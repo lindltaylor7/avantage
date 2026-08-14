@@ -7,7 +7,7 @@
           <span class="heading-icon">📇</span> Funnel de Ventas — Kanban de Leads
         </h2>
         <p class="section-subheading">
-          Gestiona el flujo comercial de candidatos. Arrastra leads entre columnas, reordena etapas con las flechas o crea nuevas etapas personalizadas.
+          Gestiona el flujo comercial de candidatos. Arrastra leads entre columnas, filtra por búsqueda, navega las páginas por etapa o crea columnas personalizadas.
         </p>
       </div>
 
@@ -57,7 +57,7 @@
       </div>
     </section>
 
-    <!-- Barra de Filtros y Control de Desplazamiento -->
+    <!-- Barra de Filtros, Búsqueda y Control de Paginación -->
     <div class="kanban-toolbar">
       <div class="search-filter-box">
         <span class="search-icon">🔍</span>
@@ -65,11 +65,17 @@
           v-model="searchQuery"
           type="text"
           class="search-input"
-          placeholder="Buscar por tema, cliente, email o teléfono..."
+          placeholder="Buscar por tema, cliente, #ID, email, teléfono..."
         />
-        <button v-if="searchQuery" class="clear-search-btn" @click="searchQuery = ''">✕</button>
+        <button v-if="searchQuery" class="clear-search-btn" @click="searchQuery = ''" title="Limpiar búsqueda">✕</button>
       </div>
 
+      <!-- Badge de Resultados de Búsqueda -->
+      <div v-if="searchQuery" class="search-result-badge">
+        🎯 <strong>{{ totalMatchingLeads }}</strong> {{ totalMatchingLeads === 1 ? 'coincidencia' : 'coincidencias' }}
+      </div>
+
+      <!-- Filtros por Viabilidad -->
       <div class="filter-pills">
         <button
           v-for="pill in VIABILITY_FILTERS"
@@ -80,6 +86,17 @@
         >
           {{ pill.label }}
         </button>
+      </div>
+
+      <!-- Control Global de Tarjetas por Columna -->
+      <div class="items-per-page-box">
+        <span class="toolbar-label">Ver por pág:</span>
+        <select v-model="itemsPerPage" class="items-select" title="Límite de tarjetas por columna">
+          <option :value="5">5 leads</option>
+          <option :value="8">8 leads</option>
+          <option :value="12">12 leads</option>
+          <option value="all">Ver todos</option>
+        </select>
       </div>
 
       <!-- Flechas de navegación horizontal del tablero -->
@@ -198,13 +215,14 @@
             </div>
           </div>
 
-          <!-- Cuerpo de la Columna (Lista de Leads) -->
+          <!-- Cuerpo de la Columna (Lista de Leads Paginada) -->
           <div class="kanban-column-body custom-scrollbar">
-            <!-- Tarjetas de Leads -->
+            <!-- Tarjetas de Leads Paginadas -->
             <div
-              v-for="lead in filteredLeadsByColumn[col.key]"
+              v-for="lead in paginatedLeadsByColumn[col.key]"
               :key="lead.id"
               class="kanban-lead-card"
+              :class="{ 'is-being-dragged': draggedLead?.id === lead.id }"
               draggable="true"
               @dragstart="onDragStart(lead)"
               @dragend="onDragEnd"
@@ -265,18 +283,72 @@
               </div>
             </div>
 
+            <!-- Silueta de Destino al Arrastrar (Drop Silhouette Preview) -->
+            <div
+              v-if="draggedLead && hoveredColumn === col.key && draggedLead.status !== col.key"
+              class="kanban-drop-silhouette"
+            >
+              <div class="silhouette-header-line">
+                <span class="silhouette-id">#{{ draggedLead.id }}</span>
+                <span class="silhouette-badge">✨ Soltar aquí</span>
+                <span :class="['viability-pill', getLevelClass(draggedLead.viability_level)]">
+                  {{ draggedLead.overall_viability_score ?? '—' }}%
+                </span>
+              </div>
+              <h4 class="silhouette-topic">{{ draggedLead.topic }}</h4>
+              <div class="silhouette-footer-line">
+                <span>📥 Se ubicará en <strong>{{ col.label }}</strong></span>
+              </div>
+            </div>
+
             <!-- Estado Vacío dentro de la Columna -->
-            <div v-if="(filteredLeadsByColumn[col.key] || []).length === 0" class="column-empty-state">
+            <div v-if="(filteredLeadsByColumn[col.key] || []).length === 0 && (!draggedLead || hoveredColumn !== col.key)" class="column-empty-state">
               <span class="empty-icon">{{ searchQuery ? '🔍' : '📥' }}</span>
               <p class="empty-text">
                 {{ searchQuery ? 'Sin coincidencias' : 'Arrastra leads aquí' }}
               </p>
+              <button v-if="searchQuery" class="clear-search-link" @click="searchQuery = ''">
+                Limpiar búsqueda
+              </button>
             </div>
           </div>
 
-          <!-- Pie de Columna (Indicador de Total) -->
+          <!-- Barra de Paginación por Columna -->
+          <div v-if="getColumnTotalPages(col.key) > 1" class="column-pagination-bar">
+            <button
+              class="col-page-btn"
+              :disabled="getColumnPage(col.key) <= 1"
+              @click.stop="prevColumnPage(col.key)"
+              title="Página anterior"
+            >
+              ◀
+            </button>
+
+            <div class="page-pills">
+              <button
+                v-for="p in getColumnTotalPages(col.key)"
+                :key="p"
+                class="page-pill"
+                :class="{ active: p === getColumnPage(col.key) }"
+                @click.stop="setColumnPage(col.key, p)"
+              >
+                {{ p }}
+              </button>
+            </div>
+
+            <button
+              class="col-page-btn"
+              :disabled="getColumnPage(col.key) >= getColumnTotalPages(col.key)"
+              @click.stop="nextColumnPage(col.key)"
+              title="Página siguiente"
+            >
+              ▶
+            </button>
+          </div>
+
+          <!-- Pie de Columna (Indicador de Rango y Estado) -->
           <div class="column-footer">
-            <span>{{ (filteredLeadsByColumn[col.key] || []).length }} lead(s)</span>
+            <span class="footer-count">{{ getColumnRangeText(col.key) }}</span>
             <span v-if="col.final" class="final-tag">🏆 Etapa Ganadora</span>
           </div>
         </div>
@@ -692,6 +764,43 @@ const projectToast = ref(null);
 const searchQuery = ref('');
 const selectedViabilityFilter = ref('all');
 
+// Paginación por Columna
+const columnPages = reactive({});
+const itemsPerPage = ref(5);
+
+function getColumnPage(colKey) {
+  return columnPages[colKey] || 1;
+}
+
+function getColumnTotalPages(colKey) {
+  const list = filteredLeadsByColumn.value[colKey] || [];
+  if (itemsPerPage.value === 'all') return 1;
+  return Math.ceil(list.length / Number(itemsPerPage.value)) || 1;
+}
+
+function setColumnPage(colKey, page) {
+  const total = getColumnTotalPages(colKey);
+  columnPages[colKey] = Math.max(1, Math.min(page, total));
+}
+
+function prevColumnPage(colKey) {
+  setColumnPage(colKey, getColumnPage(colKey) - 1);
+}
+
+function nextColumnPage(colKey) {
+  setColumnPage(colKey, getColumnPage(colKey) + 1);
+}
+
+function getColumnRangeText(colKey) {
+  const total = (filteredLeadsByColumn.value[colKey] || []).length;
+  if (total === 0) return '0 leads';
+  if (itemsPerPage.value === 'all') return `${total} lead(s)`;
+  const page = getColumnPage(colKey);
+  const start = (page - 1) * Number(itemsPerPage.value) + 1;
+  const end = Math.min(page * Number(itemsPerPage.value), total);
+  return `${start}-${end} de ${total}`;
+}
+
 // Modales de Gestión de Columnas
 const showCreateColModal = ref(false);
 const newColumnForm = reactive({
@@ -754,13 +863,17 @@ const filteredLeadsByColumn = computed(() => {
   const query = searchQuery.value.trim().toLowerCase();
 
   for (const lead of leads.value) {
-    // Filtro por texto
+    // Filtro por texto multicampo
     if (query) {
+      const cleanId = query.replace(/^#/, '');
+      const matchId = String(lead.id || '').includes(cleanId);
       const matchTopic = (lead.topic || '').toLowerCase().includes(query);
       const matchEmail = (lead.email || '').toLowerCase().includes(query);
       const matchPhone = (lead.phone || '').toLowerCase().includes(query);
       const matchField = (lead.field_of_study || '').toLowerCase().includes(query);
-      if (!matchTopic && !matchEmail && !matchPhone && !matchField) continue;
+      const matchAcademic = (lead.academic_level || '').toLowerCase().includes(query);
+      const matchNotes = (lead.additional_notes || '').toLowerCase().includes(query);
+      if (!matchId && !matchTopic && !matchEmail && !matchPhone && !matchField && !matchAcademic && !matchNotes) continue;
     }
 
     // Filtro por nivel de viabilidad
@@ -784,6 +897,44 @@ const filteredLeadsByColumn = computed(() => {
 
   return grouped;
 });
+
+// Total de coincidencias de búsqueda
+const totalMatchingLeads = computed(() => {
+  let count = 0;
+  for (const key in filteredLeadsByColumn.value) {
+    count += filteredLeadsByColumn.value[key].length;
+  }
+  return count;
+});
+
+// Leads paginados por columna
+const paginatedLeadsByColumn = computed(() => {
+  const result = {};
+  for (const col of columns.value) {
+    const list = filteredLeadsByColumn.value[col.key] || [];
+    if (itemsPerPage.value === 'all') {
+      result[col.key] = list;
+    } else {
+      const page = getColumnPage(col.key);
+      const limit = Number(itemsPerPage.value);
+      const start = (page - 1) * limit;
+      const end = start + limit;
+      result[col.key] = list.slice(start, end);
+    }
+  }
+  return result;
+});
+
+// Reajustar páginas al cambiar filtros o límite por columna
+watch([filteredLeadsByColumn, itemsPerPage], () => {
+  for (const col of columns.value) {
+    const totalPages = getColumnTotalPages(col.key);
+    const currentPage = getColumnPage(col.key);
+    if (currentPage > totalPages) {
+      columnPages[col.key] = Math.max(1, totalPages);
+    }
+  }
+}, { deep: true });
 
 // Columnas disponibles para reasignar (excluyendo la que se va a borrar)
 const availableTargetColumns = computed(() => {
@@ -1160,6 +1311,7 @@ onMounted(() => {
   padding: 0.6rem 1.15rem;
   font-size: 0.86rem;
   font-weight: 600;
+  font-family: var(--font-heading);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -1182,6 +1334,7 @@ onMounted(() => {
   padding: 0.6rem 1.05rem;
   font-size: 0.86rem;
   font-weight: 500;
+  font-family: var(--font-body);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -1201,6 +1354,7 @@ onMounted(() => {
   border-radius: 10px;
   padding: 0.55rem 0.9rem;
   font-size: 0.82rem;
+  font-family: var(--font-body);
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -1218,6 +1372,7 @@ onMounted(() => {
   border-radius: 10px;
   padding: 0.6rem 1.15rem;
   font-weight: 600;
+  font-family: var(--font-heading);
   font-size: 0.86rem;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -1281,6 +1436,7 @@ onMounted(() => {
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  font-family: var(--font-body);
 }
 
 .stat-value {
@@ -1290,7 +1446,7 @@ onMounted(() => {
   font-family: var(--font-heading);
 }
 
-/* Toolbar de Filtros y Desplazamiento */
+/* Toolbar de Filtros, Búsqueda y Paginación */
 .kanban-toolbar {
   display: flex;
   justify-content: space-between;
@@ -1308,7 +1464,7 @@ onMounted(() => {
   position: relative;
   flex: 1;
   min-width: 260px;
-  max-width: 440px;
+  max-width: 420px;
 }
 
 .search-icon {
@@ -1327,6 +1483,7 @@ onMounted(() => {
   border: 1px solid var(--border-color);
   border-radius: 10px;
   color: var(--text-main);
+  font-family: var(--font-body);
   font-size: 0.84rem;
   outline: none;
   transition: border-color 0.2s ease;
@@ -1334,6 +1491,7 @@ onMounted(() => {
 
 .search-input:focus {
   border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(16, 94, 255, 0.25);
 }
 
 .clear-search-btn {
@@ -1346,6 +1504,25 @@ onMounted(() => {
   color: var(--text-muted);
   cursor: pointer;
   font-size: 0.8rem;
+  padding: 0.2rem;
+}
+
+.clear-search-btn:hover {
+  color: var(--text-main);
+}
+
+.search-result-badge {
+  font-size: 0.78rem;
+  font-family: var(--font-body);
+  background: rgba(16, 94, 255, 0.15);
+  border: 1px solid rgba(16, 94, 255, 0.35);
+  color: var(--accent-cyan);
+  padding: 0.3rem 0.75rem;
+  border-radius: 9999px;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
 }
 
 .filter-pills {
@@ -1359,6 +1536,7 @@ onMounted(() => {
   border: 1px solid var(--border-color);
   border-radius: 9999px;
   color: var(--text-muted);
+  font-family: var(--font-body);
   padding: 0.3rem 0.75rem;
   font-size: 0.78rem;
   cursor: pointer;
@@ -1375,6 +1553,37 @@ onMounted(() => {
   border-color: var(--primary);
   color: #ffffff;
   font-weight: 600;
+}
+
+/* Control Selector de Items por Página */
+.items-per-page-box {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-family: var(--font-body);
+}
+
+.toolbar-label {
+  font-weight: 500;
+}
+
+.items-select {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-main);
+  font-family: var(--font-body);
+  padding: 0.28rem 0.55rem;
+  font-size: 0.78rem;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+
+.items-select:focus {
+  border-color: var(--primary);
 }
 
 .board-nav-arrows {
@@ -1408,6 +1617,7 @@ onMounted(() => {
 .board-nav-hint {
   font-size: 0.75rem;
   color: var(--text-muted);
+  font-family: var(--font-body);
 }
 
 /* Tablero Kanban Viewport & Columnas */
@@ -1426,16 +1636,16 @@ onMounted(() => {
 
 /* Columna Individual */
 .kanban-column {
-  flex: 0 0 310px;
-  width: 310px;
-  max-width: 330px;
+  flex: 0 0 320px;
+  width: 320px;
+  max-width: 340px;
   background: rgba(22, 22, 26, 0.85);
   backdrop-filter: blur(16px);
   border: 1px solid var(--border-color);
   border-radius: 16px;
   display: flex;
   flex-direction: column;
-  max-height: 720px;
+  max-height: 740px;
   position: relative;
   overflow: hidden;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
@@ -1489,7 +1699,7 @@ onMounted(() => {
 }
 
 .col-label {
-  font-size: 0.86rem;
+  font-size: 0.88rem;
   font-weight: 700;
   color: var(--text-main);
   font-family: var(--font-heading);
@@ -1499,8 +1709,9 @@ onMounted(() => {
 }
 
 .col-count-badge {
-  font-size: 0.7rem;
+  font-size: 0.72rem;
   font-weight: 700;
+  font-family: var(--font-heading);
   border-radius: 9999px;
   padding: 0.15rem 0.5rem;
   border: 1px solid;
@@ -1572,7 +1783,7 @@ onMounted(() => {
   gap: 0.75rem;
   overflow-y: auto;
   min-height: 280px;
-  max-height: 580px;
+  max-height: 570px;
 }
 
 /* Tarjeta de Lead */
@@ -1583,7 +1794,7 @@ onMounted(() => {
   padding: 0.85rem;
   cursor: grab;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, opacity 0.2s ease;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -1599,6 +1810,86 @@ onMounted(() => {
   cursor: grabbing;
 }
 
+.kanban-lead-card.is-being-dragged {
+  opacity: 0.4;
+  border-style: dashed;
+  transform: scale(0.98);
+}
+
+/* Silueta de Destino al Arrastrar (Drop Silhouette Preview Card) */
+.kanban-drop-silhouette {
+  background: rgba(16, 94, 255, 0.08);
+  border: 2px dashed var(--col-accent);
+  border-radius: 12px;
+  padding: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  animation: pulseSilhouette 1.8s ease-in-out infinite;
+  box-shadow: 0 0 16px var(--col-accent) 33;
+}
+
+@keyframes pulseSilhouette {
+  0% {
+    box-shadow: 0 0 8px var(--col-accent) 22;
+    background: rgba(16, 94, 255, 0.06);
+  }
+  50% {
+    box-shadow: 0 0 20px var(--col-accent) 55;
+    background: rgba(16, 94, 255, 0.14);
+  }
+  100% {
+    box-shadow: 0 0 8px var(--col-accent) 22;
+    background: rgba(16, 94, 255, 0.06);
+  }
+}
+
+.silhouette-header-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.silhouette-id {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  font-family: var(--font-body);
+}
+
+.silhouette-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-family: var(--font-heading);
+  color: var(--col-accent);
+  background: rgba(255, 255, 255, 0.1);
+  padding: 0.15rem 0.55rem;
+  border-radius: 9999px;
+  border: 1px solid var(--col-accent);
+}
+
+.silhouette-topic {
+  font-size: 0.83rem;
+  font-weight: 600;
+  color: var(--text-main);
+  font-family: var(--font-heading);
+  margin: 0;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.silhouette-footer-line {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  border-top: 1px dashed rgba(255, 255, 255, 0.12);
+  padding-top: 0.35rem;
+  margin-top: 0.2rem;
+}
+
 .card-header-line {
   display: flex;
   justify-content: space-between;
@@ -1609,6 +1900,7 @@ onMounted(() => {
   font-size: 0.68rem;
   font-weight: 700;
   color: var(--text-muted);
+  font-family: var(--font-body);
   background: rgba(255, 255, 255, 0.05);
   padding: 0.1rem 0.4rem;
   border-radius: 4px;
@@ -1617,6 +1909,7 @@ onMounted(() => {
 .viability-pill {
   font-size: 0.7rem;
   font-weight: 700;
+  font-family: var(--font-heading);
   padding: 0.15rem 0.5rem;
   border-radius: 9999px;
   border: 1px solid;
@@ -1650,6 +1943,7 @@ onMounted(() => {
   font-size: 0.84rem;
   font-weight: 600;
   color: var(--text-main);
+  font-family: var(--font-heading);
   line-height: 1.35;
   margin: 0;
   display: -webkit-box;
@@ -1663,6 +1957,7 @@ onMounted(() => {
   flex-direction: column;
   gap: 0.2rem;
   font-size: 0.73rem;
+  font-family: var(--font-body);
   color: var(--text-muted);
 }
 
@@ -1680,6 +1975,7 @@ onMounted(() => {
 
 .card-academic-badge {
   font-size: 0.7rem;
+  font-family: var(--font-body);
   color: var(--text-sub);
   background: rgba(255, 255, 255, 0.04);
   padding: 0.2rem 0.45rem;
@@ -1699,11 +1995,13 @@ onMounted(() => {
 .project-created-tag {
   font-size: 0.7rem;
   font-weight: 600;
+  font-family: var(--font-heading);
   color: var(--accent-emerald);
 }
 
 .lead-date-tag {
   font-size: 0.68rem;
+  font-family: var(--font-body);
   color: var(--text-muted);
 }
 
@@ -1743,7 +2041,7 @@ onMounted(() => {
 /* Estado Vacío de Columna */
 .column-empty-state {
   text-align: center;
-  padding: 2.5rem 1rem;
+  padding: 2.2rem 1rem;
   border: 1px dashed var(--border-color);
   border-radius: 12px;
   color: var(--text-muted);
@@ -1760,7 +2058,91 @@ onMounted(() => {
 
 .empty-text {
   font-size: 0.76rem;
+  font-family: var(--font-body);
   margin: 0;
+}
+
+.clear-search-link {
+  background: transparent;
+  border: none;
+  color: var(--primary);
+  font-size: 0.75rem;
+  font-family: var(--font-body);
+  cursor: pointer;
+  text-decoration: underline;
+  margin-top: 0.2rem;
+}
+
+/* Barra de Paginación por Columna */
+.column-pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.75rem;
+  background: rgba(0, 0, 0, 0.25);
+  border-top: 1px solid var(--border-color);
+}
+
+.col-page-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  font-size: 0.65rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.col-page-btn:hover:not(:disabled) {
+  background: var(--col-accent, var(--primary));
+  border-color: var(--col-accent, var(--primary));
+  color: #fff;
+}
+
+.col-page-btn:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+
+.page-pills {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.page-pill {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-family: var(--font-heading);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.page-pill:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-main);
+}
+
+.page-pill.active {
+  background: var(--col-accent, var(--primary));
+  color: #ffffff;
+  border-color: var(--col-accent, var(--primary));
+  box-shadow: 0 0 8px var(--col-accent, var(--primary));
 }
 
 /* Pie de Columna */
@@ -1768,6 +2150,7 @@ onMounted(() => {
   padding: 0.5rem 0.85rem;
   border-top: 1px solid var(--border-color);
   font-size: 0.72rem;
+  font-family: var(--font-body);
   color: var(--text-muted);
   display: flex;
   justify-content: space-between;
@@ -1775,9 +2158,14 @@ onMounted(() => {
   background: rgba(0, 0, 0, 0.15);
 }
 
+.footer-count {
+  font-weight: 500;
+}
+
 .final-tag {
   color: var(--accent-emerald);
   font-weight: 600;
+  font-family: var(--font-heading);
 }
 
 /* Tarjeta Fantasma: Añadir Nueva Columna */
@@ -1817,12 +2205,14 @@ onMounted(() => {
 .ghost-text {
   font-size: 0.92rem;
   font-weight: 600;
+  font-family: var(--font-heading);
   color: var(--text-main);
 }
 
 .ghost-hint {
   font-size: 0.75rem;
   color: var(--text-muted);
+  font-family: var(--font-body);
 }
 
 /* Modales */
@@ -1861,6 +2251,7 @@ onMounted(() => {
   border: 1px solid var(--border-color);
   border-radius: 10px;
   color: var(--text-main);
+  font-family: var(--font-body);
 }
 
 .custom-input:focus, .custom-select:focus {
@@ -1938,6 +2329,7 @@ onMounted(() => {
   gap: 0.6rem;
   font-size: 0.84rem;
   color: var(--text-sub);
+  font-family: var(--font-body);
   cursor: pointer;
 }
 
@@ -1958,6 +2350,7 @@ onMounted(() => {
 .modal-lead-topic {
   font-size: 1.1rem;
   font-weight: 700;
+  font-family: var(--font-heading);
   color: var(--text-main);
   line-height: 1.4;
   margin: 0 0 1.25rem 0;
@@ -1980,6 +2373,7 @@ onMounted(() => {
 .panel-subtitle {
   font-size: 0.8rem;
   font-weight: 600;
+  font-family: var(--font-heading);
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -1992,6 +2386,7 @@ onMounted(() => {
   gap: 0.1rem;
   margin-bottom: 0.4rem;
   font-size: 0.82rem;
+  font-family: var(--font-body);
 }
 
 .info-label {
@@ -2014,6 +2409,7 @@ onMounted(() => {
   padding: 0.85rem;
   margin-bottom: 1rem;
   font-size: 0.84rem;
+  font-family: var(--font-body);
   color: var(--text-sub);
 }
 
@@ -2026,6 +2422,7 @@ onMounted(() => {
   align-items: center;
   gap: 0.75rem;
   margin-bottom: 1rem;
+  font-family: var(--font-body);
 }
 
 .lead-action-buttons {
@@ -2045,6 +2442,7 @@ onMounted(() => {
 
 .quote-heading {
   font-size: 0.95rem;
+  font-family: var(--font-heading);
   color: var(--text-main);
   margin: 0 0 0.85rem 0;
 }
@@ -2059,6 +2457,7 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   gap: 1rem;
+  font-family: var(--font-body);
 }
 
 .banner-content {
@@ -2088,6 +2487,7 @@ onMounted(() => {
   color: #0b2e21;
   text-decoration: none;
   font-weight: 700;
+  font-family: var(--font-heading);
   font-size: 0.78rem;
   padding: 0.4rem 0.85rem;
   border-radius: 8px;
@@ -2125,8 +2525,8 @@ onMounted(() => {
     grid-template-columns: 1fr;
   }
   .kanban-column {
-    flex: 0 0 280px;
-    width: 280px;
+    flex: 0 0 290px;
+    width: 290px;
   }
 }
 </style>
