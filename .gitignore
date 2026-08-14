@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Environment variables (contiene secretos: DB, JWT, SMTP, Ollama API key)
+.env
+.env.local
+.env.*.local
+
+# Build output (se genera con `npm run build`)
+dist/
+
+# Archivos subidos por usuarios (adjuntos de actualizaciones de proyecto)
+uploads/*
+!uploads/.gitkeep
+!uploads/project-updates/
+uploads/project-updates/*
+!uploads/project-updates/.gitkeep
+
+# Config local del asistente (permisos específicos de esta máquina)
+.claude/settings.local.json
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor / OS
+.vscode/
+.DS_Store
+Thumbs.db
