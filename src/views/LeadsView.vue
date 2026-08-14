@@ -645,9 +645,7 @@
 import { ref, reactive, computed, watch, onMounted } from 'vue';
 import { apiFetch } from '../apiClient.js';
 
-const STORAGE_KEY = 'minirag_kanban_columns_v2';
-
-// Columnas predeterminadas del sistema
+// Columnas predeterminadas del sistema (usadas solo para "Restablecer columnas")
 const DEFAULT_COLUMNS = [
   { key: 'nuevo', label: 'Nuevo', icon: '🆕', color: '#105EFF', final: false },
   { key: 'contactado', label: 'Contactado', icon: '📞', color: '#8B5CF6', final: false },
@@ -677,8 +675,8 @@ const VIABILITY_FILTERS = [
   { id: 'baja', label: '🔻 Baja' }
 ];
 
-// Estado de Columnas Dinámicas
-const columns = ref(loadStoredColumns());
+// Estado de Columnas Dinámicas (persistidas en base de datos)
+const columns = ref([]);
 const kanbanBoardRef = ref(null);
 
 // Estado de Leads
@@ -723,34 +721,12 @@ const quoteNotes = ref('');
 const quoteSubmitting = ref(false);
 const quoteSuccess = ref(null);
 
-// Guardar columnas en localStorage cuando cambien
-watch(columns, (newCols) => {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(newCols));
-  } catch (e) {
-    console.error('Error al guardar columnas en storage:', e);
-  }
-}, { deep: true });
-
 watch(selectedLead, () => {
   showQuoteForm.value = false;
   quoteAmount.value = '';
   quoteNotes.value = '';
   quoteSuccess.value = null;
 });
-
-function loadStoredColumns() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch (e) {
-    console.warn('No se pudieron recuperar las columnas almacenadas:', e);
-  }
-  return JSON.parse(JSON.stringify(DEFAULT_COLUMNS));
-}
 
 // Estadísticas de Resumen
 const highViabilityCount = computed(() => {
@@ -822,6 +798,7 @@ function moveColumnLeft(index) {
   columns.value[index] = columns.value[index - 1];
   columns.value[index - 1] = temp;
   columns.value = [...columns.value];
+  persistColumnOrder();
 }
 
 function moveColumnRight(index) {
@@ -830,6 +807,22 @@ function moveColumnRight(index) {
   columns.value[index] = columns.value[index + 1];
   columns.value[index + 1] = temp;
   columns.value = [...columns.value];
+  persistColumnOrder();
+}
+
+// Persiste en base de datos el nuevo orden de columnas
+async function persistColumnOrder() {
+  try {
+    const response = await apiFetch('/api/funnel-columns/reorder', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keys: columns.value.map(c => c.key) })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Error al reordenar las columnas.');
+  } catch (err) {
+    console.error('No se pudo guardar el nuevo orden de columnas:', err);
+  }
 }
 
 // Desplazar el tablero horizontalmente
@@ -851,31 +844,39 @@ function openCreateColumnModal() {
   showCreateColModal.value = true;
 }
 
-function saveNewColumn() {
+async function saveNewColumn() {
   const trimmed = newColumnForm.label.trim();
   if (!trimmed) return;
 
-  const slugKey = 'col_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 5);
+  try {
+    const response = await apiFetch('/api/funnel-columns', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        label: trimmed,
+        icon: newColumnForm.icon || '📌',
+        color: newColumnForm.color || '#105EFF',
+        final: Boolean(newColumnForm.final)
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Error al crear la columna.');
 
-  columns.value.push({
-    key: slugKey,
-    label: trimmed,
-    icon: newColumnForm.icon || '📌',
-    color: newColumnForm.color || '#105EFF',
-    final: Boolean(newColumnForm.final)
-  });
+    columns.value.push(data.column);
+    showCreateColModal.value = false;
 
-  showCreateColModal.value = false;
-
-  // Auto-scroll al final del tablero
-  setTimeout(() => {
-    if (kanbanBoardRef.value) {
-      kanbanBoardRef.value.scrollTo({
-        left: kanbanBoardRef.value.scrollWidth,
-        behavior: 'smooth'
-      });
-    }
-  }, 100);
+    // Auto-scroll al final del tablero
+    setTimeout(() => {
+      if (kanbanBoardRef.value) {
+        kanbanBoardRef.value.scrollTo({
+          left: kanbanBoardRef.value.scrollWidth,
+          behavior: 'smooth'
+        });
+      }
+    }, 100);
+  } catch (err) {
+    alert('No se pudo crear la columna: ' + err.message);
+  }
 }
 
 // Gestión de Edición de Columnas
@@ -888,17 +889,31 @@ function openEditColumnModal(col, index) {
   showEditColModal.value = true;
 }
 
-function saveEditedColumn() {
+async function saveEditedColumn() {
   if (!editingColumn.value || !editColumnForm.label.trim()) return;
-  
-  editingColumn.value.label = editColumnForm.label.trim();
-  editingColumn.value.icon = editColumnForm.icon || '📌';
-  editingColumn.value.color = editColumnForm.color || '#105EFF';
-  editingColumn.value.final = Boolean(editColumnForm.final);
 
-  columns.value = [...columns.value];
-  showEditColModal.value = false;
-  editingColumn.value = null;
+  try {
+    const response = await apiFetch(`/api/funnel-columns/${editingColumn.value.key}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        label: editColumnForm.label.trim(),
+        icon: editColumnForm.icon || '📌',
+        color: editColumnForm.color || '#105EFF',
+        final: Boolean(editColumnForm.final)
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Error al actualizar la columna.');
+
+    const index = columns.value.findIndex(c => c.key === data.column.key);
+    if (index !== -1) columns.value[index] = data.column;
+    columns.value = [...columns.value];
+    showEditColModal.value = false;
+    editingColumn.value = null;
+  } catch (err) {
+    alert('No se pudo actualizar la columna: ' + err.message);
+  }
 }
 
 // Gestión de Eliminación de Columnas
@@ -918,21 +933,59 @@ async function confirmDeleteColumn() {
   const colKey = deletingColumn.value.key;
   const targetKey = targetReassignColKey.value;
 
-  // Reasignar leads que estén en esta columna
-  const leadsToMove = leads.value.filter(l => l.status === colKey);
-  for (const lead of leadsToMove) {
-    await moveLeadToStatus(lead, targetKey);
-  }
+  try {
+    // Reasignar leads que estén en esta columna
+    const leadsToMove = leads.value.filter(l => l.status === colKey);
+    for (const lead of leadsToMove) {
+      await moveLeadToStatus(lead, targetKey);
+    }
 
-  // Eliminar columna de la lista
-  columns.value = columns.value.filter(c => c.key !== colKey);
-  showDeleteColModal.value = false;
-  deletingColumn.value = null;
+    const response = await apiFetch(`/api/funnel-columns/${colKey}`, { method: 'DELETE' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Error al eliminar la columna.');
+
+    columns.value = columns.value.filter(c => c.key !== colKey);
+    showDeleteColModal.value = false;
+    deletingColumn.value = null;
+  } catch (err) {
+    alert('No se pudo eliminar la columna: ' + err.message);
+  }
 }
 
-function confirmResetColumns() {
-  if (confirm('¿Restablecer las columnas del funnel a su configuración original?')) {
-    columns.value = JSON.parse(JSON.stringify(DEFAULT_COLUMNS));
+async function confirmResetColumns() {
+  if (!confirm('¿Restablecer las columnas del funnel a su configuración original? Las columnas personalizadas se eliminarán y sus leads pasarán a "Nuevo".')) {
+    return;
+  }
+
+  isLoading.value = true;
+  try {
+    const defaultKeys = DEFAULT_COLUMNS.map(c => c.key);
+
+    // Reasignar a "nuevo" los leads que están en columnas que van a desaparecer
+    const leadsToReassign = leads.value.filter(l => !defaultKeys.includes(l.status));
+    for (const lead of leadsToReassign) {
+      await moveLeadToStatus(lead, 'nuevo');
+    }
+
+    // Eliminar todas las columnas actuales
+    for (const col of columns.value) {
+      await apiFetch(`/api/funnel-columns/${col.key}`, { method: 'DELETE' });
+    }
+
+    // Recrear las columnas por defecto en orden
+    for (const col of DEFAULT_COLUMNS) {
+      await apiFetch('/api/funnel-columns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(col)
+      });
+    }
+
+    await fetchColumns();
+  } catch (err) {
+    alert('No se pudieron restablecer las columnas: ' + err.message);
+  } finally {
+    isLoading.value = false;
   }
 }
 
@@ -959,6 +1012,13 @@ function onDrop(columnKey) {
 }
 
 // Servicios API
+async function fetchColumns() {
+  const response = await apiFetch('/api/funnel-columns');
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Error al obtener las columnas del funnel.');
+  columns.value = data.columns || [];
+}
+
 async function fetchLeads() {
   const response = await apiFetch('/api/leads');
   const data = await response.json();
@@ -970,7 +1030,7 @@ async function fetchAll() {
   isLoading.value = true;
   loadError.value = '';
   try {
-    await fetchLeads();
+    await Promise.all([fetchColumns(), fetchLeads()]);
   } catch (err) {
     loadError.value = err.message;
   } finally {

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { OllamaService } from './services/ollamaService.js';
 import { EmailService } from './services/emailService.js';
 import { LeadService } from './services/leadService.js';
+import { FunnelColumnService } from './services/funnelColumnService.js';
 import { ProjectService } from './services/projectService.js';
 import { TaskService } from './services/taskService.js';
 import { QuoteService } from './services/quoteService.js';
@@ -37,6 +38,7 @@ app.use(express.json());
 const ollamaService = new OllamaService();
 const emailService = new EmailService();
 const leadService = new LeadService();
+const funnelColumnService = new FunnelColumnService();
 const projectService = new ProjectService();
 const taskService = new TaskService();
 const quoteService = new QuoteService();
@@ -336,6 +338,96 @@ app.delete('/api/leads/:id', requireAuth, requirePermission('leads.view'), async
   }
 });
 
+
+/**
+ * Listado de columnas (etapas) del Kanban de Leads, ordenadas por posición.
+ */
+app.get('/api/funnel-columns', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const columns = await funnelColumnService.getAllColumns();
+    res.json({ columns });
+  } catch (error) {
+    console.error('❌ Error al obtener las columnas del funnel:', error);
+    res.status(500).json({ error: 'Error al obtener las columnas del funnel.', details: error.message });
+  }
+});
+
+/**
+ * Crear una nueva columna (etapa) del funnel de ventas
+ */
+app.post('/api/funnel-columns', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const { key, label, icon, color, final: isFinal } = req.body;
+    if (!label || !label.trim()) {
+      return res.status(400).json({ error: 'El nombre de la columna es requerido.' });
+    }
+    const columnKey = (key && key.trim()) || 'col_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 5);
+
+    const existing = await funnelColumnService.getColumnByKey(columnKey);
+    if (existing) {
+      return res.status(409).json({ error: 'Ya existe una columna con esa clave.' });
+    }
+
+    const column = await funnelColumnService.createColumn({ key: columnKey, label: label.trim(), icon, color, final: isFinal });
+    res.status(201).json({ column });
+  } catch (error) {
+    console.error('❌ Error al crear la columna:', error);
+    res.status(500).json({ error: 'Error al crear la columna del funnel.', details: error.message });
+  }
+});
+
+/**
+ * Reordenar columnas del funnel (recibe el arreglo completo de keys en el nuevo orden)
+ */
+app.patch('/api/funnel-columns/reorder', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const { keys } = req.body;
+    if (!Array.isArray(keys) || keys.length === 0) {
+      return res.status(400).json({ error: 'keys debe ser un arreglo con el orden de las columnas.' });
+    }
+    const columns = await funnelColumnService.reorderColumns(keys);
+    res.json({ columns });
+  } catch (error) {
+    console.error('❌ Error al reordenar las columnas:', error);
+    res.status(500).json({ error: 'Error al reordenar las columnas del funnel.', details: error.message });
+  }
+});
+
+/**
+ * Editar nombre, icono, color o marca de "etapa ganadora" de una columna
+ */
+app.put('/api/funnel-columns/:key', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const existing = await funnelColumnService.getColumnByKey(req.params.key);
+    if (!existing) {
+      return res.status(404).json({ error: 'Columna no encontrada.' });
+    }
+    const { label, icon, color, final: isFinal } = req.body;
+    const column = await funnelColumnService.updateColumn(req.params.key, { label, icon, color, final: isFinal });
+    res.json({ column });
+  } catch (error) {
+    console.error('❌ Error al actualizar la columna:', error);
+    res.status(500).json({ error: 'Error al actualizar la columna del funnel.', details: error.message });
+  }
+});
+
+/**
+ * Eliminar una columna del funnel. Los leads que estén en ella deben
+ * reasignarse desde el cliente antes de invocar este endpoint.
+ */
+app.delete('/api/funnel-columns/:key', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const existing = await funnelColumnService.getColumnByKey(req.params.key);
+    if (!existing) {
+      return res.status(404).json({ error: 'Columna no encontrada.' });
+    }
+    await funnelColumnService.deleteColumn(req.params.key);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error al eliminar la columna:', error);
+    res.status(500).json({ error: 'Error al eliminar la columna del funnel.', details: error.message });
+  }
+});
 
 /**
  * Genera y envía por correo una cotización para un lead en etapa

@@ -52,11 +52,13 @@ timestamp. Cada uno exporta `up()` (aplicar cambio) y `down()` (revertirlo).
 | `20260805010000_create_project_collaborators_table.js` | Tabla pivote N:N `projects` ↔ `users`: colaboradores asignados a un proyecto. |
 | `20260805020000_create_project_updates_table.js` | Crea `project_updates` (N:1 con `projects`): hitos de la línea de tiempo, texto + un adjunto opcional (archivo guardado en `uploads/project-updates/`). |
 | `20260806000000_alter_projects_lead_id_nullable.js` | `projects.lead_id` pasa a ser opcional, para poder crear proyectos manualmente sin que provengan de un lead ganado. |
+| `20260807000000_alter_leads_add_prospect_fields.js` | Agrega a `leads` los campos detallados de prospecto: datos personales, académicos, ubicación, origen y asesor asignado. |
+| `20260814000000_create_funnel_columns_table.js` | Crea la tabla `funnel_columns`: las etapas (columnas) del Kanban de Leads, antes almacenadas solo en `localStorage` del navegador. Cada fila tiene `key`, `label`, `icon`, `color`, `final` y `position` (orden de despliegue). |
 
-## 3. Seeds (datos iniciales de roles y permisos)
+## 3. Seeds (datos iniciales de roles, permisos, columnas del funnel y leads de prueba)
 
 ```bash
-npm run seed   # ejecuta backend/db/seeds/001_init_rbac.js
+npm run seed   # ejecuta backend/db/seeds/001_init_rbac.js y 002_seed_funnel_columns_and_leads.js
 ```
 
 Crea los permisos base, los roles **Administrador** (todos los permisos) y **Comercial**
@@ -69,6 +71,13 @@ Password: admin123
 
 **Cambia esta contraseña después del primer inicio de sesión** — el seed es solo para
 arrancar el sistema en desarrollo/local.
+
+El segundo seed (`002_seed_funnel_columns_and_leads.js`) crea las 5 columnas por defecto del
+Kanban de Leads (`nuevo`, `contactado`, `en_negociacion`, `ganado`, `perdido`) y ~20 leads de
+prueba por columna (100 en total), con datos ficticios (nombre, universidad, carrera, score de
+viabilidad, etc.) coherentes con la etapa del funnel en la que se encuentran. **Este seed borra
+todos los `leads` existentes** (y en cascada sus `projects`/`quotes` asociados) antes de volver a
+insertarlos — solo úsalo en un entorno de desarrollo/demo, no contra datos reales de producción.
 
 ## 4. Uso en el código
 
