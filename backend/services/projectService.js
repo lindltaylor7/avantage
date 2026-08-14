@@ -82,7 +82,12 @@ export class ProjectService {
   }
 
   async updateLeader(id, leaderId) {
-    await db('projects').where({ id }).update({ leader_id: leaderId || null });
+    let validLeaderId = null;
+    if (leaderId) {
+      const userExists = await db('users').where({ id: leaderId }).first();
+      if (userExists) validLeaderId = leaderId;
+    }
+    await db('projects').where({ id }).update({ leader_id: validLeaderId });
     return this.getProjectById(id);
   }
 
@@ -95,6 +100,12 @@ export class ProjectService {
   }
 
   async addCollaborator(projectId, userId) {
+    if (userId) {
+      const userExists = await db('users').where({ id: userId }).first();
+      if (!userExists) {
+        throw new Error('El usuario seleccionado ya no existe en el sistema.');
+      }
+    }
     const existing = await db('project_collaborators').where({ project_id: projectId, user_id: userId }).first();
     if (!existing) {
       await db('project_collaborators').insert({ project_id: projectId, user_id: userId });
