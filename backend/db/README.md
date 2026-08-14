@@ -33,7 +33,7 @@ npm run migrate:status   # lista qué migraciones se aplicaron / faltan
 npm run migrate:make -- nombre_migracion  # crea un nuevo archivo de migración
 ```
 
-Los archivos de migración viven en `db/migrations/` y se ejecutan en orden por su prefijo de
+Los archivos de migración viven en `backend/db/migrations/` y se ejecutan en orden por su prefijo de
 timestamp. Cada uno exporta `up()` (aplicar cambio) y `down()` (revertirlo).
 
 ### Migraciones existentes
@@ -56,7 +56,7 @@ timestamp. Cada uno exporta `up()` (aplicar cambio) y `down()` (revertirlo).
 ## 3. Seeds (datos iniciales de roles y permisos)
 
 ```bash
-npm run seed   # ejecuta db/seeds/001_init_rbac.js
+npm run seed   # ejecuta backend/db/seeds/001_init_rbac.js
 ```
 
 Crea los permisos base, los roles **Administrador** (todos los permisos) y **Comercial**
@@ -72,8 +72,8 @@ arrancar el sistema en desarrollo/local.
 
 ## 4. Uso en el código
 
-`db/connection.js` exporta una instancia única de Knex (`db`) que reutilizan los servicios
-(p. ej. `services/leadService.js`). No se crea una conexión nueva por request.
+`backend/db/connection.js` exporta una instancia única de Knex (`db`) que reutilizan los
+servicios (p. ej. `backend/services/leadService.js`). No se crea una conexión nueva por request.
 
 Si la base de datos no está disponible, el guardado de leads falla de forma controlada
 (se loguea una advertencia) sin interrumpir la respuesta al usuario — el reporte y el correo

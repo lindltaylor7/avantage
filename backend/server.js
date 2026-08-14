@@ -784,7 +784,7 @@ app.patch('/api/users/:id/role', requireAuth, requirePermission('roles.manage'),
 });
 
 // Servir frontend en producción si existe dist/
-const distPath = path.join(__dirname, 'dist');
+const distPath = path.join(__dirname, '..', 'dist');
 app.use(express.static(distPath));
 
 app.get('*', (req, res, next) => {

@@ -2,21 +2,20 @@
   "name": "minirag-tesis-viabilidad",
   "version": "1.0.0",
   "description": "Evaluador de Viabilidad de Temas de Tesis en Perú con Node.js, Vue 3, Ollama Cloud y Email",
-  "main": "server.js",
-  "type": "module",
+  "main": "boot.cjs",
   "engines": {
     "node": ">=18.0.0"
   },
   "scripts": {
-    "dev": "node --watch server.js",
-    "start": "node server.js",
+    "dev": "node --watch backend/server.js",
+    "start": "node boot.cjs",
     "build": "vite build",
     "preview": "vite preview",
-    "migrate": "knex migrate:latest --knexfile db/knexfile.js",
-    "migrate:rollback": "knex migrate:rollback --knexfile db/knexfile.js",
-    "migrate:status": "knex migrate:status --knexfile db/knexfile.js",
-    "migrate:make": "knex migrate:make --knexfile db/knexfile.js -x js --migrations-directory db/migrations",
-    "seed": "knex seed:run --knexfile db/knexfile.js"
+    "migrate": "knex migrate:latest --knexfile backend/db/knexfile.js",
+    "migrate:rollback": "knex migrate:rollback --knexfile backend/db/knexfile.js",
+    "migrate:status": "knex migrate:status --knexfile backend/db/knexfile.js",
+    "migrate:make": "knex migrate:make --knexfile backend/db/knexfile.js -x js --migrations-directory backend/db/migrations",
+    "seed": "knex seed:run --knexfile backend/db/knexfile.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

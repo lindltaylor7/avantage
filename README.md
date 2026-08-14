@@ -44,7 +44,7 @@ npm run dev        # http://localhost:3000 (API + sirve dist/ si existe)
 npx vite           # servidor de desarrollo del frontend en http://localhost:5173 (proxy a :3000)
 ```
 
-Detalle completo de migraciones y seeds en [`db/README.md`](db/README.md).
+Detalle completo de migraciones y seeds en [`backend/db/README.md`](backend/db/README.md).
 
 ## 2. Subir el proyecto a Git
 
@@ -79,7 +79,7 @@ adelante) desde **hPanel → Avanzado → Node.js**. Pasos:
    - **Versión de Node**: 18 o superior.
    - **Raíz de la aplicación**: la carpeta donde subiste el código.
    - **URL de la aplicación**: tu dominio o subdominio.
-   - **Archivo de inicio (startup file)**: `server.js`.
+   - **Archivo de inicio (startup file)**: `boot.cjs` (no `server.js` — ver nota abajo).
 
 4. **Variables de entorno**: en el panel de la app Node.js, agrega cada variable de la tabla de
    la sección 1 (usa las credenciales de MySQL del paso 1; `DB_HOST` suele ser `localhost` en
@@ -100,7 +100,7 @@ adelante) desde **hPanel → Avanzado → Node.js**. Pasos:
    nuevo.
 
 7. **Cambia la contraseña del usuario admin sembrado** (`admin@tesisperu.local` / `admin123`)
-   apenas inicies sesión — ver [`db/README.md`](db/README.md).
+   apenas inicies sesión — ver [`backend/db/README.md`](backend/db/README.md).
 
 ### Notas de producción
 
@@ -110,3 +110,12 @@ adelante) desde **hPanel → Avanzado → Node.js**. Pasos:
   asegúrate de que esa carpeta persista entre despliegues (no la borres al re-subir código).
 - Cada despliegue nuevo de código requiere repetir `npm install` y `npm run build` (y
   `npm run migrate` si hay migraciones nuevas) antes de reiniciar la app.
+- **Por qué `boot.cjs` y no `server.js` como archivo de inicio**: el hosting de Node.js de
+  Hostinger arranca la app con Phusion Passenger, que usa `require()` (CommonJS) para cargar el
+  archivo de inicio. Nuestro backend usa módulos ES (`import`/`export`, ver
+  `backend/package.json`), que Node no permite cargar con `require()`. `boot.cjs` es un archivo
+  CommonJS mínimo que hace `import('./backend/server.js')` — la forma soportada de cargar ESM
+  desde CommonJS — y así arranca la app real. Si además ves un error `ERR_REQUIRE_ESM` mencionando
+  un archivo interno de Hostinger (p. ej. `preload-timestamp.js`), es porque su plataforma copia tu
+  `package.json` a su propia configuración interna; por eso el `package.json` de la raíz ya **no**
+  declara `"type": "module"` (solo `backend/package.json` lo hace).

@@ -4,7 +4,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const uploadDir = path.join(__dirname, '..', 'uploads', 'project-updates');
+const uploadDir = path.join(__dirname, '..', '..', 'uploads', 'project-updates');
 fs.mkdirSync(uploadDir, { recursive: true });
 
 const storage = multer.diskStorage({
