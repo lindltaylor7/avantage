@@ -230,21 +230,39 @@
             >
               <div class="card-header-line">
                 <span class="lead-id-tag">#{{ lead.id }}</span>
+                <span v-if="lead.assigned_to" class="lead-assigned-tag" :title="'Asignado a: ' + lead.assigned_to">
+                  👤 {{ lead.assigned_to }}
+                </span>
                 <span :class="['viability-pill', getLevelClass(lead.viability_level)]">
                   {{ lead.overall_viability_score ?? '—' }}%
                 </span>
               </div>
 
-              <h4 class="card-lead-topic" :title="lead.topic">{{ lead.topic }}</h4>
+              <!-- Nombre Completo del Prospecto / Lead -->
+              <div class="card-lead-name-box">
+                <span class="lead-name-icon">👤</span>
+                <h4 class="card-lead-name" :title="getLeadFullName(lead)">
+                  {{ getLeadFullName(lead) }}
+                </h4>
+              </div>
+
+              <!-- Tema o Asunto secundario si existe y difiere del nombre -->
+              <p
+                v-if="lead.topic && lead.topic.trim() && lead.topic.trim().toLowerCase() !== (lead.full_name || '').trim().toLowerCase()"
+                class="card-lead-topic"
+                :title="lead.topic"
+              >
+                <span class="topic-icon">📄</span> {{ lead.topic }}
+              </p>
 
               <div class="card-lead-contact">
                 <div class="contact-row" :title="lead.email">
                   <span class="icon">✉️</span>
-                  <span class="truncate">{{ lead.email }}</span>
+                  <span class="truncate">{{ lead.email || 'Sin correo' }}</span>
                 </div>
                 <div class="contact-row" :title="lead.phone">
                   <span class="icon">📱</span>
-                  <span>{{ lead.phone }}</span>
+                  <span>{{ lead.phone || 'Sin celular' }}</span>
                 </div>
               </div>
 
@@ -273,6 +291,7 @@
                     💬
                   </a>
                   <a
+                    v-if="lead.email"
                     :href="'mailto:' + lead.email"
                     class="quick-icon-btn email"
                     title="Enviar Correo"
@@ -295,7 +314,7 @@
                   {{ draggedLead.overall_viability_score ?? '—' }}%
                 </span>
               </div>
-              <h4 class="silhouette-topic">{{ draggedLead.topic }}</h4>
+              <h4 class="silhouette-topic">{{ getLeadFullName(draggedLead) }}</h4>
               <div class="silhouette-footer-line">
                 <span>📥 Se ubicará en <strong>{{ col.label }}</strong></span>
               </div>
@@ -313,8 +332,19 @@
             </div>
           </div>
 
-          <!-- Barra de Paginación por Columna -->
+          <!-- Barra de Paginación por Columna Mejorada -->
           <div v-if="getColumnTotalPages(col.key) > 1" class="column-pagination-bar">
+            <!-- Botón Ir al Inicio (Página 1) -->
+            <button
+              class="col-page-btn nav-extreme-btn"
+              :disabled="getColumnPage(col.key) <= 1"
+              @click.stop="setColumnPage(col.key, 1)"
+              title="Ir al inicio (Pág. 1)"
+            >
+              ⏮
+            </button>
+
+            <!-- Botón Anterior -->
             <button
               class="col-page-btn"
               :disabled="getColumnPage(col.key) <= 1"
@@ -324,18 +354,30 @@
               ◀
             </button>
 
+            <!-- Pastillas de Páginas Inteligentes -->
             <div class="page-pills">
-              <button
-                v-for="p in getColumnTotalPages(col.key)"
-                :key="p"
-                class="page-pill"
-                :class="{ active: p === getColumnPage(col.key) }"
-                @click.stop="setColumnPage(col.key, p)"
-              >
-                {{ p }}
-              </button>
+              <template v-for="(p, idx) in getVisibleColumnPages(col.key)" :key="idx">
+                <button
+                  v-if="p !== '...'"
+                  class="page-pill"
+                  :class="{ active: p === getColumnPage(col.key) }"
+                  @click.stop="setColumnPage(col.key, p)"
+                  :title="'Ir a página ' + p"
+                >
+                  {{ p }}
+                </button>
+                <button
+                  v-else
+                  class="page-pill ellipsis-pill"
+                  @click.stop="jumpColumnPages(col.key, idx === 1 ? -5 : 5)"
+                  :title="idx === 1 ? 'Retroceder 5 páginas' : 'Avanzar 5 páginas'"
+                >
+                  …
+                </button>
+              </template>
             </div>
 
+            <!-- Botón Siguiente -->
             <button
               class="col-page-btn"
               :disabled="getColumnPage(col.key) >= getColumnTotalPages(col.key)"
@@ -344,11 +386,31 @@
             >
               ▶
             </button>
+
+            <!-- Botón Ir al Final (Última Página) -->
+            <button
+              class="col-page-btn nav-extreme-btn"
+              :disabled="getColumnPage(col.key) >= getColumnTotalPages(col.key)"
+              @click.stop="setColumnPage(col.key, getColumnTotalPages(col.key))"
+              title="Ir a la última página"
+            >
+              ⏭
+            </button>
           </div>
 
-          <!-- Pie de Columna (Indicador de Rango y Estado) -->
+          <!-- Pie de Columna (Indicador de Rango y Acceso Rápido a Inicio) -->
           <div class="column-footer">
-            <span class="footer-count">{{ getColumnRangeText(col.key) }}</span>
+            <div class="footer-left-info">
+              <span class="footer-count">{{ getColumnRangeText(col.key) }}</span>
+              <button
+                v-if="getColumnPage(col.key) > 1"
+                class="footer-start-btn"
+                @click.stop="setColumnPage(col.key, 1)"
+                title="Volver a la página 1 de esta columna"
+              >
+                ⏮ Inicio
+              </button>
+            </div>
             <span v-if="col.final" class="final-tag">🏆 Etapa Ganadora</span>
           </div>
         </div>
@@ -580,18 +642,35 @@
         </div>
 
         <div class="modal-body">
-          <h3 class="modal-lead-topic">{{ selectedLead.topic }}</h3>
+          <div class="modal-lead-title-area">
+            <h3 class="modal-lead-name">👤 {{ getLeadFullName(selectedLead) }}</h3>
+            <p v-if="selectedLead.topic && selectedLead.topic.trim().toLowerCase() !== (selectedLead.full_name || '').trim().toLowerCase()" class="modal-lead-topic-sub">
+              📄 {{ selectedLead.topic }}
+            </p>
+          </div>
 
           <div class="lead-info-grid">
             <div class="info-card-panel">
               <h5 class="panel-subtitle">👤 Contacto</h5>
+              <div v-if="selectedLead.full_name" class="info-item">
+                <span class="info-label">Nombre Completo:</span>
+                <span class="info-value selectable" style="font-weight: 600;">{{ selectedLead.full_name }}</span>
+              </div>
               <div class="info-item">
                 <span class="info-label">Email:</span>
-                <span class="info-value selectable">{{ selectedLead.email }}</span>
+                <span class="info-value selectable">{{ selectedLead.email || '—' }}</span>
               </div>
               <div class="info-item">
                 <span class="info-label">Celular:</span>
-                <span class="info-value selectable">{{ selectedLead.phone }}</span>
+                <span class="info-value selectable">{{ selectedLead.phone || '—' }}</span>
+              </div>
+              <div v-if="selectedLead.dni" class="info-item">
+                <span class="info-label">DNI:</span>
+                <span class="info-value selectable">{{ selectedLead.dni }}</span>
+              </div>
+              <div v-if="selectedLead.assigned_to" class="info-item">
+                <span class="info-label">Asignado a:</span>
+                <span class="info-value selectable">{{ selectedLead.assigned_to }}</span>
               </div>
             </div>
 
@@ -791,14 +870,38 @@ function nextColumnPage(colKey) {
   setColumnPage(colKey, getColumnPage(colKey) + 1);
 }
 
+function jumpColumnPages(colKey, delta) {
+  const current = getColumnPage(colKey);
+  const total = getColumnTotalPages(colKey);
+  setColumnPage(colKey, Math.max(1, Math.min(total, current + delta)));
+}
+
+function getVisibleColumnPages(colKey) {
+  const total = getColumnTotalPages(colKey);
+  const current = getColumnPage(colKey);
+
+  if (total <= 5) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+
+  if (current <= 3) {
+    return [1, 2, 3, 4, '...', total];
+  } else if (current >= total - 2) {
+    return [1, '...', total - 3, total - 2, total - 1, total];
+  } else {
+    return [1, '...', current - 1, current, current + 1, '...', total];
+  }
+}
+
 function getColumnRangeText(colKey) {
   const total = (filteredLeadsByColumn.value[colKey] || []).length;
   if (total === 0) return '0 leads';
   if (itemsPerPage.value === 'all') return `${total} lead(s)`;
   const page = getColumnPage(colKey);
+  const totalPages = getColumnTotalPages(colKey);
   const start = (page - 1) * Number(itemsPerPage.value) + 1;
   const end = Math.min(page * Number(itemsPerPage.value), total);
-  return `${start}-${end} de ${total}`;
+  return `Pág. ${page}/${totalPages} (${start}-${end} de ${total})`;
 }
 
 // Modales de Gestión de Columnas
@@ -863,17 +966,19 @@ const filteredLeadsByColumn = computed(() => {
   const query = searchQuery.value.trim().toLowerCase();
 
   for (const lead of leads.value) {
-    // Filtro por texto multicampo
+    // Filtro por texto multicampo (incluyendo nombre completo, tema, email, celular, etc.)
     if (query) {
       const cleanId = query.replace(/^#/, '');
       const matchId = String(lead.id || '').includes(cleanId);
+      const matchName = (lead.full_name || '').toLowerCase().includes(query);
       const matchTopic = (lead.topic || '').toLowerCase().includes(query);
       const matchEmail = (lead.email || '').toLowerCase().includes(query);
       const matchPhone = (lead.phone || '').toLowerCase().includes(query);
       const matchField = (lead.field_of_study || '').toLowerCase().includes(query);
       const matchAcademic = (lead.academic_level || '').toLowerCase().includes(query);
       const matchNotes = (lead.additional_notes || '').toLowerCase().includes(query);
-      if (!matchId && !matchTopic && !matchEmail && !matchPhone && !matchField && !matchAcademic && !matchNotes) continue;
+      const matchAssigned = (lead.assigned_to || '').toLowerCase().includes(query);
+      if (!matchId && !matchName && !matchTopic && !matchEmail && !matchPhone && !matchField && !matchAcademic && !matchNotes && !matchAssigned) continue;
     }
 
     // Filtro por nivel de viabilidad
@@ -1255,6 +1360,14 @@ function formatAcademic(level, field) {
   const shortLevel = (level || '').includes('Pregrado') ? 'Pregrado' : (level || '').includes('Maestría') ? 'Maestría' : 'Doctorado';
   const shortField = (field || '').split(' ')[0] || 'General';
   return `${shortLevel} · ${shortField}`;
+}
+
+function getLeadFullName(lead) {
+  if (!lead) return '—';
+  if (lead.full_name && lead.full_name.trim()) return lead.full_name.trim();
+  if (lead.fullName && lead.fullName.trim()) return lead.fullName.trim();
+  if (lead.topic && lead.topic.trim()) return lead.topic.trim();
+  return `Prospecto #${lead.id || '—'}`;
 }
 
 function getLevelClass(level) {
@@ -1939,17 +2052,59 @@ onMounted(() => {
   color: var(--text-muted);
 }
 
-.card-lead-topic {
-  font-size: 0.84rem;
+.lead-assigned-tag {
+  font-size: 0.68rem;
   font-weight: 600;
+  color: var(--accent-cyan);
+  background: rgba(6, 182, 212, 0.12);
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  max-width: 110px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-lead-name-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin-top: 0.1rem;
+}
+
+.lead-name-icon {
+  font-size: 0.85rem;
+  opacity: 0.85;
+  line-height: 1.3;
+}
+
+.card-lead-name {
+  font-size: 0.9rem;
+  font-weight: 700;
   color: var(--text-main);
   font-family: var(--font-heading);
+  line-height: 1.3;
+  margin: 0;
+  word-break: break-word;
+}
+
+.card-lead-topic {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  font-family: var(--font-body);
   line-height: 1.35;
   margin: 0;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.topic-icon {
+  font-size: 0.72rem;
+  opacity: 0.75;
 }
 
 .card-lead-contact {
@@ -2073,30 +2228,38 @@ onMounted(() => {
   margin-top: 0.2rem;
 }
 
-/* Barra de Paginación por Columna */
+/* Barra de Paginación por Columna Mejorada */
 .column-pagination-bar {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.4rem;
-  padding: 0.45rem 0.75rem;
-  background: rgba(0, 0, 0, 0.25);
+  gap: 0.25rem;
+  padding: 0.45rem 0.5rem;
+  background: rgba(0, 0, 0, 0.3);
   border-top: 1px solid var(--border-color);
+  flex-wrap: nowrap;
 }
 
 .col-page-btn {
   width: 24px;
   height: 24px;
+  min-width: 24px;
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid var(--border-color);
   color: var(--text-main);
-  font-size: 0.65rem;
+  font-size: 0.62rem;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   transition: all 0.15s ease;
+  padding: 0;
+}
+
+.col-page-btn.nav-extreme-btn {
+  font-size: 0.58rem;
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .col-page-btn:hover:not(:disabled) {
@@ -2106,19 +2269,20 @@ onMounted(() => {
 }
 
 .col-page-btn:disabled {
-  opacity: 0.25;
+  opacity: 0.2;
   cursor: not-allowed;
 }
 
 .page-pills {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.18rem;
 }
 
 .page-pill {
-  width: 22px;
+  min-width: 22px;
   height: 22px;
+  padding: 0 0.25rem;
   border-radius: 6px;
   background: transparent;
   border: 1px solid transparent;
@@ -2145,9 +2309,22 @@ onMounted(() => {
   box-shadow: 0 0 8px var(--col-accent, var(--primary));
 }
 
+.page-pill.ellipsis-pill {
+  min-width: 16px;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  letter-spacing: -1px;
+}
+
+.page-pill.ellipsis-pill:hover {
+  color: var(--primary);
+  background: rgba(16, 94, 255, 0.15);
+}
+
 /* Pie de Columna */
 .column-footer {
-  padding: 0.5rem 0.85rem;
+  padding: 0.45rem 0.75rem;
   border-top: 1px solid var(--border-color);
   font-size: 0.72rem;
   font-family: var(--font-body);
@@ -2158,8 +2335,36 @@ onMounted(() => {
   background: rgba(0, 0, 0, 0.15);
 }
 
+.footer-left-info {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
 .footer-count {
   font-weight: 500;
+}
+
+.footer-start-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--text-main);
+  font-size: 0.65rem;
+  font-weight: 600;
+  font-family: var(--font-body);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.footer-start-btn:hover {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
 }
 
 .final-tag {
@@ -2347,13 +2552,25 @@ onMounted(() => {
 }
 
 /* Detalle del Lead en Modal */
-.modal-lead-topic {
-  font-size: 1.1rem;
+.modal-lead-title-area {
+  margin-bottom: 1.25rem;
+}
+
+.modal-lead-name {
+  font-size: 1.15rem;
   font-weight: 700;
   font-family: var(--font-heading);
   color: var(--text-main);
+  line-height: 1.35;
+  margin: 0 0 0.3rem 0;
+}
+
+.modal-lead-topic-sub {
+  font-size: 0.84rem;
+  font-family: var(--font-body);
+  color: var(--text-muted);
+  margin: 0;
   line-height: 1.4;
-  margin: 0 0 1.25rem 0;
 }
 
 .lead-info-grid {
