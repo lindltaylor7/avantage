@@ -374,7 +374,12 @@ app.get('/api/webhooks/meta', (req, res) => {
  */
 app.post('/api/webhooks/meta', (req, res) => {
   const signature = req.headers['x-hub-signature-256'];
-  if (process.env.META_APP_SECRET && !metaWebhookService.verifySignature(req.rawBody, signature)) {
+  const hasSecret = !!process.env.META_APP_SECRET;
+  const signatureValid = hasSecret ? metaWebhookService.verifySignature(req.rawBody, signature) : null;
+
+  metaWebhookService.recordEvent({ body: req.body, signatureValid, hasSecret });
+
+  if (hasSecret && !signatureValid) {
     console.warn('⚠️ [Meta Webhook] Firma de la solicitud inválida, se rechaza el evento.');
     return res.sendStatus(403);
   }
@@ -387,6 +392,23 @@ app.post('/api/webhooks/meta', (req, res) => {
   Promise.all((body.entry || []).map((entry) => metaWebhookService.handleEntry(entry))).catch((error) => {
     console.error('❌ [Meta Webhook] Error al procesar el evento del webhook:', error);
   });
+});
+
+/**
+ * Últimos eventos crudos recibidos en el webhook de Meta (de cualquier campo),
+ * para verificar en la UI que la suscripción está realmente conectada mientras
+ * la app sigue en modo desarrollo.
+ */
+app.get('/api/webhooks/meta/events', requireAuth, requirePermission('leads.view'), (req, res) => {
+  res.json({ events: metaWebhookService.getRecentEvents() });
+});
+
+/**
+ * Limpia el historial de eventos de prueba mostrado en la UI.
+ */
+app.delete('/api/webhooks/meta/events', requireAuth, requirePermission('leads.view'), (req, res) => {
+  metaWebhookService.clearRecentEvents();
+  res.json({ success: true });
 });
 
 /**

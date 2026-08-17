@@ -7,6 +7,7 @@ import DatabaseView from '../views/DatabaseView.vue';
 import ProjectsView from '../views/ProjectsView.vue';
 import ProjectDetailView from '../views/ProjectDetailView.vue';
 import RolesView from '../views/RolesView.vue';
+import MetaWebhookTestView from '../views/MetaWebhookTestView.vue';
 import { isAuthenticated, hasPermission } from '../auth.js';
 
 const router = createRouter({
@@ -19,7 +20,8 @@ const router = createRouter({
     { path: '/admin/leads', name: 'leads', component: LeadsView, meta: { requiresAuth: true, permission: 'leads.view' } },
     { path: '/admin/projects', name: 'projects', component: ProjectsView, meta: { requiresAuth: true, permission: 'projects.view' } },
     { path: '/admin/projects/:id', name: 'project-detail', component: ProjectDetailView, props: true, meta: { requiresAuth: true, permission: 'projects.view' } },
-    { path: '/admin/roles', name: 'roles', component: RolesView, meta: { requiresAuth: true, permission: 'roles.manage' } }
+    { path: '/admin/roles', name: 'roles', component: RolesView, meta: { requiresAuth: true, permission: 'roles.manage' } },
+    { path: '/admin/webhooks', name: 'webhooks', component: MetaWebhookTestView, meta: { requiresAuth: true, permission: 'leads.view' } }
   ]
 });
 

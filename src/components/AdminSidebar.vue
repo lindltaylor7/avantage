@@ -143,9 +143,23 @@
           <span class="nav-label" v-if="!isCollapsed">Mis Leads</span>
         </router-link>
 
-        <router-link 
-          v-if="hasPermission('roles.manage')" 
-          to="/admin/roles" 
+        <router-link
+          v-if="hasPermission('leads.view')"
+          to="/admin/webhooks"
+          class="nav-item"
+          :class="{ 'is-active': $route.path === '/admin/webhooks' }"
+          @click="closeMobile"
+        >
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18.36 6.64a9 9 0 1 1-12.73 0"/>
+            <line x1="12" y1="2" x2="12" y2="12"/>
+          </svg>
+          <span class="nav-label" v-if="!isCollapsed">Webhooks</span>
+        </router-link>
+
+        <router-link
+          v-if="hasPermission('roles.manage')"
+          to="/admin/roles"
           class="nav-item"
           :class="{ 'is-active': $route.path === '/admin/roles' }"
           @click="closeMobile"

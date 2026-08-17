@@ -3,6 +3,8 @@ import { LeadService } from './leadService.js';
 
 const GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v21.0';
 
+const MAX_RECENT_EVENTS = 50;
+
 /**
  * Recepción e importación de leads generados por Meta Lead Ads (Facebook/Instagram)
  * vía el webhook de la app de Meta (campo "leadgen").
@@ -10,6 +12,33 @@ const GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v21.0';
 export class MetaWebhookService {
   constructor() {
     this.leadService = new LeadService();
+    this.recentEvents = [];
+  }
+
+  /**
+   * Guarda en memoria los últimos webhooks recibidos (de cualquier campo, no
+   * solo "leadgen"), para poder verificar en la UI que Meta está llegando al
+   * endpoint mientras se prueba la integración.
+   */
+  recordEvent({ body, signatureValid, hasSecret }) {
+    this.recentEvents.unshift({
+      id: crypto.randomUUID(),
+      receivedAt: new Date().toISOString(),
+      signatureValid,
+      hasSecret,
+      body
+    });
+    if (this.recentEvents.length > MAX_RECENT_EVENTS) {
+      this.recentEvents.length = MAX_RECENT_EVENTS;
+    }
+  }
+
+  getRecentEvents() {
+    return this.recentEvents;
+  }
+
+  clearRecentEvents() {
+    this.recentEvents = [];
   }
 
   /**
