@@ -13,6 +13,7 @@ import { QuoteService } from './services/quoteService.js';
 import { UserService } from './services/userService.js';
 import { RoleService } from './services/roleService.js';
 import { ProjectUpdateService } from './services/projectUpdateService.js';
+import { MetaWebhookService } from './services/metaWebhookService.js';
 import { signToken, requireAuth, requirePermission } from './middleware/auth.js';
 import { uploadProjectUpdateAttachment, uploadDir } from './middleware/upload.js';
 
@@ -32,7 +33,13 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json());
+// Se conserva el body crudo (rawBody) para poder validar la firma
+// X-Hub-Signature-256 de los webhooks de Meta.
+app.use(express.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
 
 // Instanciar servicios
 const ollamaService = new OllamaService();
@@ -45,6 +52,7 @@ const quoteService = new QuoteService();
 const userService = new UserService();
 const roleService = new RoleService();
 const projectUpdateService = new ProjectUpdateService();
+const metaWebhookService = new MetaWebhookService();
 
 // Historial en memoria de evaluaciones recientes
 const evaluationHistory = [];
@@ -338,6 +346,48 @@ app.delete('/api/leads/:id', requireAuth, requirePermission('leads.view'), async
   }
 });
 
+
+/**
+ * Verificación del webhook de Meta (Facebook) Lead Ads. Meta llama a este
+ * endpoint por GET al configurar la suscripción, enviando hub.mode,
+ * hub.verify_token y hub.challenge; hay que responder con el challenge tal cual
+ * si el token coincide con META_VERIFY_TOKEN.
+ */
+app.get('/api/webhooks/meta', (req, res) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+
+  if (metaWebhookService.verifyChallenge(mode, token)) {
+    console.log('✅ [Meta Webhook] Verificación de suscripción exitosa.');
+    return res.status(200).send(challenge);
+  }
+
+  console.warn('⚠️ [Meta Webhook] Verificación de suscripción fallida (token o modo inválido).');
+  res.sendStatus(403);
+});
+
+/**
+ * Recepción de eventos del webhook de Meta (Facebook) Lead Ads. Se responde
+ * 200 de inmediato (Meta espera una respuesta rápida) y los leads se importan
+ * en segundo plano vía la Graph API.
+ */
+app.post('/api/webhooks/meta', (req, res) => {
+  const signature = req.headers['x-hub-signature-256'];
+  if (process.env.META_APP_SECRET && !metaWebhookService.verifySignature(req.rawBody, signature)) {
+    console.warn('⚠️ [Meta Webhook] Firma de la solicitud inválida, se rechaza el evento.');
+    return res.sendStatus(403);
+  }
+
+  res.sendStatus(200);
+
+  const body = req.body || {};
+  if (body.object !== 'page') return;
+
+  Promise.all((body.entry || []).map((entry) => metaWebhookService.handleEntry(entry))).catch((error) => {
+    console.error('❌ [Meta Webhook] Error al procesar el evento del webhook:', error);
+  });
+});
 
 /**
  * Listado de columnas (etapas) del Kanban de Leads, ordenadas por posición.

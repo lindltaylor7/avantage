@@ -82,6 +82,10 @@ export class LeadService {
       .orderBy('leads.created_at', 'desc');
   }
 
+  async findByAdditionalNotesContaining(text) {
+    return db('leads').where('additional_notes', 'like', `%${text}%`).first();
+  }
+
   async getLeadById(id) {
     return db('leads')
       .select('leads.*', 'projects.id as project_id', 'projects.status as project_status')
