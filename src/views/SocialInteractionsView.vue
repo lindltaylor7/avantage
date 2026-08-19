@@ -174,7 +174,7 @@ async function pollFollowersNow() {
   try {
     const response = await apiFetch('/api/social-followers/poll', { method: 'POST' });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Error al sondear los seguidores.');
+    if (!response.ok) throw new Error(data.details || data.error || 'Error al sondear los seguidores.');
     followersLatest.value = data.snapshot;
   } catch (error) {
     errorMessage.value = error.message;

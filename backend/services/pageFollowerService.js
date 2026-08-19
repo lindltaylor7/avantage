@@ -11,8 +11,7 @@ export class PageFollowerService {
   async pollAndStore() {
     const pageAccessToken = process.env.META_PAGE_ACCESS_TOKEN;
     if (!pageAccessToken) {
-      console.error('❌ [Meta Followers] Falta META_PAGE_ACCESS_TOKEN, no se puede sondear el conteo de seguidores.');
-      return null;
+      throw new Error('META_PAGE_ACCESS_TOKEN no está configurado en el servidor.');
     }
 
     const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/me?fields=id,name,fan_count,followers_count&access_token=${encodeURIComponent(pageAccessToken)}`;
@@ -20,8 +19,9 @@ export class PageFollowerService {
     const data = await response.json();
 
     if (!response.ok) {
+      const reason = data?.error?.message || JSON.stringify(data);
       console.error('❌ [Meta Followers] Error al consultar la Graph API:', data);
-      return null;
+      throw new Error(`Graph API rechazó la solicitud: ${reason}`);
     }
 
     const [id] = await db('page_follower_snapshots').insert({

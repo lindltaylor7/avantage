@@ -465,13 +465,10 @@ app.get('/api/social-followers', requireAuth, requirePermission('leads.view'), a
 app.post('/api/social-followers/poll', requireAuth, requirePermission('leads.view'), async (req, res) => {
   try {
     const snapshot = await pageFollowerService.pollAndStore();
-    if (!snapshot) {
-      return res.status(502).json({ error: 'No se pudo sondear el conteo de seguidores. Revisa META_PAGE_ACCESS_TOKEN.' });
-    }
     res.json({ snapshot });
   } catch (error) {
     console.error('❌ Error al sondear el conteo de seguidores:', error);
-    res.status(500).json({ error: 'Error al sondear el conteo de seguidores.', details: error.message });
+    res.status(502).json({ error: 'No se pudo sondear el conteo de seguidores.', details: error.message });
   }
 });
 
