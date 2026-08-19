@@ -14,6 +14,8 @@ import { UserService } from './services/userService.js';
 import { RoleService } from './services/roleService.js';
 import { ProjectUpdateService } from './services/projectUpdateService.js';
 import { MetaWebhookService } from './services/metaWebhookService.js';
+import { PageInteractionService } from './services/pageInteractionService.js';
+import { PageFollowerService } from './services/pageFollowerService.js';
 import { signToken, requireAuth, requirePermission } from './middleware/auth.js';
 import { uploadProjectUpdateAttachment, uploadDir } from './middleware/upload.js';
 
@@ -23,6 +25,10 @@ const FUNNEL_FINAL_STATUS = 'ganado';
 
 // Etapas del funnel en las que un lead ya puede recibir una cotización.
 const QUOTE_ELIGIBLE_STATUSES = ['contactado', 'en_negociacion'];
+
+// Frecuencia del sondeo del conteo de seguidores de la página (Meta no lo
+// notifica por webhook), 1 hora por defecto.
+const FOLLOWER_POLL_INTERVAL_MS = Number(process.env.META_FOLLOWER_POLL_INTERVAL_MS) || 60 * 60 * 1000;
 
 dotenv.config();
 
@@ -53,6 +59,8 @@ const userService = new UserService();
 const roleService = new RoleService();
 const projectUpdateService = new ProjectUpdateService();
 const metaWebhookService = new MetaWebhookService();
+const pageInteractionService = new PageInteractionService();
+const pageFollowerService = new PageFollowerService();
 
 // Historial en memoria de evaluaciones recientes
 const evaluationHistory = [];
@@ -412,6 +420,59 @@ app.get('/api/webhooks/meta/events', requireAuth, requirePermission('leads.view'
 app.delete('/api/webhooks/meta/events', requireAuth, requirePermission('leads.view'), (req, res) => {
   metaWebhookService.clearRecentEvents();
   res.json({ success: true });
+});
+
+/**
+ * Interacciones (comentarios, reacciones, publicaciones, compartidos) de las
+ * páginas de Facebook conectadas, recibidas vía el campo "feed" del webhook.
+ */
+app.get('/api/social-interactions', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const itemType = req.query.itemType || null;
+    const [interactions, stats] = await Promise.all([
+      pageInteractionService.getRecent({ limit, itemType }),
+      pageInteractionService.getStats()
+    ]);
+    res.json({ interactions, stats });
+  } catch (error) {
+    console.error('❌ Error al obtener las interacciones de la página:', error);
+    res.status(500).json({ error: 'Error al obtener las interacciones de la página.', details: error.message });
+  }
+});
+
+/**
+ * Conteo de seguidores de la página: último valor sondeado + historial, para
+ * ver la tendencia (no es un contador en tiempo real, ver pageFollowerService).
+ */
+app.get('/api/social-followers', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const [latest, history] = await Promise.all([
+      pageFollowerService.getLatest(),
+      pageFollowerService.getHistory({ limit: 100 })
+    ]);
+    res.json({ latest, history });
+  } catch (error) {
+    console.error('❌ Error al obtener el historial de seguidores:', error);
+    res.status(500).json({ error: 'Error al obtener el historial de seguidores.', details: error.message });
+  }
+});
+
+/**
+ * Fuerza un sondeo inmediato del conteo de seguidores (en vez de esperar al
+ * siguiente ciclo automático).
+ */
+app.post('/api/social-followers/poll', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const snapshot = await pageFollowerService.pollAndStore();
+    if (!snapshot) {
+      return res.status(502).json({ error: 'No se pudo sondear el conteo de seguidores. Revisa META_PAGE_ACCESS_TOKEN.' });
+    }
+    res.json({ snapshot });
+  } catch (error) {
+    console.error('❌ Error al sondear el conteo de seguidores:', error);
+    res.status(500).json({ error: 'Error al sondear el conteo de seguidores.', details: error.message });
+  }
 });
 
 /**
@@ -964,4 +1025,15 @@ app.get('*', (req, res, next) => {
 app.listen(PORT, () => {
   console.log(`\n🚀 Servidor de Evaluación de Tesis corriendo en http://localhost:${PORT}`);
   console.log(`- API Status: http://localhost:${PORT}/api/health`);
+
+  if (process.env.META_PAGE_ACCESS_TOKEN) {
+    pageFollowerService.pollAndStore().catch((error) => {
+      console.error('❌ [Meta Followers] Error en el sondeo inicial de seguidores:', error);
+    });
+    setInterval(() => {
+      pageFollowerService.pollAndStore().catch((error) => {
+        console.error('❌ [Meta Followers] Error en el sondeo periódico de seguidores:', error);
+      });
+    }, FOLLOWER_POLL_INTERVAL_MS);
+  }
 });

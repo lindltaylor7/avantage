@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { LeadService } from './leadService.js';
+import { PageInteractionService } from './pageInteractionService.js';
 
 const GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v21.0';
 
@@ -12,6 +13,7 @@ const MAX_RECENT_EVENTS = 50;
 export class MetaWebhookService {
   constructor() {
     this.leadService = new LeadService();
+    this.pageInteractionService = new PageInteractionService();
     this.recentEvents = [];
   }
 
@@ -67,20 +69,22 @@ export class MetaWebhookService {
   }
 
   /**
-   * Procesa una entrada ("entry") del payload del webhook, importando cada
-   * evento de generación de lead ("leadgen") que contenga.
+   * Procesa una entrada ("entry") del payload del webhook: importa los leads
+   * del campo "leadgen" y guarda las interacciones (comentarios, reacciones,
+   * publicaciones, compartidos) del campo "feed".
    */
   async handleEntry(entry) {
     const changes = entry?.changes || [];
     for (const change of changes) {
-      if (change.field !== 'leadgen') continue;
-      const leadgenId = change.value?.leadgen_id;
-      if (!leadgenId) continue;
-
       try {
-        await this.importLead(leadgenId);
+        if (change.field === 'leadgen') {
+          const leadgenId = change.value?.leadgen_id;
+          if (leadgenId) await this.importLead(leadgenId);
+        } else if (change.field === 'feed') {
+          await this.pageInteractionService.createFromFeedChange(entry?.id, change.value || {});
+        }
       } catch (error) {
-        console.error(`❌ [Meta Webhook] Error al importar el lead ${leadgenId}:`, error);
+        console.error(`❌ [Meta Webhook] Error al procesar el cambio de campo "${change.field}":`, error);
       }
     }
   }
