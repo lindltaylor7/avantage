@@ -377,6 +377,9 @@ app.post('/api/webhooks/meta', (req, res) => {
   const hasSecret = !!process.env.META_APP_SECRET;
   const signatureValid = hasSecret ? metaWebhookService.verifySignature(req.rawBody, signature) : null;
 
+  const fields = (req.body?.entry || []).flatMap((e) => (e.changes || []).map((c) => c.field));
+  console.log(`📩 [Meta Webhook] POST recibido. object=${req.body?.object} campos=[${fields.join(', ')}] firma=${hasSecret ? (signatureValid ? 'válida' : 'inválida') : 'sin verificar'}`);
+
   metaWebhookService.recordEvent({ body: req.body, signatureValid, hasSecret });
 
   if (hasSecret && !signatureValid) {
