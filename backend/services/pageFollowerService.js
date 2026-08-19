@@ -14,7 +14,10 @@ export class PageFollowerService {
       throw new Error('META_PAGE_ACCESS_TOKEN no está configurado en el servidor.');
     }
 
-    const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/me?fields=id,name,fan_count,followers_count&access_token=${encodeURIComponent(pageAccessToken)}`;
+    // Nota: "fan_count" fue retirado de la Graph API (Meta lo reemplazó por
+    // "followers_count"); pedirlo ahora responde el error (#100) "Tried
+    // accessing nonexisting field".
+    const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/me?fields=id,name,followers_count&access_token=${encodeURIComponent(pageAccessToken)}`;
     const response = await fetch(url);
     const data = await response.json();
 
@@ -27,11 +30,10 @@ export class PageFollowerService {
     const [id] = await db('page_follower_snapshots').insert({
       page_id: data.id,
       page_name: data.name || null,
-      fan_count: data.fan_count ?? null,
       followers_count: data.followers_count ?? null
     });
 
-    console.log(`👥 [Meta Followers] Snapshot guardado: ${data.name || data.id} — fan_count=${data.fan_count} followers_count=${data.followers_count}`);
+    console.log(`👥 [Meta Followers] Snapshot guardado: ${data.name || data.id} — followers_count=${data.followers_count}`);
     return db('page_follower_snapshots').where({ id }).first();
   }
 
