@@ -78,6 +78,11 @@ export class WhatsappMessageService {
    * Envía un mensaje de texto libre a un contacto vía la Graph API. Solo
    * funciona dentro de la ventana de 24h desde el último mensaje del cliente;
    * fuera de ella, WhatsApp exige usar una plantilla aprobada.
+   *
+   * Para contactos identificados solo por BSUID (p. ej. "PE.1551888569771124",
+   * cuando no compartieron su número) NO se usa el campo "to": la Graph API
+   * exige el campo "recipient" en su lugar, con el BSUID completo.
+   * https://developers.facebook.com/documentation/business-messaging/whatsapp/business-scoped-user-ids/
    */
   async sendTextMessage(waId, body) {
     const phoneNumberId = process.env.META_WHATSAPP_PHONE_NUMBER_ID;
@@ -89,6 +94,8 @@ export class WhatsappMessageService {
       throw new Error('META_WHATSAPP_ACCESS_TOKEN (o META_PAGE_ACCESS_TOKEN) no está configurado en el servidor.');
     }
 
+    const isBsuid = /^[A-Za-z]{2}\.[A-Za-z0-9]+$/.test(waId);
+
     const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${phoneNumberId}/messages`;
     const response = await fetch(url, {
       method: 'POST',
@@ -98,7 +105,7 @@ export class WhatsappMessageService {
       },
       body: JSON.stringify({
         messaging_product: 'whatsapp',
-        to: waId,
+        ...(isBsuid ? { recipient: waId } : { to: waId }),
         type: 'text',
         text: { body }
       })
