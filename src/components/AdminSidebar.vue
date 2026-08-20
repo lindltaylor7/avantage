@@ -184,6 +184,36 @@
         </router-link>
 
         <router-link
+          v-if="hasPermission('leads.view')"
+          to="/admin/bot-script"
+          class="nav-item"
+          :class="{ 'is-active': $route.path === '/admin/bot-script' }"
+          @click="closeMobile"
+        >
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="3"/>
+            <path d="M8 9h8M8 13h5"/>
+            <circle cx="17" cy="16" r="1.2" fill="currentColor" stroke="none"/>
+          </svg>
+          <span class="nav-label" v-if="!isCollapsed">Guion del Bot</span>
+        </router-link>
+
+        <router-link
+          to="/admin/availability"
+          class="nav-item"
+          :class="{ 'is-active': $route.path === '/admin/availability' }"
+          @click="closeMobile"
+        >
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+            <line x1="16" y1="2" x2="16" y2="6"/>
+            <line x1="8" y1="2" x2="8" y2="6"/>
+            <line x1="3" y1="10" x2="21" y2="10"/>
+          </svg>
+          <span class="nav-label" v-if="!isCollapsed">Disponibilidad</span>
+        </router-link>
+
+        <router-link
           v-if="hasPermission('roles.manage')"
           to="/admin/roles"
           class="nav-item"

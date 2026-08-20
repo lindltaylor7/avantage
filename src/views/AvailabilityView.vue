@@ -1,0 +1,481 @@
+<template>
+  <main class="container-fluid availability-page-wrapper">
+    <header class="availability-header">
+      <div class="header-titles">
+        <h2 class="section-heading">
+          <span class="heading-icon">🗓️</span> Mi Disponibilidad
+        </h2>
+        <p class="section-subheading">
+          Marca los bloques de media hora en los que puedes reunirte. Haz clic y arrastra para pintar varios
+          a la vez, o usa los atajos rápidos.
+        </p>
+      </div>
+
+      <div class="header-actions">
+        <button class="btn-action-secondary" @click="clearAll" :disabled="isSaving">
+          🧹 Limpiar todo
+        </button>
+        <button class="btn-action-primary" @click="save" :disabled="isSaving || !isDirty">
+          {{ isSaving ? 'Guardando...' : (isDirty ? '💾 Guardar cambios' : '✅ Guardado') }}
+        </button>
+      </div>
+    </header>
+
+    <p v-if="errorMessage" class="info-box alert-box">⚠️ {{ errorMessage }}</p>
+    <p v-if="savedMessage" class="info-box success-box">✅ {{ savedMessage }}</p>
+
+    <!-- Atajos rápidos -->
+    <section class="presets-row">
+      <span class="presets-label">Atajos:</span>
+      <button class="preset-pill" @click="applyPreset('weekdaysMorning')">☀️ Lun-Vie 9am-1pm</button>
+      <button class="preset-pill" @click="applyPreset('weekdaysAfternoon')">🌤️ Lun-Vie 3pm-7pm</button>
+      <button class="preset-pill" @click="applyPreset('weekdaysFull')">🗂️ Lun-Vie 9am-7pm</button>
+      <button class="preset-pill" @click="applyPreset('weekend')">🌴 Fines de semana 10am-2pm</button>
+    </section>
+
+    <!-- Grilla -->
+    <section class="grid-wrapper custom-scrollbar" @mouseleave="stopPaint">
+      <div class="grid" :style="gridStyle">
+        <div class="grid-corner">Hora</div>
+        <div v-for="day in DAYS" :key="day.value" class="grid-day-header">{{ day.short }}</div>
+
+        <template v-for="slot in TIME_SLOTS" :key="slot">
+          <div class="grid-time-label">{{ slot }}</div>
+          <div
+            v-for="day in DAYS"
+            :key="`${day.value}-${slot}`"
+            class="grid-cell"
+            :class="{ selected: isSelected(day.value, slot) }"
+            @mousedown.prevent="startPaint(day.value, slot)"
+            @mouseenter="enterCell(day.value, slot)"
+            @touchstart.prevent="toggleCell(day.value, slot)"
+          ></div>
+        </template>
+      </div>
+    </section>
+
+    <!-- Resumen legible -->
+    <section class="summary-card">
+      <h4>📋 Resumen de tu semana</h4>
+      <p v-if="!hasAnySelection" class="summary-empty">Aún no has marcado ningún horario disponible.</p>
+      <ul v-else class="summary-list">
+        <li v-for="day in DAYS" :key="day.value" v-show="summaryByDay[day.value]">
+          <strong>{{ day.label }}:</strong> {{ summaryByDay[day.value] }}
+        </li>
+      </ul>
+    </section>
+  </main>
+</template>
+
+<script setup>
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { apiFetch } from '../apiClient.js';
+
+const DAYS = [
+  { value: 0, label: 'Lunes', short: 'Lun' },
+  { value: 1, label: 'Martes', short: 'Mar' },
+  { value: 2, label: 'Miércoles', short: 'Mié' },
+  { value: 3, label: 'Jueves', short: 'Jue' },
+  { value: 4, label: 'Viernes', short: 'Vie' },
+  { value: 5, label: 'Sábado', short: 'Sáb' },
+  { value: 6, label: 'Domingo', short: 'Dom' }
+];
+
+function buildTimeSlots(startHour, endHour) {
+  const slots = [];
+  for (let h = startHour; h < endHour; h++) {
+    slots.push(`${String(h).padStart(2, '0')}:00`);
+    slots.push(`${String(h).padStart(2, '0')}:30`);
+  }
+  return slots;
+}
+
+const TIME_SLOTS = buildTimeSlots(7, 21); // 07:00 a 20:30 (cobertura hasta las 21:00)
+
+function key(day, slot) {
+  return `${day}-${slot}`;
+}
+
+function minutesOf(slot) {
+  const [h, m] = slot.split(':').map(Number);
+  return h * 60 + m;
+}
+
+function addMinutesToSlot(slot, minutes) {
+  const total = minutesOf(slot) + minutes;
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+const selected = reactive(new Set());
+const savedSnapshot = ref('');
+const isPainting = ref(false);
+const paintValue = ref(true);
+const isSaving = ref(false);
+const errorMessage = ref('');
+const savedMessage = ref('');
+
+const gridStyle = computed(() => ({
+  gridTemplateColumns: `70px repeat(${DAYS.length}, 1fr)`
+}));
+
+function isSelected(day, slot) {
+  return selected.has(key(day, slot));
+}
+
+function setCell(day, slot, value) {
+  const k = key(day, slot);
+  if (value) selected.add(k);
+  else selected.delete(k);
+}
+
+function toggleCell(day, slot) {
+  setCell(day, slot, !isSelected(day, slot));
+}
+
+function startPaint(day, slot) {
+  isPainting.value = true;
+  paintValue.value = !isSelected(day, slot);
+  setCell(day, slot, paintValue.value);
+}
+
+function enterCell(day, slot) {
+  if (isPainting.value) setCell(day, slot, paintValue.value);
+}
+
+function stopPaint() {
+  isPainting.value = false;
+}
+
+function clearAll() {
+  selected.clear();
+}
+
+const PRESETS = {
+  weekdaysMorning: { days: [0, 1, 2, 3, 4], from: '09:00', to: '13:00' },
+  weekdaysAfternoon: { days: [0, 1, 2, 3, 4], from: '15:00', to: '19:00' },
+  weekdaysFull: { days: [0, 1, 2, 3, 4], from: '09:00', to: '19:00' },
+  weekend: { days: [5, 6], from: '10:00', to: '14:00' }
+};
+
+function applyPreset(name) {
+  const preset = PRESETS[name];
+  if (!preset) return;
+  const fromMin = minutesOf(preset.from);
+  const toMin = minutesOf(preset.to);
+  for (const day of preset.days) {
+    for (const slot of TIME_SLOTS) {
+      if (minutesOf(slot) >= fromMin && minutesOf(slot) < toMin) {
+        setCell(day, slot, true);
+      }
+    }
+  }
+}
+
+const hasAnySelection = computed(() => selected.size > 0);
+
+const summaryByDay = computed(() => {
+  const result = {};
+  for (const day of DAYS) {
+    const daySlots = TIME_SLOTS.filter((slot) => isSelected(day.value, slot));
+    if (daySlots.length === 0) continue;
+
+    const ranges = [];
+    let rangeStart = daySlots[0];
+    let prev = daySlots[0];
+    for (let i = 1; i < daySlots.length; i++) {
+      const current = daySlots[i];
+      if (minutesOf(current) - minutesOf(prev) > 30) {
+        ranges.push(`${rangeStart}–${addMinutesToSlot(prev, 30)}`);
+        rangeStart = current;
+      }
+      prev = current;
+    }
+    ranges.push(`${rangeStart}–${addMinutesToSlot(prev, 30)}`);
+    result[day.value] = ranges.join(', ');
+  }
+  return result;
+});
+
+function currentSnapshot() {
+  return [...selected].sort().join(',');
+}
+
+const isDirty = computed(() => currentSnapshot() !== savedSnapshot.value);
+
+async function fetchAvailability() {
+  errorMessage.value = '';
+  try {
+    const response = await apiFetch('/api/availability/me');
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Error al obtener tu disponibilidad.');
+    selected.clear();
+    for (const slot of data.slots || []) {
+      selected.add(key(slot.day_of_week, slot.start_time.slice(0, 5)));
+    }
+    savedSnapshot.value = currentSnapshot();
+  } catch (error) {
+    errorMessage.value = error.message;
+  }
+}
+
+async function save() {
+  isSaving.value = true;
+  errorMessage.value = '';
+  savedMessage.value = '';
+  try {
+    const slots = [...selected].map((k) => {
+      const [day, ...rest] = k.split('-');
+      return { dayOfWeek: Number(day), startTime: rest.join('-') };
+    });
+    const response = await apiFetch('/api/availability/me', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slots })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No se pudo guardar tu disponibilidad.');
+    savedSnapshot.value = currentSnapshot();
+    savedMessage.value = 'Tu disponibilidad se guardó correctamente.';
+    setTimeout(() => { savedMessage.value = ''; }, 3000);
+  } catch (error) {
+    errorMessage.value = error.message;
+  } finally {
+    isSaving.value = false;
+  }
+}
+
+function handleGlobalMouseUp() {
+  stopPaint();
+}
+
+onMounted(() => {
+  fetchAvailability();
+  window.addEventListener('mouseup', handleGlobalMouseUp);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('mouseup', handleGlobalMouseUp);
+});
+</script>
+
+<style scoped>
+.availability-page-wrapper {
+  padding: 1.75rem 2rem 3rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  user-select: none;
+}
+
+.availability-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.header-titles {
+  max-width: 640px;
+}
+
+.section-subheading {
+  color: var(--text-sub);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.header-actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.btn-action-primary {
+  background: linear-gradient(135deg, var(--primary), var(--primary-hover));
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  padding: 0.6rem 1.15rem;
+  font-size: 0.86rem;
+  font-weight: 600;
+  font-family: var(--font-heading);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-action-primary:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.btn-action-primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn-action-secondary {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 0.6rem 1.1rem;
+  font-size: 0.86rem;
+  font-weight: 600;
+  font-family: var(--font-heading);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-action-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.alert-box {
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+}
+
+.success-box {
+  border-color: rgba(34, 197, 94, 0.4);
+  color: #4ade80;
+}
+
+.presets-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.presets-label {
+  font-size: 0.8rem;
+  color: var(--text-sub);
+  font-weight: 600;
+}
+
+.preset-pill {
+  background: rgba(76, 134, 255, 0.12);
+  border: 1px solid rgba(76, 134, 255, 0.3);
+  color: var(--accent-cyan);
+  border-radius: 999px;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.preset-pill:hover {
+  background: rgba(76, 134, 255, 0.22);
+}
+
+.grid-wrapper {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 1rem;
+  overflow: auto;
+  max-height: 560px;
+}
+
+.grid {
+  display: grid;
+  gap: 3px;
+  min-width: 520px;
+}
+
+.grid-corner {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  background: var(--bg-card);
+}
+
+.grid-day-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-card);
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-main);
+  padding: 0.4rem 0;
+  font-family: var(--font-heading);
+}
+
+.grid-time-label {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--bg-card);
+  font-size: 0.7rem;
+  color: var(--text-sub);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 0.5rem;
+  white-space: nowrap;
+}
+
+.grid-cell {
+  height: 22px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.grid-cell:hover {
+  background: rgba(76, 134, 255, 0.25);
+}
+
+.grid-cell.selected {
+  background: var(--primary);
+  border-color: var(--primary-hover);
+}
+
+.summary-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 1.1rem 1.25rem;
+}
+
+.summary-card h4 {
+  font-size: 0.9rem;
+  color: var(--accent-cyan);
+  margin-bottom: 0.6rem;
+}
+
+.summary-empty {
+  font-size: 0.85rem;
+  color: var(--text-sub);
+}
+
+.summary-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--text-sub);
+}
+
+.summary-list strong {
+  color: var(--text-main);
+}
+
+@media (max-width: 768px) {
+  .availability-page-wrapper {
+    padding: 1rem;
+  }
+}
+</style>

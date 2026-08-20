@@ -20,6 +20,8 @@ import { PageFollowerService } from './services/pageFollowerService.js';
 import { WhatsappWebhookService } from './services/whatsappWebhookService.js';
 import { WhatsappMessageService } from './services/whatsappMessageService.js';
 import { WhatsappBotService } from './services/whatsappBotService.js';
+import { WhatsappBotStepService } from './services/whatsappBotStepService.js';
+import { AdvisorAvailabilityService } from './services/advisorAvailabilityService.js';
 import { signToken, requireAuth, requirePermission } from './middleware/auth.js';
 import { uploadProjectUpdateAttachment, uploadDir } from './middleware/upload.js';
 
@@ -67,8 +69,10 @@ const pageInteractionService = new PageInteractionService();
 const pageMessageService = new PageMessageService();
 const pageFollowerService = new PageFollowerService();
 const whatsappMessageService = new WhatsappMessageService();
-const whatsappBotService = new WhatsappBotService({ ollamaService, emailService, leadService, whatsappMessageService });
+const whatsappBotStepService = new WhatsappBotStepService();
+const whatsappBotService = new WhatsappBotService({ ollamaService, emailService, leadService, whatsappMessageService, stepService: whatsappBotStepService });
 const whatsappWebhookService = new WhatsappWebhookService({ botService: whatsappBotService });
+const advisorAvailabilityService = new AdvisorAvailabilityService();
 
 // Historial en memoria de evaluaciones recientes
 const evaluationHistory = [];
@@ -131,6 +135,31 @@ app.get('/api/auth/me', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('❌ Error al obtener el usuario actual:', error);
     res.status(500).json({ error: 'Error al obtener el usuario actual.', details: error.message });
+  }
+});
+
+/**
+ * Horario semanal de disponibilidad para reuniones del usuario autenticado
+ * (cada quien configura únicamente el suyo).
+ */
+app.get('/api/availability/me', requireAuth, async (req, res) => {
+  try {
+    const slots = await advisorAvailabilityService.getByUser(req.user.id);
+    res.json({ slots });
+  } catch (error) {
+    console.error('❌ Error al obtener la disponibilidad:', error);
+    res.status(500).json({ error: 'Error al obtener la disponibilidad.', details: error.message });
+  }
+});
+
+app.put('/api/availability/me', requireAuth, async (req, res) => {
+  try {
+    const slots = Array.isArray(req.body?.slots) ? req.body.slots : [];
+    const saved = await advisorAvailabilityService.replaceForUser(req.user.id, slots);
+    res.json({ slots: saved });
+  } catch (error) {
+    console.error('❌ Error al guardar la disponibilidad:', error);
+    res.status(500).json({ error: 'Error al guardar la disponibilidad.', details: error.message });
   }
 });
 
@@ -656,6 +685,34 @@ app.patch('/api/whatsapp/conversations/:waId/bot', requireAuth, requirePermissio
   } catch (error) {
     console.error('❌ Error al actualizar el estado del bot de WhatsApp:', error);
     res.status(500).json({ error: 'Error al actualizar el estado del bot.', details: error.message });
+  }
+});
+
+/**
+ * Guion editable de las preguntas de TesiBot por WhatsApp (texto, opciones,
+ * orden, activo/inactivo y valor por defecto).
+ */
+app.get('/api/whatsapp/bot-steps', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const steps = await whatsappBotStepService.getAll();
+    res.json({ steps });
+  } catch (error) {
+    console.error('❌ Error al obtener el guion del bot:', error);
+    res.status(500).json({ error: 'Error al obtener el guion del bot.', details: error.message });
+  }
+});
+
+app.put('/api/whatsapp/bot-steps', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const steps = Array.isArray(req.body?.steps) ? req.body.steps : [];
+    if (steps.length === 0) {
+      return res.status(400).json({ error: 'La lista de preguntas no puede estar vacía.' });
+    }
+    const saved = await whatsappBotStepService.saveAll(steps);
+    res.json({ steps: saved });
+  } catch (error) {
+    console.error('❌ Error al guardar el guion del bot:', error);
+    res.status(500).json({ error: 'Error al guardar el guion del bot.', details: error.message });
   }
 });
 

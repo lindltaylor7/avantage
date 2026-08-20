@@ -10,6 +10,8 @@ import RolesView from '../views/RolesView.vue';
 import MetaWebhookTestView from '../views/MetaWebhookTestView.vue';
 import SocialInteractionsView from '../views/SocialInteractionsView.vue';
 import WhatsAppView from '../views/WhatsAppView.vue';
+import AvailabilityView from '../views/AvailabilityView.vue';
+import BotScriptView from '../views/BotScriptView.vue';
 import { isAuthenticated, hasPermission } from '../auth.js';
 
 const router = createRouter({
@@ -25,7 +27,9 @@ const router = createRouter({
     { path: '/admin/roles', name: 'roles', component: RolesView, meta: { requiresAuth: true, permission: 'roles.manage' } },
     { path: '/admin/webhooks', name: 'webhooks', component: MetaWebhookTestView, meta: { requiresAuth: true, permission: 'leads.view' } },
     { path: '/admin/social', name: 'social', component: SocialInteractionsView, meta: { requiresAuth: true, permission: 'leads.view' } },
-    { path: '/admin/whatsapp', name: 'whatsapp', component: WhatsAppView, meta: { requiresAuth: true, permission: 'leads.view' } }
+    { path: '/admin/whatsapp', name: 'whatsapp', component: WhatsAppView, meta: { requiresAuth: true, permission: 'leads.view' } },
+    { path: '/admin/availability', name: 'availability', component: AvailabilityView, meta: { requiresAuth: true } },
+    { path: '/admin/bot-script', name: 'bot-script', component: BotScriptView, meta: { requiresAuth: true, permission: 'leads.view' } }
   ]
 });
 
