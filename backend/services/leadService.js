@@ -86,6 +86,27 @@ export class LeadService {
     return db('leads').where('additional_notes', 'like', `%${text}%`).first();
   }
 
+  async findByPhone(phone) {
+    return db('leads').where({ phone }).first();
+  }
+
+  /**
+   * Registra como lead al primer contacto por WhatsApp de un número nuevo
+   * (si ya existe un lead con ese teléfono, no crea uno duplicado).
+   */
+  async findOrCreateFromWhatsApp({ phone, fullName }) {
+    const existing = await this.findByPhone(phone);
+    if (existing) return existing;
+
+    return this.createLead({
+      fullName: fullName || 'Contacto de WhatsApp',
+      phone,
+      topic: `Consulta por WhatsApp de ${fullName || phone}`,
+      source: 'WhatsApp Directo',
+      status: 'nuevo'
+    });
+  }
+
   async getLeadById(id) {
     return db('leads')
       .select('leads.*', 'projects.id as project_id', 'projects.status as project_status')

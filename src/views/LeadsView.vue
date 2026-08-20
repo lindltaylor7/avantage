@@ -230,6 +230,9 @@
             >
               <div class="card-header-line">
                 <span class="lead-id-tag">#{{ lead.id }}</span>
+                <span v-if="lead.source" class="lead-channel-tag" :title="'Canal: ' + lead.source">
+                  {{ channelIcon(lead.source) }}
+                </span>
                 <span v-if="lead.assigned_to" class="lead-assigned-tag" :title="'Asignado a: ' + lead.assigned_to">
                   👤 {{ lead.assigned_to }}
                 </span>
@@ -1378,6 +1381,23 @@ function getLevelClass(level) {
   return 'level-baja';
 }
 
+const CHANNEL_ICONS = {
+  'Chatbot Web': '🤖',
+  'WhatsApp Directo': '💬',
+  'Facebook Ads': '📘',
+  'Instagram Ads': '📸',
+  'Instagram': '📸',
+  'TikTok': '🎵',
+  'Referido': '🤝',
+  'Presencial': '🏢',
+  'Base Fría': '📞',
+  'Meta Ads': '🅼'
+};
+
+function channelIcon(source) {
+  return CHANNEL_ICONS[source] || '📡';
+}
+
 onMounted(() => {
   fetchAll();
 });
@@ -2064,6 +2084,11 @@ onMounted(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.lead-channel-tag {
+  font-size: 0.78rem;
+  line-height: 1;
 }
 
 .card-lead-name-box {

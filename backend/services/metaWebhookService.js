@@ -107,7 +107,7 @@ export class MetaWebhookService {
       return existing;
     }
 
-    const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${leadgenId}?access_token=${encodeURIComponent(pageAccessToken)}`;
+    const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${leadgenId}?fields=field_data,form_id,platform&access_token=${encodeURIComponent(pageAccessToken)}`;
     const response = await fetch(url);
     const data = await response.json();
 
@@ -121,11 +121,15 @@ export class MetaWebhookService {
       fields[item.name] = item.values?.[0] || '';
     }
 
+    // "platform" indica si el formulario se llenó en Facebook ("fb") o
+    // Instagram ("ig"); sin ese dato, se etiqueta genéricamente como Meta Ads.
+    const source = data.platform === 'ig' ? 'Instagram Ads' : data.platform === 'fb' ? 'Facebook Ads' : 'Meta Ads';
+
     const prospect = await this.leadService.createProspect({
       fullName: fields.full_name || fields.nombre_completo || 'Prospecto de Facebook',
       email: fields.email || fields.correo_electronico || '',
       phone: fields.phone_number || fields.phone || '',
-      source: 'Facebook Ads',
+      source,
       additionalNotes: `${marker} form_id=${data.form_id || 'desconocido'}`
     });
 
