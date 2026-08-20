@@ -36,6 +36,7 @@
         <li>Identificador de verificación: el valor de <code>META_WHATSAPP_VERIFY_TOKEN</code> en tu <code>.env</code> de producción.</li>
         <li>Para responder, necesitas configurar <code>META_WHATSAPP_PHONE_NUMBER_ID</code> y <code>META_WHATSAPP_ACCESS_TOKEN</code> (con permiso <code>whatsapp_business_messaging</code>).</li>
         <li>Solo puedes enviar mensajes de texto libre dentro de las <strong>24 horas</strong> desde el último mensaje del cliente; fuera de esa ventana, WhatsApp exige una plantilla aprobada.</li>
+        <li>Cuando alguien escribe después de tocar "Enviar mensaje" en un anuncio o publicación de Facebook/Instagram, WhatsApp lo indica automáticamente en el mensaje — por eso cada conversación muestra su canal de origen (📘 Facebook, 📸 Instagram o 💬 directo).</li>
       </ul>
     </section>
 
@@ -79,7 +80,12 @@
             <span class="contact-name">{{ c.contact_name || c.wa_id }}</span>
             <span class="contact-preview">{{ c.direction === 'outbound' ? 'Tú: ' : '' }}{{ truncate(c.body, 40) }}</span>
           </span>
-          <span class="contact-time">{{ formatShortTime(c.received_at) }}</span>
+          <span class="contact-side">
+            <span class="channel-badge" :class="channelBadgeClass(c.origin_channel)" :title="c.origin_channel">
+              {{ channelIcon(c.origin_channel) }}
+            </span>
+            <span class="contact-time">{{ formatShortTime(c.received_at) }}</span>
+          </span>
         </button>
       </div>
 
@@ -88,7 +94,16 @@
           <header class="thread-header">
             <strong>{{ selectedContactName }}</strong>
             <span class="thread-phone">{{ selectedWaId }}</span>
+            <span v-if="threadOriginChannel" class="channel-badge" :class="channelBadgeClass(threadOriginChannel)">
+              {{ channelIcon(threadOriginChannel) }} {{ threadOriginChannel }}
+            </span>
           </header>
+
+          <div v-if="threadReferral" class="origin-banner">
+            🎯 Este contacto escribió después de tocar
+            <strong>{{ threadReferral.source_type === 'post' ? 'una publicación' : 'un anuncio' }}</strong>
+            de Meta<span v-if="threadReferral.headline">: "{{ threadReferral.headline }}"</span>.
+          </div>
 
           <div class="thread-messages" ref="threadScrollEl">
             <div
@@ -166,6 +181,21 @@ let pollHandle = null;
 const selectedContactName = computed(() => {
   const conv = conversations.value.find((c) => c.wa_id === selectedWaId.value);
   return conv?.contact_name || selectedWaId.value;
+});
+
+const threadOriginChannel = computed(() => {
+  const conv = conversations.value.find((c) => c.wa_id === selectedWaId.value);
+  return conv?.origin_channel || null;
+});
+
+const threadReferral = computed(() => {
+  const first = thread.value.find((m) => m.direction === 'inbound' && m.referral);
+  if (!first) return null;
+  try {
+    return typeof first.referral === 'string' ? JSON.parse(first.referral) : first.referral;
+  } catch {
+    return null;
+  }
 });
 
 async function fetchConversations() {
@@ -256,6 +286,18 @@ async function fetchAll() {
 function iconFor(type) {
   const icons = { text: '💬', image: '🖼️', video: '🎬', audio: '🎧', document: '📄', location: '📍', sticker: '🩹', button: '🔘', interactive: '🔘' };
   return icons[type] || '📨';
+}
+
+function channelIcon(channel) {
+  const icons = { 'Facebook Ads': '📘', 'Instagram Ads': '📸', 'Anuncio de Meta': '🎯', 'Publicación de Meta': '📝' };
+  return icons[channel] || '💬';
+}
+
+function channelBadgeClass(channel) {
+  if (channel === 'Facebook Ads') return 'channel-fb';
+  if (channel === 'Instagram Ads') return 'channel-ig';
+  if (channel === 'WhatsApp Directo' || !channel) return 'channel-direct';
+  return 'channel-ad';
 }
 
 function statusTick(status) {
@@ -545,12 +587,59 @@ onUnmounted(() => {
   text-overflow: ellipsis;
 }
 
+.contact-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
 .contact-time {
   font-size: 0.68rem;
   color: var(--text-sub);
   opacity: 0.7;
   flex-shrink: 0;
   white-space: nowrap;
+}
+
+.channel-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.channel-fb {
+  background: rgba(24, 119, 242, 0.15);
+  color: #5b9dff;
+}
+
+.channel-ig {
+  background: rgba(225, 48, 108, 0.15);
+  color: #f0578a;
+}
+
+.channel-direct {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-sub);
+}
+
+.channel-ad {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+}
+
+.origin-banner {
+  background: rgba(245, 158, 11, 0.1);
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-sub);
+  font-size: 0.78rem;
+  padding: 0.6rem 1.1rem;
 }
 
 .thread-panel {

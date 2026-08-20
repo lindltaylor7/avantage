@@ -19,6 +19,25 @@ function extractBody(message) {
 }
 
 /**
+ * Detecta el canal de origen de una conversación a partir del objeto
+ * "referral" que WhatsApp incluye en el primer mensaje cuando el cliente
+ * escribió después de tocar un anuncio o publicación de "Enviar mensaje" en
+ * Facebook o Instagram. Sin ese objeto, es un contacto directo/orgánico.
+ * Nota: Meta no manda un campo explícito "fb"/"ig" en el referral, así que
+ * la distinción Facebook/Instagram se infiere del dominio de "source_url".
+ */
+export function detectWhatsappChannel(referral) {
+  if (!referral) return 'WhatsApp Directo';
+
+  const url = (referral.source_url || '').toLowerCase();
+  if (url.includes('instagram.com')) return 'Instagram Ads';
+  if (url.includes('facebook.com') || url.includes('fb.me') || url.includes('l.facebook.com')) return 'Facebook Ads';
+  if (referral.source_type === 'ad') return 'Anuncio de Meta';
+  if (referral.source_type === 'post') return 'Publicación de Meta';
+  return 'Anuncio de Meta';
+}
+
+/**
  * Persistencia y envío de mensajes de WhatsApp Business Platform: guarda los
  * mensajes entrantes recibidos vía webhook y permite responder vía la Graph API.
  */
@@ -34,6 +53,8 @@ export class WhatsappMessageService {
         message_type: message.type,
         body: extractBody(message),
         direction: 'inbound',
+        channel: detectWhatsappChannel(message.referral),
+        referral: message.referral ? JSON.stringify(message.referral) : null,
         raw_payload: JSON.stringify(message),
         received_at: message.timestamp ? new Date(Number(message.timestamp) * 1000) : new Date()
       })
@@ -116,16 +137,21 @@ export class WhatsappMessageService {
   }
 
   /**
-   * Lista de conversaciones (un registro por contacto, con su último mensaje),
-   * para mostrar una bandeja de entrada tipo chat.
+   * Lista de conversaciones (un registro por contacto con su último mensaje),
+   * conservando el canal de origen detectado en el PRIMER mensaje del
+   * contacto (el "referral" solo llega en el mensaje que inició la
+   * conversación, no en los siguientes).
    */
   async getConversations({ limit = 100 } = {}) {
-    const rows = await db('whatsapp_messages').orderBy('received_at', 'desc');
-    const seen = new Map();
+    const rows = await db('whatsapp_messages').orderBy('received_at', 'asc');
+    const map = new Map();
     for (const row of rows) {
-      if (!seen.has(row.wa_id)) seen.set(row.wa_id, row);
+      const originChannel = map.get(row.wa_id)?.origin_channel ?? row.channel;
+      map.set(row.wa_id, { ...row, origin_channel: originChannel });
     }
-    return [...seen.values()].slice(0, limit);
+    return [...map.values()]
+      .sort((a, b) => new Date(b.received_at) - new Date(a.received_at))
+      .slice(0, limit);
   }
 
   /**

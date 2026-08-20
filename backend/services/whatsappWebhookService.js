@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { WhatsappMessageService } from './whatsappMessageService.js';
+import { WhatsappMessageService, detectWhatsappChannel } from './whatsappMessageService.js';
 import { LeadService } from './leadService.js';
 
 const MAX_RECENT_EVENTS = 50;
@@ -78,7 +78,11 @@ export class WhatsappWebhookService {
           await this.messageService.createFromMessage(value, message);
 
           const contact = (value.contacts || []).find((c) => c.wa_id === message.from);
-          await this.leadService.findOrCreateFromWhatsApp({ phone: message.from, fullName: contact?.profile?.name });
+          await this.leadService.findOrCreateFromWhatsApp({
+            phone: message.from,
+            fullName: contact?.profile?.name,
+            source: detectWhatsappChannel(message.referral)
+          });
         } catch (error) {
           console.error(`❌ [WhatsApp Webhook] Error al guardar el mensaje ${message.id}:`, error);
         }

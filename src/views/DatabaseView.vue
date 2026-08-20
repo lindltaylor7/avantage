@@ -91,7 +91,6 @@
         <thead>
           <tr>
             <th class="th-name">NOMBRE / TELÉFONO</th>
-            <th class="th-channel">CANAL</th>
             <th class="th-assigned">ASIGNADO A</th>
             <th class="th-date">FECHA DE REGISTRO</th>
             <th class="th-options">OPCIONES</th>
@@ -107,13 +106,6 @@
               <div class="client-phone-text">
                 {{ formatDisplayPhone(lead.phone) }}
               </div>
-            </td>
-
-            <!-- CANAL DE ORIGEN -->
-            <td class="td-channel">
-              <span class="channel-pill" :title="lead.source || 'Sin canal'">
-                {{ channelIcon(lead.source) }} {{ lead.source || 'Sin canal' }}
-              </span>
             </td>
 
             <!-- ASIGNADO A -->
@@ -184,7 +176,7 @@
 
           <!-- Estado Vacío -->
           <tr v-if="filteredLeads.length === 0 && !isLoading">
-            <td colspan="5" class="empty-table-cell">
+            <td colspan="4" class="empty-table-cell">
               <div class="empty-table-state">
                 <span class="empty-icon">📭</span>
                 <p>No se encontraron prospectos que coincidan con la búsqueda o fecha seleccionada.</p>
@@ -890,23 +882,6 @@ function formatDisplayPhone(phone) {
   return phone;
 }
 
-const CHANNEL_ICONS = {
-  'Chatbot Web': '🤖',
-  'WhatsApp Directo': '💬',
-  'Facebook Ads': '📘',
-  'Instagram Ads': '📸',
-  'Instagram': '📸',
-  'TikTok': '🎵',
-  'Referido': '🤝',
-  'Presencial': '🏢',
-  'Base Fría': '📞',
-  'Meta Ads': '🅼'
-};
-
-function channelIcon(source) {
-  return CHANNEL_ICONS[source] || '📡';
-}
-
 function formatTableDate(dateStr) {
   if (!dateStr) return '—';
   const d = new Date(dateStr);
@@ -1179,11 +1154,10 @@ onMounted(() => {
   font-family: var(--font-heading);
 }
 
-.th-name { width: 32%; }
-.th-channel { width: 18%; }
-.th-assigned { width: 16%; }
-.th-date { width: 18%; }
-.th-options { width: 16%; text-align: right; }
+.th-name { width: 42%; }
+.th-assigned { width: 20%; }
+.th-date { width: 20%; }
+.th-options { width: 18%; text-align: right; }
 
 .lead-table-row {
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
@@ -1219,23 +1193,6 @@ onMounted(() => {
   font-size: 0.85rem;
   color: var(--text-main);
   font-weight: 500;
-}
-
-.channel-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--accent-cyan);
-  background: rgba(76, 134, 255, 0.12);
-  border: 1px solid rgba(76, 134, 255, 0.25);
-  padding: 0.2rem 0.55rem;
-  border-radius: 999px;
-  white-space: nowrap;
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .date-text {

@@ -94,7 +94,7 @@ export class LeadService {
    * Registra como lead al primer contacto por WhatsApp de un número nuevo
    * (si ya existe un lead con ese teléfono, no crea uno duplicado).
    */
-  async findOrCreateFromWhatsApp({ phone, fullName }) {
+  async findOrCreateFromWhatsApp({ phone, fullName, source }) {
     const existing = await this.findByPhone(phone);
     if (existing) return existing;
 
@@ -102,7 +102,7 @@ export class LeadService {
       fullName: fullName || 'Contacto de WhatsApp',
       phone,
       topic: `Consulta por WhatsApp de ${fullName || phone}`,
-      source: 'WhatsApp Directo',
+      source: source || 'WhatsApp Directo',
       status: 'nuevo'
     });
   }
