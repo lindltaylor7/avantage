@@ -558,6 +558,52 @@ app.get('/api/whatsapp/messages', requireAuth, requirePermission('leads.view'), 
 });
 
 /**
+ * Bandeja de conversaciones de WhatsApp: un registro por contacto con su
+ * último mensaje.
+ */
+app.get('/api/whatsapp/conversations', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const conversations = await whatsappMessageService.getConversations({ limit: 100 });
+    res.json({ conversations });
+  } catch (error) {
+    console.error('❌ Error al obtener las conversaciones de WhatsApp:', error);
+    res.status(500).json({ error: 'Error al obtener las conversaciones de WhatsApp.', details: error.message });
+  }
+});
+
+/**
+ * Hilo completo (entrantes + salientes) de un contacto de WhatsApp.
+ */
+app.get('/api/whatsapp/conversations/:waId/messages', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const thread = await whatsappMessageService.getThread(req.params.waId, { limit: 200 });
+    res.json({ messages: thread });
+  } catch (error) {
+    console.error('❌ Error al obtener el hilo de WhatsApp:', error);
+    res.status(500).json({ error: 'Error al obtener el hilo de WhatsApp.', details: error.message });
+  }
+});
+
+/**
+ * Responde a un contacto de WhatsApp (mensaje de texto libre). Solo funciona
+ * dentro de la ventana de 24h desde su último mensaje; fuera de ella, WhatsApp
+ * exige una plantilla aprobada.
+ */
+app.post('/api/whatsapp/conversations/:waId/messages', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const body = (req.body?.body || '').trim();
+    if (!body) {
+      return res.status(400).json({ error: 'El mensaje no puede estar vacío.' });
+    }
+    const message = await whatsappMessageService.sendTextMessage(req.params.waId, body);
+    res.status(201).json({ message });
+  } catch (error) {
+    console.error('❌ Error al enviar el mensaje de WhatsApp:', error);
+    res.status(502).json({ error: 'No se pudo enviar el mensaje de WhatsApp.', details: error.message });
+  }
+});
+
+/**
  * Listado de columnas (etapas) del Kanban de Leads, ordenadas por posición.
  */
 app.get('/api/funnel-columns', requireAuth, requirePermission('leads.view'), async (req, res) => {

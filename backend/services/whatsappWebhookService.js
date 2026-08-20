@@ -63,7 +63,7 @@ export class WhatsappWebhookService {
 
   /**
    * Procesa una entrada ("entry") del payload: guarda cada mensaje entrante y
-   * cuenta las actualizaciones de estado recibidas (no se persisten).
+   * actualiza el estado (enviado/entregado/leído/fallido) de los salientes.
    */
   async handleEntry(entry) {
     const changes = entry?.changes || [];
@@ -81,6 +81,11 @@ export class WhatsappWebhookService {
 
       for (const status of value.statuses || []) {
         console.log(`📶 [WhatsApp Webhook] Actualización de estado: mensaje ${status.id} → ${status.status}`);
+        try {
+          await this.messageService.updateStatus(status.id, status.status);
+        } catch (error) {
+          console.error(`❌ [WhatsApp Webhook] Error al actualizar el estado del mensaje ${status.id}:`, error);
+        }
       }
     }
   }
