@@ -16,6 +16,8 @@ import { ProjectUpdateService } from './services/projectUpdateService.js';
 import { MetaWebhookService } from './services/metaWebhookService.js';
 import { PageInteractionService } from './services/pageInteractionService.js';
 import { PageFollowerService } from './services/pageFollowerService.js';
+import { WhatsappWebhookService } from './services/whatsappWebhookService.js';
+import { WhatsappMessageService } from './services/whatsappMessageService.js';
 import { signToken, requireAuth, requirePermission } from './middleware/auth.js';
 import { uploadProjectUpdateAttachment, uploadDir } from './middleware/upload.js';
 
@@ -61,6 +63,8 @@ const projectUpdateService = new ProjectUpdateService();
 const metaWebhookService = new MetaWebhookService();
 const pageInteractionService = new PageInteractionService();
 const pageFollowerService = new PageFollowerService();
+const whatsappWebhookService = new WhatsappWebhookService();
+const whatsappMessageService = new WhatsappMessageService();
 
 // Historial en memoria de evaluaciones recientes
 const evaluationHistory = [];
@@ -469,6 +473,87 @@ app.post('/api/social-followers/poll', requireAuth, requirePermission('leads.vie
   } catch (error) {
     console.error('❌ Error al sondear el conteo de seguidores:', error);
     res.status(502).json({ error: 'No se pudo sondear el conteo de seguidores.', details: error.message });
+  }
+});
+
+/**
+ * Verificación del webhook de WhatsApp Business Platform (mismo mecanismo que
+ * el de Page/Lead Ads, pero con su propio verify token y URL de callback,
+ * configurados por separado en el producto "WhatsApp" de la app de Meta).
+ */
+app.get('/api/webhooks/whatsapp', (req, res) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+
+  if (whatsappWebhookService.verifyChallenge(mode, token)) {
+    console.log('✅ [WhatsApp Webhook] Verificación de suscripción exitosa.');
+    return res.status(200).send(challenge);
+  }
+
+  console.warn('⚠️ [WhatsApp Webhook] Verificación de suscripción fallida (token o modo inválido).');
+  res.sendStatus(403);
+});
+
+/**
+ * Recepción de eventos del webhook de WhatsApp: mensajes entrantes y
+ * actualizaciones de estado de mensajes enviados.
+ */
+app.post('/api/webhooks/whatsapp', (req, res) => {
+  const signature = req.headers['x-hub-signature-256'];
+  const hasSecret = !!process.env.META_APP_SECRET;
+  const signatureValid = hasSecret ? whatsappWebhookService.verifySignature(req.rawBody, signature) : null;
+
+  const fields = (req.body?.entry || []).flatMap((e) => (e.changes || []).map((c) => c.field));
+  console.log(`📩 [WhatsApp Webhook] POST recibido. object=${req.body?.object} campos=[${fields.join(', ')}] firma=${hasSecret ? (signatureValid ? 'válida' : 'inválida') : 'sin verificar'}`);
+
+  whatsappWebhookService.recordEvent({ body: req.body, signatureValid, hasSecret });
+
+  if (hasSecret && !signatureValid) {
+    console.warn('⚠️ [WhatsApp Webhook] Firma de la solicitud inválida, se rechaza el evento.');
+    return res.sendStatus(403);
+  }
+
+  res.sendStatus(200);
+
+  const body = req.body || {};
+  if (body.object !== 'whatsapp_business_account') return;
+
+  Promise.all((body.entry || []).map((entry) => whatsappWebhookService.handleEntry(entry))).catch((error) => {
+    console.error('❌ [WhatsApp Webhook] Error al procesar el evento del webhook:', error);
+  });
+});
+
+/**
+ * Últimos eventos crudos recibidos en el webhook de WhatsApp, para verificar
+ * en la UI que la suscripción está realmente conectada.
+ */
+app.get('/api/webhooks/whatsapp/events', requireAuth, requirePermission('leads.view'), (req, res) => {
+  res.json({ events: whatsappWebhookService.getRecentEvents() });
+});
+
+/**
+ * Limpia el historial de eventos de prueba del webhook de WhatsApp.
+ */
+app.delete('/api/webhooks/whatsapp/events', requireAuth, requirePermission('leads.view'), (req, res) => {
+  whatsappWebhookService.clearRecentEvents();
+  res.json({ success: true });
+});
+
+/**
+ * Listado de mensajes de WhatsApp recibidos y persistidos en la base de datos.
+ */
+app.get('/api/whatsapp/messages', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const [messages, stats] = await Promise.all([
+      whatsappMessageService.getRecent({ limit }),
+      whatsappMessageService.getStats()
+    ]);
+    res.json({ messages, stats });
+  } catch (error) {
+    console.error('❌ Error al obtener los mensajes de WhatsApp:', error);
+    res.status(500).json({ error: 'Error al obtener los mensajes de WhatsApp.', details: error.message });
   }
 });
 
