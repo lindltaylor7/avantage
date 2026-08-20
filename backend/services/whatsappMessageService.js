@@ -43,16 +43,20 @@ export function detectWhatsappChannel(referral) {
  */
 export class WhatsappMessageService {
   async createFromMessage(value, message) {
-    if (!message.from) {
-      console.error('❌ [WhatsApp] Mensaje sin remitente ("from"), se descarta:', JSON.stringify(message));
+    // Normalmente el remitente viene en "from" (teléfono). Algunos mensajes
+    // (p. ej. contactos vinculados por Instagram que no comparten su número)
+    // en cambio traen "from_user_id" con un identificador tipo "PE.xxxxx".
+    const senderId = message.from || message.from_user_id;
+    if (!senderId) {
+      console.error('❌ [WhatsApp] Mensaje sin remitente identificable, se descarta:', JSON.stringify(message));
       return null;
     }
 
-    const contact = (value.contacts || []).find((c) => c.wa_id === message.from);
+    const contact = (value.contacts || []).find((c) => (c.wa_id || c.user_id) === senderId);
 
     const [id] = await db('whatsapp_messages')
       .insert({
-        wa_id: message.from,
+        wa_id: senderId,
         contact_name: contact?.profile?.name || null,
         message_id: message.id,
         message_type: message.type,

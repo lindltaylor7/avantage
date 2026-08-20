@@ -74,17 +74,24 @@ export class WhatsappWebhookService {
       const value = change.value || {};
 
       for (const message of value.messages || []) {
-        if (!message.from) continue;
+        const senderId = message.from || message.from_user_id;
+        if (!senderId) continue;
 
         try {
           await this.messageService.createFromMessage(value, message);
 
-          const contact = (value.contacts || []).find((c) => c.wa_id === message.from);
-          await this.leadService.findOrCreateFromWhatsApp({
-            phone: message.from,
-            fullName: contact?.profile?.name,
-            source: detectWhatsappChannel(message.referral)
-          });
+          // Solo se crea el lead en el CRM cuando el remitente compartió un
+          // número real ("from"); los contactos identificados solo por
+          // "from_user_id" (p. ej. vinculados por Instagram) no tienen un
+          // teléfono utilizable para el campo "phone" del lead.
+          if (message.from) {
+            const contact = (value.contacts || []).find((c) => c.wa_id === message.from);
+            await this.leadService.findOrCreateFromWhatsApp({
+              phone: message.from,
+              fullName: contact?.profile?.name,
+              source: detectWhatsappChannel(message.referral)
+            });
+          }
         } catch (error) {
           console.error(`❌ [WhatsApp Webhook] Error al guardar el mensaje ${message.id}:`, error);
         }
