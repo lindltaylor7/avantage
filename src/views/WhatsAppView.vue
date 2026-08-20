@@ -97,6 +97,13 @@
             <span v-if="threadOriginChannel" class="channel-badge" :class="channelBadgeClass(threadOriginChannel)">
               {{ channelIcon(threadOriginChannel) }} {{ threadOriginChannel }}
             </span>
+            <span class="bot-status-spacer"></span>
+            <span v-if="botSession" class="bot-status" :title="botStatusHint">
+              {{ botStatusIcon }} {{ botStatusLabel }}
+            </span>
+            <button type="button" class="btn-bot-toggle" @click="toggleBot">
+              {{ botSession?.bot_enabled ? '⏸️ Pausar bot' : '▶️ Activar bot' }}
+            </button>
           </header>
 
           <div v-if="threadReferral" class="origin-banner">
@@ -176,6 +183,7 @@ const thread = ref([]);
 const replyText = ref('');
 const isSending = ref(false);
 const threadScrollEl = ref(null);
+const botSession = ref(null);
 
 let pollHandle = null;
 
@@ -197,6 +205,34 @@ const threadReferral = computed(() => {
   } catch {
     return null;
   }
+});
+
+const BOT_STEP_LABELS = {
+  1: 'esperando el tema de tesis',
+  2: 'esperando el ámbito/ubicación',
+  3: 'esperando nivel académico',
+  4: 'esperando la carrera',
+  5: 'esperando el correo'
+};
+
+const botStatusIcon = computed(() => {
+  if (!botSession.value) return '';
+  if (botSession.value.status === 'completed') return '✅';
+  return botSession.value.bot_enabled ? '🤖' : '⏸️';
+});
+
+const botStatusLabel = computed(() => {
+  if (!botSession.value) return '';
+  if (botSession.value.status === 'completed') return 'TesiBot completado';
+  if (!botSession.value.bot_enabled) return 'Bot pausado';
+  return `TesiBot: ${BOT_STEP_LABELS[botSession.value.step] || 'en curso'}`;
+});
+
+const botStatusHint = computed(() => {
+  if (!botSession.value) return '';
+  return botSession.value.status === 'completed'
+    ? 'El contacto ya completó el flujo automático y se registró como lead.'
+    : 'TesiBot está conversando automáticamente con este contacto.';
 });
 
 async function fetchConversations() {
@@ -236,10 +272,39 @@ async function fetchThread(waId, { scrollToBottom = false } = {}) {
   }
 }
 
+async function fetchBotSession(waId) {
+  try {
+    const response = await apiFetch(`/api/whatsapp/conversations/${encodeURIComponent(waId)}/bot`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Error al obtener el estado del bot.');
+    botSession.value = data.session;
+  } catch (error) {
+    errorMessage.value = error.message;
+  }
+}
+
+async function toggleBot() {
+  if (!selectedWaId.value) return;
+  const nextEnabled = !(botSession.value?.bot_enabled ?? false);
+  try {
+    const response = await apiFetch(`/api/whatsapp/conversations/${encodeURIComponent(selectedWaId.value)}/bot`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: nextEnabled })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No se pudo cambiar el estado del bot.');
+    botSession.value = data.session;
+  } catch (error) {
+    errorMessage.value = error.message;
+  }
+}
+
 function selectConversation(waId) {
   if (!waId) return;
   selectedWaId.value = waId;
   fetchThread(waId, { scrollToBottom: true });
+  fetchBotSession(waId);
 }
 
 async function sendReply() {
@@ -257,7 +322,11 @@ async function sendReply() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.details || data.error || 'No se pudo enviar el mensaje.');
     replyText.value = '';
-    await Promise.all([fetchThread(selectedWaId.value, { scrollToBottom: true }), fetchConversations()]);
+    await Promise.all([
+      fetchThread(selectedWaId.value, { scrollToBottom: true }),
+      fetchConversations(),
+      fetchBotSession(selectedWaId.value)
+    ]);
   } catch (error) {
     errorMessage.value = error.message;
   } finally {
@@ -280,7 +349,7 @@ async function fetchAll() {
   isLoading.value = true;
   errorMessage.value = '';
   const tasks = [fetchConversations(), fetchStats(), fetchRawEvents()];
-  if (selectedWaId.value) tasks.push(fetchThread(selectedWaId.value));
+  if (selectedWaId.value) tasks.push(fetchThread(selectedWaId.value), fetchBotSession(selectedWaId.value));
   await Promise.all(tasks);
   isLoading.value = false;
 }
@@ -659,8 +728,39 @@ onUnmounted(() => {
   padding: 0.9rem 1.1rem;
   border-bottom: 1px solid var(--border-color);
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.bot-status-spacer {
+  flex: 1;
+}
+
+.bot-status {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--accent-cyan);
+  background: rgba(76, 134, 255, 0.12);
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  white-space: nowrap;
+}
+
+.btn-bot-toggle {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-bot-toggle:hover {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .thread-phone {

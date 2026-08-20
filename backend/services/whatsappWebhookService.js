@@ -10,9 +10,10 @@ const MAX_RECENT_EVENTS = 50;
  * enviados (entregado/leído/fallido).
  */
 export class WhatsappWebhookService {
-  constructor() {
+  constructor({ botService } = {}) {
     this.messageService = new WhatsappMessageService();
     this.leadService = new LeadService();
+    this.botService = botService || null;
     this.recentEvents = [];
   }
 
@@ -78,7 +79,7 @@ export class WhatsappWebhookService {
         if (!senderId) continue;
 
         try {
-          await this.messageService.createFromMessage(value, message);
+          const { isNew } = await this.messageService.createFromMessage(value, message);
 
           // Solo se crea el lead en el CRM cuando el remitente compartió un
           // número real ("from"); los contactos identificados solo por
@@ -91,6 +92,15 @@ export class WhatsappWebhookService {
               fullName: contact?.profile?.name,
               source: detectWhatsappChannel(message.referral)
             });
+
+            // El bot de TesiBot solo conversa con contactos identificados por
+            // un número real (no BSUID), solo ante mensajes de texto, y solo
+            // si el mensaje es realmente nuevo (Meta puede reenviar el mismo
+            // evento por reintentos; sin este chequeo el bot procesaría el
+            // mismo mensaje dos veces y duplicaría preguntas).
+            if (isNew && this.botService && message.type === 'text' && message.text?.body) {
+              await this.botService.handleIncomingMessage(message.from, message.text.body);
+            }
           }
         } catch (error) {
           console.error(`❌ [WhatsApp Webhook] Error al guardar el mensaje ${message.id}:`, error);

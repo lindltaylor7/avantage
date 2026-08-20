@@ -70,8 +70,11 @@ export class WhatsappMessageService {
       .onConflict('message_id')
       .ignore();
 
-    if (!id) return this.getByMessageId(message.id);
-    return this.getById(id);
+    // "isNew" indica si esta llamada realmente insertó el mensaje o si ya
+    // existía (Meta reenvía el mismo evento de webhook por reintentos) — el
+    // llamador lo usa para no procesar dos veces el mismo mensaje en el bot.
+    if (!id) return { record: await this.getByMessageId(message.id), isNew: false };
+    return { record: await this.getById(id), isNew: true };
   }
 
   /**

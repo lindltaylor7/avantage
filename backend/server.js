@@ -19,6 +19,7 @@ import { PageMessageService } from './services/pageMessageService.js';
 import { PageFollowerService } from './services/pageFollowerService.js';
 import { WhatsappWebhookService } from './services/whatsappWebhookService.js';
 import { WhatsappMessageService } from './services/whatsappMessageService.js';
+import { WhatsappBotService } from './services/whatsappBotService.js';
 import { signToken, requireAuth, requirePermission } from './middleware/auth.js';
 import { uploadProjectUpdateAttachment, uploadDir } from './middleware/upload.js';
 
@@ -65,8 +66,9 @@ const metaWebhookService = new MetaWebhookService();
 const pageInteractionService = new PageInteractionService();
 const pageMessageService = new PageMessageService();
 const pageFollowerService = new PageFollowerService();
-const whatsappWebhookService = new WhatsappWebhookService();
 const whatsappMessageService = new WhatsappMessageService();
+const whatsappBotService = new WhatsappBotService({ ollamaService, emailService, leadService, whatsappMessageService });
+const whatsappWebhookService = new WhatsappWebhookService({ botService: whatsappBotService });
 
 // Historial en memoria de evaluaciones recientes
 const evaluationHistory = [];
@@ -615,10 +617,45 @@ app.post('/api/whatsapp/conversations/:waId/messages', requireAuth, requirePermi
       return res.status(400).json({ error: 'El mensaje no puede estar vacío.' });
     }
     const message = await whatsappMessageService.sendTextMessage(req.params.waId, body);
+
+    // Si un asesor responde manualmente, se pausa TesiBot para esa
+    // conversación (evita que el bot automático interrumpa a un humano
+    // que ya está atendiendo al contacto).
+    await whatsappBotService.setBotEnabled(req.params.waId, false);
+
     res.status(201).json({ message });
   } catch (error) {
     console.error('❌ Error al enviar el mensaje de WhatsApp:', error);
     res.status(502).json({ error: 'No se pudo enviar el mensaje de WhatsApp.', details: error.message });
+  }
+});
+
+/**
+ * Estado del flujo automático de TesiBot para una conversación (paso actual,
+ * si terminó, si está activo).
+ */
+app.get('/api/whatsapp/conversations/:waId/bot', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const session = await whatsappBotService.getSession(req.params.waId);
+    res.json({ session: session || null });
+  } catch (error) {
+    console.error('❌ Error al obtener el estado del bot de WhatsApp:', error);
+    res.status(500).json({ error: 'Error al obtener el estado del bot.', details: error.message });
+  }
+});
+
+/**
+ * Activa o pausa manualmente el bot de TesiBot para una conversación.
+ */
+app.patch('/api/whatsapp/conversations/:waId/bot', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const enabled = !!req.body?.enabled;
+    await whatsappBotService.setBotEnabled(req.params.waId, enabled);
+    const session = await whatsappBotService.getSession(req.params.waId);
+    res.json({ session });
+  } catch (error) {
+    console.error('❌ Error al actualizar el estado del bot de WhatsApp:', error);
+    res.status(500).json({ error: 'Error al actualizar el estado del bot.', details: error.message });
   }
 });
 

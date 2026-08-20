@@ -152,6 +152,8 @@ export class LeadService {
     }
     if (data.source !== undefined) updatePayload.source = data.source;
     if (data.status !== undefined) updatePayload.status = data.status;
+    if (data.overallViabilityScore !== undefined) updatePayload.overall_viability_score = data.overallViabilityScore;
+    if (data.viabilityLevel !== undefined) updatePayload.viability_level = data.viabilityLevel;
     if (data.additionalNotes !== undefined || data.additional_notes !== undefined) {
       updatePayload.additional_notes = data.additionalNotes !== undefined ? data.additionalNotes : data.additional_notes;
     }
