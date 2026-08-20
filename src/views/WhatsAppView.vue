@@ -115,8 +115,9 @@
               <p class="bubble-text">{{ msg.body }}</p>
               <span class="bubble-meta">
                 {{ formatShortTime(msg.received_at) }}
-                <span v-if="msg.direction === 'outbound'">{{ statusTick(msg.status) }}</span>
+                <span v-if="msg.direction === 'outbound'" :title="msg.status_error || ''">{{ statusTick(msg.status) }}</span>
               </span>
+              <p v-if="msg.status === 'failed' && msg.status_error" class="bubble-error">⚠️ {{ msg.status_error }}</p>
             </div>
           </div>
 
@@ -708,6 +709,16 @@ onUnmounted(() => {
   opacity: 0.75;
   margin-top: 0.25rem;
   text-align: right;
+}
+
+.bubble-error {
+  font-size: 0.72rem;
+  color: #fde68a;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 6px;
+  padding: 0.3rem 0.5rem;
+  margin-top: 0.3rem;
+  overflow-wrap: break-word;
 }
 
 .reply-box {

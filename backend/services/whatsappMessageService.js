@@ -127,10 +127,11 @@ export class WhatsappMessageService {
 
   /**
    * Actualiza el estado (sent/delivered/read/failed) de un mensaje saliente a
-   * partir de las actualizaciones de estado recibidas por webhook.
+   * partir de las actualizaciones de estado recibidas por webhook, guardando
+   * el motivo del fallo si WhatsApp lo reporta.
    */
-  async updateStatus(messageId, status) {
-    await db('whatsapp_messages').where({ message_id: messageId }).update({ status });
+  async updateStatus(messageId, status, statusError = null) {
+    await db('whatsapp_messages').where({ message_id: messageId }).update({ status, status_error: statusError });
   }
 
   async getById(id) {

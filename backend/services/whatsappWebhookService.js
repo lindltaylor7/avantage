@@ -98,9 +98,13 @@ export class WhatsappWebhookService {
       }
 
       for (const status of value.statuses || []) {
-        console.log(`📶 [WhatsApp Webhook] Actualización de estado: mensaje ${status.id} → ${status.status}`);
+        const statusError = (status.errors || [])
+          .map((e) => `[${e.code}] ${e.title}${e.error_data?.details ? `: ${e.error_data.details}` : ''}`)
+          .join(' | ') || null;
+
+        console.log(`📶 [WhatsApp Webhook] Actualización de estado: mensaje ${status.id} → ${status.status}${statusError ? ` (${statusError})` : ''}`);
         try {
-          await this.messageService.updateStatus(status.id, status.status);
+          await this.messageService.updateStatus(status.id, status.status, statusError);
         } catch (error) {
           console.error(`❌ [WhatsApp Webhook] Error al actualizar el estado del mensaje ${status.id}:`, error);
         }
