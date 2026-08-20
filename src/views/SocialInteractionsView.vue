@@ -96,7 +96,8 @@
 
     <section v-else class="interactions-list">
       <article v-for="item in interactions" :key="item.id" class="interaction-card">
-        <div class="interaction-icon">{{ iconFor(item.item_type) }}</div>
+        <img v-if="item.post_picture_url" :src="item.post_picture_url" alt="" class="interaction-thumb" />
+        <div v-else class="interaction-icon">{{ iconFor(item.item_type) }}</div>
         <div class="interaction-body">
           <div class="interaction-top">
             <span class="interaction-type">{{ labelFor(item.item_type) }}</span>
@@ -105,9 +106,11 @@
           <p v-if="item.sender_name" class="interaction-sender">{{ item.sender_name }}</p>
           <p v-if="item.message" class="interaction-message">"{{ item.message }}"</p>
           <p v-if="item.reaction_type" class="interaction-reaction">Reacción: {{ item.reaction_type }}</p>
+          <p v-if="item.post_message" class="interaction-post-preview">📝 {{ truncate(item.post_message, 140) }}</p>
           <p class="interaction-refs">
             <span v-if="item.post_id">Post: {{ item.post_id }}</span>
             <span v-if="item.page_id"> · Página: {{ item.page_id }}</span>
+            <a v-if="item.post_permalink_url" :href="item.post_permalink_url" target="_blank" rel="noopener noreferrer" class="interaction-link">Ver en Facebook ↗</a>
           </p>
         </div>
       </article>
@@ -202,6 +205,11 @@ function formatTime(isoString) {
     day: '2-digit', month: '2-digit', year: 'numeric',
     hour: '2-digit', minute: '2-digit'
   });
+}
+
+function truncate(text, maxLength) {
+  if (!text) return '';
+  return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
 }
 
 onMounted(fetchAll);
@@ -445,6 +453,15 @@ onMounted(fetchAll);
   flex-shrink: 0;
 }
 
+.interaction-thumb {
+  width: 56px;
+  height: 56px;
+  border-radius: 10px;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 1px solid var(--border-color);
+}
+
 .interaction-body {
   flex: 1;
   min-width: 0;
@@ -487,11 +504,34 @@ onMounted(fetchAll);
   margin-top: 0.2rem;
 }
 
+.interaction-post-preview {
+  font-size: 0.78rem;
+  color: var(--text-sub);
+  opacity: 0.85;
+  margin-top: 0.3rem;
+  overflow-wrap: break-word;
+}
+
 .interaction-refs {
   font-size: 0.72rem;
   color: var(--text-sub);
   opacity: 0.7;
   margin-top: 0.35rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.interaction-link {
+  color: var(--accent-cyan);
+  text-decoration: none;
+  opacity: 1;
+  font-weight: 600;
+}
+
+.interaction-link:hover {
+  text-decoration: underline;
 }
 
 @media (max-width: 768px) {
