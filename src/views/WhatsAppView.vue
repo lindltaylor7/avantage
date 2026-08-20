@@ -236,6 +236,7 @@ async function fetchThread(waId, { scrollToBottom = false } = {}) {
 }
 
 function selectConversation(waId) {
+  if (!waId) return;
   selectedWaId.value = waId;
   fetchThread(waId, { scrollToBottom: true });
 }

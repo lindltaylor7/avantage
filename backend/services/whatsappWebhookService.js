@@ -74,6 +74,8 @@ export class WhatsappWebhookService {
       const value = change.value || {};
 
       for (const message of value.messages || []) {
+        if (!message.from) continue;
+
         try {
           await this.messageService.createFromMessage(value, message);
 

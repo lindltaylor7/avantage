@@ -43,6 +43,11 @@ export function detectWhatsappChannel(referral) {
  */
 export class WhatsappMessageService {
   async createFromMessage(value, message) {
+    if (!message.from) {
+      console.error('❌ [WhatsApp] Mensaje sin remitente ("from"), se descarta:', JSON.stringify(message));
+      return null;
+    }
+
     const contact = (value.contacts || []).find((c) => c.wa_id === message.from);
 
     const [id] = await db('whatsapp_messages')
@@ -143,7 +148,7 @@ export class WhatsappMessageService {
    * conversación, no en los siguientes).
    */
   async getConversations({ limit = 100 } = {}) {
-    const rows = await db('whatsapp_messages').orderBy('received_at', 'asc');
+    const rows = await db('whatsapp_messages').whereNotNull('wa_id').where('wa_id', '!=', '').orderBy('received_at', 'asc');
     const map = new Map();
     for (const row of rows) {
       const originChannel = map.get(row.wa_id)?.origin_channel ?? row.channel;
