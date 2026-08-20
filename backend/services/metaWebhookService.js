@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { LeadService } from './leadService.js';
 import { PageInteractionService } from './pageInteractionService.js';
+import { PageMessageService } from './pageMessageService.js';
 
 const GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v21.0';
 
@@ -14,6 +15,7 @@ export class MetaWebhookService {
   constructor() {
     this.leadService = new LeadService();
     this.pageInteractionService = new PageInteractionService();
+    this.pageMessageService = new PageMessageService();
     this.recentEvents = [];
   }
 
@@ -70,8 +72,9 @@ export class MetaWebhookService {
 
   /**
    * Procesa una entrada ("entry") del payload del webhook: importa los leads
-   * del campo "leadgen" y guarda las interacciones (comentarios, reacciones,
-   * publicaciones, compartidos) del campo "feed".
+   * del campo "leadgen", guarda las interacciones (comentarios, reacciones,
+   * publicaciones, compartidos) del campo "feed", y los mensajes directos de
+   * Messenger (formato "messaging", distinto al de "changes").
    */
   async handleEntry(entry) {
     const changes = entry?.changes || [];
@@ -85,6 +88,15 @@ export class MetaWebhookService {
         }
       } catch (error) {
         console.error(`❌ [Meta Webhook] Error al procesar el cambio de campo "${change.field}":`, error);
+      }
+    }
+
+    const messagingEvents = entry?.messaging || [];
+    for (const event of messagingEvents) {
+      try {
+        await this.pageMessageService.createFromMessagingEvent(entry?.id, event);
+      } catch (error) {
+        console.error('❌ [Meta Webhook] Error al procesar un evento de Messenger:', error);
       }
     }
   }

@@ -15,6 +15,7 @@ import { RoleService } from './services/roleService.js';
 import { ProjectUpdateService } from './services/projectUpdateService.js';
 import { MetaWebhookService } from './services/metaWebhookService.js';
 import { PageInteractionService } from './services/pageInteractionService.js';
+import { PageMessageService } from './services/pageMessageService.js';
 import { PageFollowerService } from './services/pageFollowerService.js';
 import { WhatsappWebhookService } from './services/whatsappWebhookService.js';
 import { WhatsappMessageService } from './services/whatsappMessageService.js';
@@ -62,6 +63,7 @@ const roleService = new RoleService();
 const projectUpdateService = new ProjectUpdateService();
 const metaWebhookService = new MetaWebhookService();
 const pageInteractionService = new PageInteractionService();
+const pageMessageService = new PageMessageService();
 const pageFollowerService = new PageFollowerService();
 const whatsappWebhookService = new WhatsappWebhookService();
 const whatsappMessageService = new WhatsappMessageService();
@@ -442,6 +444,23 @@ app.get('/api/social-interactions', requireAuth, requirePermission('leads.view')
   } catch (error) {
     console.error('❌ Error al obtener las interacciones de la página:', error);
     res.status(500).json({ error: 'Error al obtener las interacciones de la página.', details: error.message });
+  }
+});
+
+/**
+ * Mensajes directos (Messenger) recibidos en la bandeja de entrada de la Página.
+ */
+app.get('/api/page-messages', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const [messages, stats] = await Promise.all([
+      pageMessageService.getRecent({ limit }),
+      pageMessageService.getStats()
+    ]);
+    res.json({ messages, stats });
+  } catch (error) {
+    console.error('❌ Error al obtener los mensajes de Messenger:', error);
+    res.status(500).json({ error: 'Error al obtener los mensajes de Messenger.', details: error.message });
   }
 });
 

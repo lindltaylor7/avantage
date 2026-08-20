@@ -115,6 +115,26 @@
         </div>
       </article>
     </section>
+
+    <!-- Mensajes de Messenger -->
+    <h3 class="subsection-title">📩 Mensajes de Messenger ({{ messengerStats.total || 0 }})</h3>
+    <section v-if="!isLoading && messengerMessages.length === 0" class="empty-state">
+      <span class="empty-icon">📭</span>
+      <p>Aún no se ha recibido ningún mensaje directo.</p>
+      <p class="empty-hint">Asegúrate de suscribir el campo "messages" en el webhook de Meta y escribe a la Página desde Messenger.</p>
+    </section>
+    <section v-else class="messenger-list">
+      <article v-for="msg in messengerMessages" :key="msg.id" class="messenger-card">
+        <span class="interaction-icon">💬</span>
+        <div class="interaction-body">
+          <div class="interaction-top">
+            <span class="interaction-sender">{{ msg.sender_name || msg.sender_id }}</span>
+            <span class="interaction-time">{{ formatTime(msg.received_at) }}</span>
+          </div>
+          <p v-if="msg.text" class="interaction-message">"{{ msg.text }}"</p>
+        </div>
+      </article>
+    </section>
   </main>
 </template>
 
@@ -132,6 +152,8 @@ const TYPE_FILTERS = [
 
 const interactions = ref([]);
 const stats = ref({ total: 0, byType: {} });
+const messengerMessages = ref([]);
+const messengerStats = ref({ total: 0, contacts: 0 });
 const followersLatest = ref(null);
 const isLoading = ref(false);
 const isPolling = ref(false);
@@ -167,8 +189,20 @@ async function fetchFollowers() {
   }
 }
 
+async function fetchMessengerMessages() {
+  try {
+    const response = await apiFetch('/api/page-messages?limit=50');
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Error al obtener los mensajes de Messenger.');
+    messengerMessages.value = data.messages || [];
+    messengerStats.value = data.stats || { total: 0, contacts: 0 };
+  } catch (error) {
+    errorMessage.value = error.message;
+  }
+}
+
 async function fetchAll() {
-  await Promise.all([fetchInteractions(), fetchFollowers()]);
+  await Promise.all([fetchInteractions(), fetchFollowers(), fetchMessengerMessages()]);
 }
 
 async function pollFollowersNow() {
@@ -440,6 +474,28 @@ onMounted(fetchAll);
 }
 
 .interaction-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 0.9rem 1.1rem;
+  display: flex;
+  gap: 0.85rem;
+}
+
+.subsection-title {
+  font-family: var(--font-heading);
+  font-size: 1.05rem;
+  color: var(--text-main);
+  margin-top: 0.5rem;
+}
+
+.messenger-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.messenger-card {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: 14px;
