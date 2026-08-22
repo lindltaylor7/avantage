@@ -23,7 +23,9 @@ import { WhatsappBotService } from './services/whatsappBotService.js';
 import { WhatsappBotStepService } from './services/whatsappBotStepService.js';
 import { AdvisorAvailabilityService } from './services/advisorAvailabilityService.js';
 import { InstagramService } from './services/instagramService.js';
+import { InstagramWebhookService } from './services/instagramWebhookService.js';
 import { signToken, requireAuth, requirePermission } from './middleware/auth.js';
+
 import { uploadProjectUpdateAttachment, uploadDir } from './middleware/upload.js';
 
 // Estado del funnel Kanban que marca el fin del proceso comercial: al llegar
@@ -75,8 +77,10 @@ const whatsappBotService = new WhatsappBotService({ ollamaService, emailService,
 const whatsappWebhookService = new WhatsappWebhookService({ botService: whatsappBotService });
 const advisorAvailabilityService = new AdvisorAvailabilityService();
 const instagramService = new InstagramService();
+const instagramWebhookService = new InstagramWebhookService();
 
 // Historial en memoria de evaluaciones recientes
+
 const evaluationHistory = [];
 
 // API Endpoints
@@ -587,6 +591,69 @@ app.get('/api/instagram/stats', requireAuth, requirePermission('leads.view'), as
 });
 
 /**
+ * Verificación del webhook de Instagram (Graph API / Instagram Messaging / Comments).
+ * Meta llama a este endpoint por GET al configurar la suscripción del webhook.
+ */
+app.get('/api/webhooks/instagram', (req, res) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+
+  if (instagramWebhookService.verifyChallenge(mode, token)) {
+    console.log('✅ [Instagram Webhook] Verificación de suscripción exitosa.');
+    return res.status(200).send(challenge);
+  }
+
+  console.warn('⚠️ [Instagram Webhook] Verificación de suscripción fallida (token o modo inválido).');
+  res.sendStatus(403);
+});
+
+/**
+ * Recepción de eventos del webhook de Instagram. Responde 200 inmediatamente
+ * y procesa las entradas en segundo plano.
+ */
+app.post('/api/webhooks/instagram', (req, res) => {
+  const signature = req.headers['x-hub-signature-256'];
+  const hasSecret = !!process.env.META_APP_SECRET;
+  const signatureValid = hasSecret ? instagramWebhookService.verifySignature(req.rawBody, signature) : null;
+
+  const fields = (req.body?.entry || []).flatMap((e) => (e.changes || []).map((c) => c.field));
+  console.log(`📸 [Instagram Webhook] POST recibido. object=${req.body?.object} campos=[${fields.join(', ')}] firma=${hasSecret ? (signatureValid ? 'válida' : 'inválida') : 'sin verificar'}`);
+
+  instagramWebhookService.recordEvent({ body: req.body, signatureValid, hasSecret });
+
+  if (hasSecret && !signatureValid) {
+    console.warn('⚠️ [Instagram Webhook] Firma de la solicitud inválida, se rechaza el evento.');
+    return res.sendStatus(403);
+  }
+
+  res.sendStatus(200);
+
+  const body = req.body || {};
+  if (body.object !== 'instagram' && body.object !== 'page') return;
+
+  Promise.all((body.entry || []).map((entry) => instagramWebhookService.handleEntry(entry))).catch((error) => {
+    console.error('❌ [Instagram Webhook] Error al procesar el evento de Instagram:', error);
+  });
+});
+
+/**
+ * Últimos eventos crudos recibidos en el webhook de Instagram (JSON).
+ */
+app.get('/api/webhooks/instagram/events', requireAuth, requirePermission('leads.view'), (req, res) => {
+  res.json({ events: instagramWebhookService.getRecentEvents() });
+});
+
+/**
+ * Limpia el historial de eventos de prueba de Instagram en la UI.
+ */
+app.delete('/api/webhooks/instagram/events', requireAuth, requirePermission('leads.view'), (req, res) => {
+  instagramWebhookService.clearRecentEvents();
+  res.json({ success: true });
+});
+
+/**
+
  * Verificación del webhook de WhatsApp Business Platform (mismo mecanismo que
  * el de Page/Lead Ads, pero con su propio verify token y URL de callback,
  * configurados por separado en el producto "WhatsApp" de la app de Meta).

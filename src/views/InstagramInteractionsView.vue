@@ -21,6 +21,19 @@
 
     <p v-if="errorMessage" class="info-box alert-box">⚠️ {{ errorMessage }}</p>
 
+    <!-- Tarjeta de Estado de Conexión si no está configurado el Token -->
+    <div v-if="profile && !profile.connected" class="info-box" style="border-color: rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.08); margin-bottom: 1.5rem;">
+      <div style="display: flex; align-items: flex-start; gap: 0.75rem;">
+        <span style="font-size: 1.4rem;">🔑</span>
+        <div>
+          <strong style="color: var(--accent-amber);">Instagram Graph API desconectado</strong>
+          <p style="margin: 0.25rem 0 0; color: var(--text-sub); font-size: 0.85rem; line-height: 1.45;">
+            {{ profile.error || 'Configura META_PAGE_ACCESS_TOKEN en tu archivo .env para extraer en vivo los seguidores, publicaciones y comentarios de @grupo.avantage.' }}
+          </p>
+        </div>
+      </div>
+    </div>
+
     <!-- Tarjeta de Perfil de Instagram Conectado -->
     <section class="ig-profile-card">
       <div class="ig-profile-main">
@@ -30,17 +43,17 @@
               <span class="ig-avatar-emoji">📸</span>
             </div>
           </div>
-          <span class="ig-status-dot" :class="{ connected: profile?.connected }" :title="profile?.connected ? 'Conectado a Graph API' : 'Modo Demostración'"></span>
+          <span class="ig-status-dot" :class="{ connected: profile?.connected }" :title="profile?.connected ? 'Conectado a Graph API en vivo' : 'Token no configurado'"></span>
         </div>
 
         <div class="ig-profile-info">
           <div class="ig-username-row">
-            <h3 class="ig-username">@{{ profile?.username || 'instagram_account' }}</h3>
+            <h3 class="ig-username">@{{ profile?.username || 'grupo.avantage' }}</h3>
             <span class="ig-badge-verified" title="Cuenta Comercial Verificada">✓</span>
-            <span class="ig-badge-type">Business Account</span>
+            <span class="ig-badge-type">{{ profile?.connected ? 'Instagram Business En Vivo' : 'Cuenta Pendiente de Token' }}</span>
           </div>
-          <h4 class="ig-display-name">{{ profile?.name || 'Página de Instagram' }}</h4>
-          <p class="ig-bio">{{ profile?.biography || 'Asesoría y Metodología de Investigación.' }}</p>
+          <h4 class="ig-display-name">{{ profile?.name || 'Avantage Group' }}</h4>
+          <p class="ig-bio" v-if="profile?.biography">{{ profile.biography }}</p>
           <a v-if="profile?.website" :href="profile.website" target="_blank" rel="noopener" class="ig-website-link">
             🔗 {{ profile.website }}
           </a>
@@ -49,15 +62,15 @@
 
       <div class="ig-profile-metrics">
         <div class="metric-box">
-          <span class="metric-num">{{ profile?.followers_count?.toLocaleString() || '0' }}</span>
+          <span class="metric-num">{{ profile?.followers_count?.toLocaleString() ?? 0 }}</span>
           <span class="metric-label">Seguidores</span>
         </div>
         <div class="metric-box">
-          <span class="metric-num">{{ profile?.follows_count?.toLocaleString() || '0' }}</span>
+          <span class="metric-num">{{ profile?.follows_count?.toLocaleString() ?? 0 }}</span>
           <span class="metric-label">Seguidos</span>
         </div>
         <div class="metric-box">
-          <span class="metric-num">{{ profile?.media_count || '0' }}</span>
+          <span class="metric-num">{{ profile?.media_count ?? 0 }}</span>
           <span class="metric-label">Publicaciones</span>
         </div>
       </div>
