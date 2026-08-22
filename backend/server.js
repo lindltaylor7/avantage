@@ -22,6 +22,7 @@ import { WhatsappMessageService } from './services/whatsappMessageService.js';
 import { WhatsappBotService } from './services/whatsappBotService.js';
 import { WhatsappBotStepService } from './services/whatsappBotStepService.js';
 import { AdvisorAvailabilityService } from './services/advisorAvailabilityService.js';
+import { InstagramService } from './services/instagramService.js';
 import { signToken, requireAuth, requirePermission } from './middleware/auth.js';
 import { uploadProjectUpdateAttachment, uploadDir } from './middleware/upload.js';
 
@@ -73,6 +74,7 @@ const whatsappBotStepService = new WhatsappBotStepService();
 const whatsappBotService = new WhatsappBotService({ ollamaService, emailService, leadService, whatsappMessageService, stepService: whatsappBotStepService });
 const whatsappWebhookService = new WhatsappWebhookService({ botService: whatsappBotService });
 const advisorAvailabilityService = new AdvisorAvailabilityService();
+const instagramService = new InstagramService();
 
 // Historial en memoria de evaluaciones recientes
 const evaluationHistory = [];
@@ -523,6 +525,64 @@ app.post('/api/social-followers/poll', requireAuth, requirePermission('leads.vie
   } catch (error) {
     console.error('❌ Error al sondear el conteo de seguidores:', error);
     res.status(502).json({ error: 'No se pudo sondear el conteo de seguidores.', details: error.message });
+  }
+});
+
+/**
+ * Perfil y métricas de la cuenta de Instagram Business conectada
+ */
+app.get('/api/instagram/profile', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const profile = await instagramService.getProfile();
+    res.json({ profile });
+  } catch (error) {
+    console.error('❌ Error al obtener perfil de Instagram:', error);
+    res.status(500).json({ error: 'Error al obtener perfil de Instagram.', details: error.message });
+  }
+});
+
+/**
+ * Publicaciones y Reels de la cuenta de Instagram
+ */
+app.get('/api/instagram/media', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 12, 50);
+    const media = await instagramService.getMedia(limit);
+    res.json({ media });
+  } catch (error) {
+    console.error('❌ Error al obtener publicaciones de Instagram:', error);
+    res.status(500).json({ error: 'Error al obtener publicaciones de Instagram.', details: error.message });
+  }
+});
+
+/**
+ * Interacciones de Instagram: comentarios, menciones, DMs, respuestas a historias
+ */
+app.get('/api/instagram/interactions', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const itemType = req.query.itemType || null;
+    const [interactions, stats] = await Promise.all([
+      instagramService.getInteractions({ limit, itemType }),
+      instagramService.getStats()
+    ]);
+    res.json({ interactions, stats });
+  } catch (error) {
+    console.error('❌ Error al obtener interacciones de Instagram:', error);
+    res.status(500).json({ error: 'Error al obtener interacciones de Instagram.', details: error.message });
+  }
+});
+
+/**
+ * Estadísticas resumidas de Instagram
+ */
+app.get('/api/instagram/stats', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const stats = await instagramService.getStats();
+    res.json({ stats });
+  } catch (error) {
+    console.error('❌ Error al obtener estadísticas de Instagram:', error);
+    res.status(500).json({ error: 'Error al obtener estadísticas de Instagram.', details: error.message });
   }
 });
 

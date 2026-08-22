@@ -103,6 +103,8 @@ const pendingCommunicationsCount = computed(() => pendingCommunications.value.le
 
 const TOOLS = [
   { key: 'leads.view', label: 'Funnel de Leads', description: 'Gestión comercial de candidatos y clientes en tablero Kanban', icon: '📇', to: '/admin/leads' },
+  { key: 'leads.view', label: 'Setter Funnel', description: 'Triaje de leads y conversaciones de WhatsApp, Facebook e Instagram', icon: '🎯', to: '/admin/setter-funnel' },
+  { key: 'leads.view', label: 'Instagram', description: 'Comentarios, DMs, menciones e interacciones de Instagram Business', icon: '📸', to: '/admin/instagram' },
   { key: 'projects.view', label: 'Proyectos & Avances', description: 'Gestión de proyectos, entregables, cronogramas y tareas', icon: '🚀', to: '/admin/projects' },
   { key: 'roles.manage', label: 'Roles y Permisos', description: 'Administración de usuarios, roles de acceso y herramientas', icon: '🔐', to: '/admin/roles' }
 ];

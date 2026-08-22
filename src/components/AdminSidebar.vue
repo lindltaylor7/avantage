@@ -47,13 +47,6 @@
 
         <router-link to="/dashboard" class="nav-item" @click="closeMobile">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-          </svg>
-          <span class="nav-label" v-if="!isCollapsed">Archivos</span>
-        </router-link>
-
-        <router-link to="/dashboard" class="nav-item" @click="closeMobile">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="9 11 12 14 22 4"/>
             <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
           </svg>
@@ -65,37 +58,13 @@
             <line x1="12" y1="1" x2="12" y2="23"/>
             <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
           </svg>
-          <span class="nav-label" v-if="!isCollapsed">Ingresos</span>
-        </router-link>
-
-        <router-link to="/dashboard" class="nav-item" @click="closeMobile">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="9" cy="21" r="1"/>
-            <circle cx="20" cy="21" r="1"/>
-            <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
-          </svg>
-          <span class="nav-label" v-if="!isCollapsed">PostVenta</span>
+          <span class="nav-label" v-if="!isCollapsed">Finanzas</span>
         </router-link>
       </div>
 
       <!-- MENÚ Section -->
       <div class="nav-section">
         <div class="section-title" v-if="!isCollapsed">MENÚ</div>
-
-        <router-link 
-          v-if="hasPermission('leads.view')"
-          to="/admin/database" 
-          class="nav-item" 
-          :class="{ 'is-active': $route.path === '/admin/database' }"
-          @click="closeMobile"
-        >
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <ellipse cx="12" cy="5" rx="9" ry="3"/>
-            <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
-            <path d="M21 19c0 1.66-4 3-9 3s-9-1.34-9-3"/>
-          </svg>
-          <span class="nav-label" v-if="!isCollapsed">Base de Datos</span>
-        </router-link>
 
         <router-link 
           v-if="hasPermission('leads.view')" 
@@ -110,6 +79,19 @@
           <span class="nav-label" v-if="!isCollapsed">Funnel</span>
         </router-link>
 
+        <router-link 
+          v-if="hasPermission('leads.view')" 
+          to="/admin/setter-funnel" 
+          class="nav-item"
+          :class="{ 'is-active': $route.path === '/admin/setter-funnel' }"
+          @click="closeMobile"
+        >
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+          </svg>
+          <span class="nav-label" v-if="!isCollapsed">Setter Funnel</span>
+        </router-link>
+
         <router-link to="/dashboard" class="nav-item" @click="closeMobile">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -119,28 +101,6 @@
             <polyline points="10 9 9 9 8 9"/>
           </svg>
           <span class="nav-label" v-if="!isCollapsed">Documentos</span>
-        </router-link>
-
-        <router-link to="/dashboard" class="nav-item" @click="closeMobile">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-            <polyline points="22,6 12,13 2,6"/>
-          </svg>
-          <span class="nav-label" v-if="!isCollapsed">Comunicaciones</span>
-        </router-link>
-
-        <router-link 
-          v-if="hasPermission('leads.view')" 
-          to="/admin/leads" 
-          class="nav-item"
-          @click="closeMobile"
-        >
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-            <circle cx="8.5" cy="7" r="4"/>
-            <polyline points="17 11 19 13 23 9"/>
-          </svg>
-          <span class="nav-label" v-if="!isCollapsed">Mis Leads</span>
         </router-link>
 
         <router-link
@@ -168,6 +128,21 @@
             <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
           </svg>
           <span class="nav-label" v-if="!isCollapsed">Interacciones</span>
+        </router-link>
+
+        <router-link
+          v-if="hasPermission('leads.view')"
+          to="/admin/instagram"
+          class="nav-item"
+          :class="{ 'is-active': $route.path === '/admin/instagram' }"
+          @click="closeMobile"
+        >
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="2" width="20" height="20" rx="5" ry="5"/>
+            <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/>
+            <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/>
+          </svg>
+          <span class="nav-label" v-if="!isCollapsed">Instagram</span>
         </router-link>
 
         <router-link
@@ -239,13 +214,6 @@
             <path d="M12 15l-3-3 7.5-7.5c1.5-1.5 3.5-1.5 5 0s1.5 3.5 0 5L14 17l-2-2z"/>
           </svg>
           <span class="nav-label" v-if="!isCollapsed">Proyectos</span>
-        </router-link>
-
-        <router-link to="/dashboard" class="nav-item" @click="closeMobile">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-          </svg>
-          <span class="nav-label" v-if="!isCollapsed">Chat</span>
         </router-link>
       </div>
     </div>

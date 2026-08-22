@@ -12,6 +12,8 @@ import SocialInteractionsView from '../views/SocialInteractionsView.vue';
 import WhatsAppView from '../views/WhatsAppView.vue';
 import AvailabilityView from '../views/AvailabilityView.vue';
 import BotScriptView from '../views/BotScriptView.vue';
+import SetterFunnelView from '../views/SetterFunnelView.vue';
+import InstagramInteractionsView from '../views/InstagramInteractionsView.vue';
 import { isAuthenticated, hasPermission } from '../auth.js';
 
 const router = createRouter({
@@ -22,11 +24,13 @@ const router = createRouter({
     { path: '/dashboard', name: 'dashboard', component: DashboardView, meta: { requiresAuth: true } },
     { path: '/admin/database', name: 'database', component: DatabaseView, meta: { requiresAuth: true, permission: 'leads.view' } },
     { path: '/admin/leads', name: 'leads', component: LeadsView, meta: { requiresAuth: true, permission: 'leads.view' } },
+    { path: '/admin/setter-funnel', name: 'setter-funnel', component: SetterFunnelView, meta: { requiresAuth: true, permission: 'leads.view' } },
     { path: '/admin/projects', name: 'projects', component: ProjectsView, meta: { requiresAuth: true, permission: 'projects.view' } },
     { path: '/admin/projects/:id', name: 'project-detail', component: ProjectDetailView, props: true, meta: { requiresAuth: true, permission: 'projects.view' } },
     { path: '/admin/roles', name: 'roles', component: RolesView, meta: { requiresAuth: true, permission: 'roles.manage' } },
     { path: '/admin/webhooks', name: 'webhooks', component: MetaWebhookTestView, meta: { requiresAuth: true, permission: 'leads.view' } },
     { path: '/admin/social', name: 'social', component: SocialInteractionsView, meta: { requiresAuth: true, permission: 'leads.view' } },
+    { path: '/admin/instagram', name: 'instagram', component: InstagramInteractionsView, meta: { requiresAuth: true, permission: 'leads.view' } },
     { path: '/admin/whatsapp', name: 'whatsapp', component: WhatsAppView, meta: { requiresAuth: true, permission: 'leads.view' } },
     { path: '/admin/availability', name: 'availability', component: AvailabilityView, meta: { requiresAuth: true } },
     { path: '/admin/bot-script', name: 'bot-script', component: BotScriptView, meta: { requiresAuth: true, permission: 'leads.view' } }
