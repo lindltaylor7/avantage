@@ -71,14 +71,6 @@ export class InstagramWebhookService {
 
     const expected = crypto.createHmac('sha256', appSecret).update(rawBody).digest('hex');
     const provided = signatureHeader.slice('sha256='.length);
-
-  console.log('esperado:', expected);
-  console.log('recibido:', provided);
-  console.log('rawBody length:', rawBody.length);
-
-  console.log('appSecret entre corchetes: [' + appSecret + ']');
-console.log('appSecret length:', appSecret.length);
-
     const expectedBuf = Buffer.from(expected, 'hex');
     const providedBuf = Buffer.from(provided, 'hex');
     if (expectedBuf.length !== providedBuf.length) return false;

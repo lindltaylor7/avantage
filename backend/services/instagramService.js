@@ -1,4 +1,4 @@
-import { db } from '../db/connection.js';
+import { PageInteractionService } from './pageInteractionService.js';
 
 const GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v21.0';
 
@@ -8,6 +8,10 @@ const GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v21.0';
  * comentarios, menciones y mensajes de la cuenta conectada.
  */
 export class InstagramService {
+  constructor() {
+    this.pageInteractionService = new PageInteractionService();
+  }
+
   /**
    * Resuelve y descubre automáticamente el ID de la cuenta de Instagram Business
    * vinculada a la Página de Facebook usando el Page Access Token.
@@ -189,28 +193,12 @@ export class InstagramService {
 
     // 2. Extraer interacciones de Instagram registradas en la base de datos (Webhooks de Meta)
     try {
-      const dbQuery = db('page_interactions as pi')
-        .leftJoin('page_posts as pp', 'pp.post_id', 'pi.post_id')
-        .select(
-          'pi.*',
-          'pp.picture_url as post_picture_url',
-          'pp.message as post_message',
-          'pp.permalink_url as post_permalink_url'
-        )
-        .where(function() {
-          this.where('pi.raw_value', 'like', '%instagram%')
-            .orWhere('pi.item_type', 'like', '%ig%')
-            .orWhere('pi.item_type', 'comment');
-        })
-        .orderBy('pi.received_at', 'desc')
-        .limit(limit);
+      const dbInteractions = await this.pageInteractionService.getRecent({
+        limit,
+        itemType,
+        platform: 'instagram'
+      });
 
-      if (itemType) {
-        dbQuery.where('pi.item_type', itemType);
-      }
-
-      const dbInteractions = await dbQuery;
-      
       // Combinar evitando duplicados por ID
       const existingIds = new Set(allInteractions.map(i => String(i.id)));
       for (const item of dbInteractions) {

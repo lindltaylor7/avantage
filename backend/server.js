@@ -486,8 +486,8 @@ app.get('/api/social-interactions', requireAuth, requirePermission('leads.view')
     const limit = Math.min(Number(req.query.limit) || 50, 200);
     const itemType = req.query.itemType || null;
     const [interactions, stats] = await Promise.all([
-      pageInteractionService.getRecent({ limit, itemType }),
-      pageInteractionService.getStats()
+      pageInteractionService.getRecent({ limit, itemType, platform: 'facebook' }),
+      pageInteractionService.getStats({ platform: 'facebook' })
     ]);
     res.json({ interactions, stats });
   } catch (error) {

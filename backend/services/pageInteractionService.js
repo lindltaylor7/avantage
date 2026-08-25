@@ -10,6 +10,7 @@ export class PageInteractionService {
   async createFromFeedChange(pageId, value) {
     const [id] = await db('page_interactions').insert({
       page_id: pageId || value.from?.id || null,
+      platform: 'facebook',
       item_type: value.item || 'desconocido',
       verb: value.verb || null,
       post_id: value.post_id || null,
@@ -42,6 +43,7 @@ export class PageInteractionService {
 
     const [id] = await db('page_interactions').insert({
       page_id: igAccountId || null,
+      platform: 'instagram',
       item_type: 'comment',
       verb: null,
       post_id: mediaId,
@@ -135,7 +137,7 @@ export class PageInteractionService {
     return db('page_interactions').where({ id }).first();
   }
 
-  async getRecent({ limit = 50, itemType = null } = {}) {
+  async getRecent({ limit = 50, itemType = null, platform = null } = {}) {
     const query = db('page_interactions as pi')
       .leftJoin('page_posts as pp', 'pp.post_id', 'pi.post_id')
       .select(
@@ -147,14 +149,17 @@ export class PageInteractionService {
       .orderBy('pi.received_at', 'desc')
       .limit(limit);
     if (itemType) query.where('pi.item_type', itemType);
+    if (platform) query.where('pi.platform', platform);
     return query;
   }
 
-  async getStats() {
-    const rows = await db('page_interactions')
+  async getStats({ platform = null } = {}) {
+    const query = db('page_interactions')
       .select('item_type')
       .count('* as total')
       .groupBy('item_type');
+    if (platform) query.where('platform', platform);
+    const rows = await query;
 
     const stats = { total: 0, byType: {} };
     for (const row of rows) {
