@@ -228,42 +228,67 @@ Detalles adicionales: ${additionalNotes || 'Ninguno'}`;
   }
 
   /**
-   * Genera un saludo de bienvenida humanizado (texto libre, no JSON) a partir
-   * de los primeros mensajes que escribió un contacto nuevo por WhatsApp,
-   * cerrando con una pregunta que lo dirija a contar su tema de tesis y así
-   * arrancar el guion estructurado del bot. Si no hay conexión a Ollama Cloud
-   * (sin API key, o la llamada falla), se usa un saludo de respaldo fijo.
+   * Motor conversacional de Avan por WhatsApp: en vez de un guion fijo de
+   * preguntas numeradas, en cada turno el LLM decide qué responder y qué
+   * preguntar (tono natural), va extrayendo del hilo los datos necesarios
+   * para evaluar la tesis, y avisa cuándo ya tiene lo suficiente para
+   * generar el reporte. Si no hay conexión a Ollama Cloud (sin API key, o la
+   * llamada falla), se usa una lógica de respaldo mínima basada en reglas.
    */
-  async generateWelcomeMessage(firstMessageText, { apiKeyOverride, hostOverride } = {}) {
-    const activeApiKey = (apiKeyOverride && String(apiKeyOverride).trim() !== '') ? apiKeyOverride.trim() : (this.apiKey || process.env.OLLAMA_API_KEY || '');
-    let activeHost = (hostOverride && String(hostOverride).trim() !== '') ? hostOverride.trim() : (this.host || 'https://ollama.com');
+  async converseAsAvan({ history, knownAnswers, incomingText, isFirstTurn, toneInstructions }) {
+    const activeApiKey = this.apiKey || process.env.OLLAMA_API_KEY || '';
+    let activeHost = this.host || 'https://ollama.com';
     if (activeHost === 'https://api.ollama.com') activeHost = 'https://ollama.com';
 
-    const fallbackText = '¡Hola! 👋 Soy Avan, el asistente académico de Avantage Group. Cuéntame, ¿qué tema o problema te gustaría desarrollar en tu tesis? Así puedo ayudarte a evaluar qué tan viable es. 🎓';
-
     if (!activeApiKey && !activeHost.includes('localhost') && !activeHost.includes('127.0.0.1')) {
-      return { text: fallbackText, source: 'fallback' };
+      return this.fallbackConversationTurn(knownAnswers, incomingText, isFirstTurn);
     }
 
-    const systemPrompt = `Eres Avan, el asistente académico de Avantage Group (Perú), atendiendo por WhatsApp a un contacto que recién escribe por primera vez para evaluar gratis la viabilidad de su tema de tesis (regulación SUNEDU/CONCYTEC).
+    const systemPrompt = `Eres Avan, el asistente académico de Avantage Group (Perú), conversando por WhatsApp con alguien interesado en evaluar gratis la viabilidad de su tema de tesis (regulación SUNEDU/CONCYTEC).
 
-REGLAS DE TONO Y FORMATO (es WhatsApp, no un correo):
-- Máximo 3-4 líneas. Cercano, empático y natural. Nunca suenes a plantilla ni a mensaje corporativo genérico.
-- Reconoce en tus propias palabras algo ESPECÍFICO de lo que escribió el contacto. Si solo escribió un saludo sin contenido (ej. "Hola"), no inventes que ya contó algo: simplemente saluda y pasa a la pregunta.
-- Sin listas ni viñetas. Máximo 1-2 emojis.
-- Termina SIEMPRE con una sola pregunta clara que invite a contar su tema o problema de tesis, para poder evaluar su viabilidad.
+TU OBJETIVO: a través de una conversación natural (NUNCA un cuestionario numerado), llegar a conocer:
+1. El problema o tema de tesis que quiere investigar — OBLIGATORIO.
+2. Un correo electrónico donde enviarle el reporte completo — OBLIGATORIO.
+3. El ámbito específico (región, institución, sector en Perú) — opcional, hay un valor por defecto.
+4. Su nivel académico (Pregrado o Posgrado) — opcional, hay un valor por defecto.
+5. Su carrera o campo de estudio — opcional, hay un valor por defecto.
 
-SOBRE TU IDENTIDAD:
-- Si preguntan si eres una IA o un bot, sé transparente: eres un asistente virtual que ayuda a entender su caso. No lo niegues ni lo evadas.
-- Fuera de esa pregunta directa, no aclares por tu cuenta que eres un bot: comunícate de forma natural, como lo haría alguien del equipo.
+REGLAS DE TONO Y FORMATO (es WhatsApp, no un formulario):
+- Máximo 2-4 líneas por mensaje. Cercano, empático, natural. Nunca enumeres preguntas ni digas "Pregunta X de Y". Sin listas ni viñetas. Máximo 1-2 emojis.
+- Haz UNA sola pregunta a la vez: la más relevante según lo que ya sabes (ver "DATOS YA CONFIRMADOS" abajo) y lo que la persona acaba de escribir.
+- Si ya tienes tema y correo pero no mencionaron nivel/carrera/ámbito, pregunta como máximo una vez más por lo que falte — si igual no lo dan, sigue adelante con el valor por defecto en vez de insistir.
+- Reconoce en tus propias palabras algo ESPECÍFICO de lo que la persona escribió. No inventes que dijo algo que no dijo.
+- Si preguntan si eres una IA o un bot, sé transparente. Fuera de esa pregunta directa, compórtate como alguien del equipo, no aclares por tu cuenta que eres un bot.
+${isFirstTurn ? '- Este es el primer mensaje de la conversación: preséntate brevemente como Avan antes de continuar.' : ''}
+${toneInstructions ? `\nINSTRUCCIONES ADICIONALES DEL EQUIPO:\n${toneInstructions}\n` : ''}
 
-Responde solo con el texto del mensaje de WhatsApp: sin comillas, sin JSON, sin encabezados.`;
+CUÁNDO TERMINAR: marca "ready": true SOLO cuando ya tengas tema de tesis Y correo electrónico válido, y sientas que la conversación cubrió lo esencial. Cuando marques ready:true, tu "reply" debe ser BREVE (una confirmación de que vas a revisar su tema, ej. "Perfecto, dame un momento para revisar esto 👀") — el sistema se encarga de enviar el resto del reporte automáticamente después.
 
-    const userPrompt = `Esto es lo que escribió el contacto al iniciar la conversación:\n"""${firstMessageText}"""\n\nEscribe el mensaje de bienvenida siguiendo las reglas.`;
+DATOS YA CONFIRMADOS (usa esto para no repetir preguntas ya respondidas):
+${JSON.stringify(knownAnswers || {})}
+
+Responde ÚNICAMENTE en JSON válido con esta forma exacta (usa null en los campos de "extracted" que no puedas identificar todavía):
+{
+  "reply": "<mensaje de WhatsApp en texto plano, sin comillas ni markdown>",
+  "extracted": {
+    "problem": "<tema/problema de tesis identificado, o null>",
+    "location": "<ámbito/región/institución identificado, o null>",
+    "level": "<uno de: 'Pregrado (Bachiller/Título)', 'Posgrado (Maestría)', 'Posgrado (Doctorado)', o null>",
+    "field": "<carrera/campo de estudio identificado, o null>",
+    "email": "<correo electrónico identificado, o null>"
+  },
+  "ready": <true o false>
+}`;
+
+    const transcript = (history || [])
+      .map((m) => `${m.direction === 'outbound' ? 'Avan' : 'Contacto'}: ${m.text}`)
+      .join('\n');
+
+    const userPrompt = `Historial de la conversación hasta ahora:\n${transcript || '(sin mensajes previos)'}\n\nNuevo mensaje del contacto: "${incomingText}"\n\nResponde siguiendo las reglas, en el JSON indicado.`;
 
     try {
       const generateUrl = this.getApiUrl(activeHost, '/generate');
-      console.log(`🤖 [Ollama Cloud LLM] Generando saludo de bienvenida en ${generateUrl} (${this.chatModel})...`);
+      console.log(`🤖 [Ollama Cloud LLM] Turno conversacional de Avan en ${generateUrl} (${this.chatModel})...`);
 
       const response = await fetch(generateUrl, {
         method: 'POST',
@@ -274,27 +299,73 @@ Responde solo con el texto del mensaje de WhatsApp: sin comillas, sin JSON, sin 
         body: JSON.stringify({
           model: this.chatModel,
           prompt: `${systemPrompt}\n\n${userPrompt}`,
-          stream: false
+          stream: false,
+          format: 'json'
         }),
-        signal: AbortSignal.timeout(15000)
+        signal: AbortSignal.timeout(20000)
       });
 
       if (!response.ok) {
         const errText = await response.text();
-        console.warn(`⚠️ [Ollama Cloud LLM Error] saludo de bienvenida: ${errText.substring(0, 150)}`);
-        return { text: fallbackText, source: 'fallback' };
+        console.warn(`⚠️ [Ollama Cloud LLM Error] turno de Avan: ${errText.substring(0, 150)}`);
+        return this.fallbackConversationTurn(knownAnswers, incomingText, isFirstTurn);
       }
 
       const data = await response.json();
-      const text = (data.response || '').trim().replace(/^["']|["']$/g, '');
-      if (!text) return { text: fallbackText, source: 'fallback' };
+      const cleanResponse = (data.response || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
+      const parsed = JSON.parse(cleanResponse);
+      if (!parsed.reply) return this.fallbackConversationTurn(knownAnswers, incomingText, isFirstTurn);
 
-      console.log(`✅ [Ollama Cloud LLM] Saludo de bienvenida generado por ${this.chatModel}`);
-      return { text, source: 'llm' };
+      console.log(`✅ [Ollama Cloud LLM] Turno de Avan generado por ${this.chatModel}`);
+      return {
+        reply: parsed.reply,
+        extracted: parsed.extracted || {},
+        ready: !!parsed.ready,
+        source: 'llm'
+      };
     } catch (err) {
-      console.warn('Ollama Cloud LLM welcome message notice:', err.message);
-      return { text: fallbackText, source: 'fallback' };
+      console.warn('Ollama Cloud LLM conversation turn notice:', err.message);
+      return this.fallbackConversationTurn(knownAnswers, incomingText, isFirstTurn);
     }
+  }
+
+  /**
+   * Respaldo mínimo basado en reglas para cuando Ollama Cloud no está
+   * disponible: no reemplaza la calidad de la conversación con IA, pero
+   * evita dejar al contacto sin respuesta. Pide tema y correo en ese orden;
+   * en cuanto los tiene, marca "ready".
+   */
+  fallbackConversationTurn(knownAnswers, incomingText, isFirstTurn) {
+    const answers = knownAnswers || {};
+    const greeting = isFirstTurn ? '¡Hola! 👋 Soy Avan, el asistente académico de Avantage Group. ' : '';
+
+    if (!answers.problem) {
+      return {
+        reply: `${greeting}Cuéntame, ¿qué tema o problema te gustaría desarrollar en tu tesis?`,
+        extracted: { problem: incomingText || null },
+        ready: false,
+        source: 'fallback'
+      };
+    }
+
+    if (!answers.email) {
+      const looksLikeEmail = (incomingText || '').includes('@');
+      return {
+        reply: looksLikeEmail
+          ? 'Perfecto, dame un momento para revisar esto 👀'
+          : '¿A qué correo electrónico te envío el reporte completo de viabilidad?',
+        extracted: looksLikeEmail ? { email: incomingText.trim() } : {},
+        ready: looksLikeEmail,
+        source: 'fallback'
+      };
+    }
+
+    return {
+      reply: 'Perfecto, dame un momento para revisar esto 👀',
+      extracted: {},
+      ready: true,
+      source: 'fallback'
+    };
   }
 
   /**

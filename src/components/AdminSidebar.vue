@@ -119,7 +119,7 @@
             <path d="M8 9h8M8 13h5"/>
             <circle cx="17" cy="16" r="1.2" fill="currentColor" stroke="none"/>
           </svg>
-          <span class="nav-label" v-if="!isCollapsed">Guion del Bot</span>
+          <span class="nav-label" v-if="!isCollapsed">Personalidad del Bot</span>
         </router-link>
 
         <router-link

@@ -20,7 +20,7 @@ import { PageFollowerService } from './services/pageFollowerService.js';
 import { WhatsappWebhookService } from './services/whatsappWebhookService.js';
 import { WhatsappMessageService } from './services/whatsappMessageService.js';
 import { WhatsappBotService } from './services/whatsappBotService.js';
-import { WhatsappBotStepService } from './services/whatsappBotStepService.js';
+import { WhatsappBotSettingsService } from './services/whatsappBotSettingsService.js';
 import { AdvisorAvailabilityService } from './services/advisorAvailabilityService.js';
 import { InstagramService } from './services/instagramService.js';
 import { InstagramWebhookService } from './services/instagramWebhookService.js';
@@ -85,9 +85,9 @@ const pageInteractionService = new PageInteractionService();
 const pageMessageService = new PageMessageService();
 const pageFollowerService = new PageFollowerService();
 const whatsappMessageService = new WhatsappMessageService();
-const whatsappBotStepService = new WhatsappBotStepService();
+const whatsappBotSettingsService = new WhatsappBotSettingsService();
 const googleCalendarService = new GoogleCalendarService();
-const whatsappBotService = new WhatsappBotService({ ollamaService, emailService, leadService, whatsappMessageService, stepService: whatsappBotStepService, googleCalendarService });
+const whatsappBotService = new WhatsappBotService({ ollamaService, emailService, leadService, whatsappMessageService, settingsService: whatsappBotSettingsService, googleCalendarService });
 const whatsappWebhookService = new WhatsappWebhookService({ botService: whatsappBotService });
 const advisorAvailabilityService = new AdvisorAvailabilityService();
 const instagramService = new InstagramService();
@@ -958,30 +958,28 @@ app.post('/api/whatsapp/conversations/:waId/bot/reset', requireAuth, requirePerm
 });
 
 /**
- * Guion editable de las preguntas de Avan por WhatsApp (texto, opciones,
- * orden, activo/inactivo y valor por defecto).
+ * Configuración del motor conversacional de Avan por WhatsApp: instrucciones
+ * de tono/objetivo para el LLM y los valores por defecto que se usan cuando
+ * el lead no menciona su nivel, carrera o ámbito.
  */
-app.get('/api/whatsapp/bot-steps', requireAuth, requirePermission('leads.view'), async (req, res) => {
+app.get('/api/whatsapp/bot-settings', requireAuth, requirePermission('leads.view'), async (req, res) => {
   try {
-    const steps = await whatsappBotStepService.getAll();
-    res.json({ steps });
+    const settings = await whatsappBotSettingsService.get();
+    res.json({ settings });
   } catch (error) {
-    console.error('❌ Error al obtener el guion del bot:', error);
-    res.status(500).json({ error: 'Error al obtener el guion del bot.', details: error.message });
+    console.error('❌ Error al obtener la configuración del bot:', error);
+    res.status(500).json({ error: 'Error al obtener la configuración del bot.', details: error.message });
   }
 });
 
-app.put('/api/whatsapp/bot-steps', requireAuth, requirePermission('leads.view'), async (req, res) => {
+app.put('/api/whatsapp/bot-settings', requireAuth, requirePermission('leads.view'), async (req, res) => {
   try {
-    const steps = Array.isArray(req.body?.steps) ? req.body.steps : [];
-    if (steps.length === 0) {
-      return res.status(400).json({ error: 'La lista de preguntas no puede estar vacía.' });
-    }
-    const saved = await whatsappBotStepService.saveAll(steps);
-    res.json({ steps: saved });
+    const { toneInstructions, defaultAcademicLevel, defaultFieldOfStudy, defaultLocation } = req.body || {};
+    const settings = await whatsappBotSettingsService.update({ toneInstructions, defaultAcademicLevel, defaultFieldOfStudy, defaultLocation });
+    res.json({ settings });
   } catch (error) {
-    console.error('❌ Error al guardar el guion del bot:', error);
-    res.status(500).json({ error: 'Error al guardar el guion del bot.', details: error.message });
+    console.error('❌ Error al guardar la configuración del bot:', error);
+    res.status(500).json({ error: 'Error al guardar la configuración del bot.', details: error.message });
   }
 });
 
@@ -1025,10 +1023,12 @@ app.get('/api/whatsapp/config-status', requireAuth, requirePermission('leads.vie
 /**
  * Simulador de prueba: procesa un mensaje como si viniera de WhatsApp, sin
  * pasar por el webhook real de Meta ni por la Graph API. Sirve para probar el
- * agrupado de mensajes y la respuesta del LLM de Ollama Cloud aunque las
- * credenciales de envío de WhatsApp todavía no estén configuradas; el
- * resultado se ve en /api/whatsapp/bot-activity. No guarda el mensaje en la
- * tabla de mensajes reales (no debe usarse con un wa_id real).
+ * agrupado de mensajes y la conversación con el LLM de Ollama Cloud aunque
+ * las credenciales de envío de WhatsApp todavía no estén configuradas; el
+ * resultado se ve en /api/whatsapp/bot-activity. El mensaje simulado sí se
+ * guarda en la tabla de mensajes (etiquetado como "Simulado"), porque el
+ * motor conversacional necesita el hilo completo para tener contexto entre
+ * turnos — usa un wa_id de prueba, no uno real.
  */
 app.post('/api/whatsapp/bot-test/simulate', requireAuth, requirePermission('leads.view'), async (req, res) => {
   try {
@@ -1037,6 +1037,7 @@ app.post('/api/whatsapp/bot-test/simulate', requireAuth, requirePermission('lead
     if (!waId || !text) {
       return res.status(400).json({ error: 'waId y text son obligatorios.' });
     }
+    await whatsappMessageService.createSimulatedInbound(waId, text);
     await whatsappBotService.handleIncomingMessage(waId, text);
     res.json({ success: true });
   } catch (error) {

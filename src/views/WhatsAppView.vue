@@ -358,17 +358,10 @@ const threadReferral = computed(() => {
   }
 });
 
-const BOT_STEP_LABELS = {
-  1: 'esperando el tema de tesis',
-  2: 'esperando el ámbito/ubicación',
-  3: 'esperando nivel académico',
-  4: 'esperando la carrera',
-  5: 'esperando el correo'
-};
-
 const botStatusIcon = computed(() => {
   if (!botSession.value) return '';
   if (botSession.value.status === 'completed') return '✅';
+  if (botSession.value.status === 'scheduling') return '📅';
   return botSession.value.bot_enabled ? '🤖' : '⏸️';
 });
 
@@ -376,14 +369,15 @@ const botStatusLabel = computed(() => {
   if (!botSession.value) return '';
   if (botSession.value.status === 'completed') return 'Avan completado';
   if (!botSession.value.bot_enabled) return 'Bot pausado';
-  return `Avan: ${BOT_STEP_LABELS[botSession.value.step] || 'en curso'}`;
+  if (botSession.value.status === 'scheduling') return 'Avan: eligiendo horario de llamada';
+  return 'Avan: conversando';
 });
 
 const botStatusHint = computed(() => {
   if (!botSession.value) return '';
-  return botSession.value.status === 'completed'
-    ? 'El contacto ya completó el flujo automático y se registró como lead.'
-    : 'Avan está conversando automáticamente con este contacto.';
+  if (botSession.value.status === 'completed') return 'El contacto ya completó la conversación con Avan y se registró como lead.';
+  if (botSession.value.status === 'scheduling') return 'Avan ya evaluó el tema y está esperando que el contacto elija un horario para la llamada.';
+  return 'Avan está conversando automáticamente con este contacto.';
 });
 
 async function fetchConversations() {

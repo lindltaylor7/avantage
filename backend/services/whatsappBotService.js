@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { db } from '../db/connection.js';
-import { WhatsappBotStepService } from './whatsappBotStepService.js';
+import { WhatsappBotSettingsService } from './whatsappBotSettingsService.js';
 
 const MAX_ACTIVITY_LOG = 100;
 
@@ -11,20 +11,16 @@ const MAX_ACTIVITY_LOG = 100;
 const BOT_DELAY_MIN_MS = Number(process.env.WHATSAPP_BOT_DELAY_MIN_MS) || 1500;
 const BOT_DELAY_MAX_MS = Number(process.env.WHATSAPP_BOT_DELAY_MAX_MS) || 3500;
 
-// Orden usado si una sesión antigua no tiene "step_sequence" guardado
-// (creada antes de que el guion fuera configurable).
-const LEGACY_STEP_ORDER = ['problem', 'location', 'level', 'field', 'email'];
-
 // Asesor cuyo Google Calendar usa el bot para agendar las llamadas que
-// ofrece al terminar el guion (por ahora uno solo, fijo, en vez de resolver
-// dinámicamente a partir de "assigned_to" del lead).
+// ofrece al terminar de calificar el tema (por ahora uno solo, fijo, en vez
+// de resolver dinámicamente a partir de "assigned_to" del lead).
 const BOOKING_ADVISOR_USER_ID = Number(process.env.GOOGLE_BOOKING_ADVISOR_USER_ID) || 1;
 
-// Cuando un contacto nuevo escribe, suele hacerlo en varias burbujas seguidas
+// Los mensajes de un contacto suelen llegar en varias burbujas seguidas
 // (p. ej. "Hola" y luego, unos segundos después, el tema real). En vez de
-// responder a la primera burbuja al instante, se espera este tiempo de
-// silencio para juntar todo en un solo mensaje antes de mandarlo al LLM.
-const FIRST_MESSAGE_DEBOUNCE_MS = Number(process.env.WHATSAPP_BOT_FIRST_MESSAGE_DEBOUNCE_MS) || 5000;
+// mandarle cada burbuja al LLM por separado, se espera este tiempo de
+// silencio para juntar todo en un solo mensaje antes de procesar el turno.
+const MESSAGE_DEBOUNCE_MS = Number(process.env.WHATSAPP_BOT_FIRST_MESSAGE_DEBOUNCE_MS) || 5000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -45,46 +41,26 @@ function normalize(text) {
     .toLowerCase();
 }
 
-function parseChoice(text, options) {
-  const trimmed = (text || '').trim();
-  const asNumber = parseInt(trimmed, 10);
-  if (!Number.isNaN(asNumber) && asNumber >= 1 && asNumber <= options.length) {
-    return options[asNumber - 1];
-  }
-  const normalizedInput = normalize(trimmed);
-  return options.find((opt) => {
-    const normalizedOpt = normalize(opt);
-    return normalizedOpt.includes(normalizedInput) || normalizedInput.includes(normalizedOpt);
-  }) || null;
-}
-
-function formatQuestion(step, number, total) {
-  let text = `📌 *Pregunta ${number} de ${total}:* ${step.question_text}`;
-  if (step.input_type === 'choice' && step.options?.length) {
-    text += `\n\n${numberedList(step.options)}`;
-  }
-  return text;
-}
-
 /**
- * Flujo conversacional automático de Avan por WhatsApp, guiado por el
- * guion editable en `whatsapp_bot_steps` (texto, orden y activo/inactivo
- * configurables desde el panel admin). Al finalizar, evalúa la viabilidad,
- * envía el reporte por correo (si se recogió un correo) y registra/actualiza
- * el lead en el funnel de ventas.
+ * Motor conversacional de Avan por WhatsApp: en cada turno, un LLM (Ollama
+ * Cloud) decide qué responder y qué preguntar de forma natural, extrayendo
+ * del hilo los datos necesarios para evaluar la tesis (tema, ámbito, nivel,
+ * carrera, correo). Al reunir tema + correo, evalúa la viabilidad, envía el
+ * reporte por correo, registra/actualiza el lead en el funnel de ventas, y
+ * ofrece agendar una llamada en el calendario real del asesor.
  */
 export class WhatsappBotService {
-  constructor({ ollamaService, emailService, leadService, whatsappMessageService, stepService, googleCalendarService }) {
+  constructor({ ollamaService, emailService, leadService, whatsappMessageService, settingsService, googleCalendarService }) {
     this.ollamaService = ollamaService;
     this.emailService = emailService;
     this.leadService = leadService;
     this.whatsappMessageService = whatsappMessageService;
-    this.stepService = stepService || new WhatsappBotStepService();
+    this.settingsService = settingsService || new WhatsappBotSettingsService();
     this.googleCalendarService = googleCalendarService;
     // wa_id -> { messages: string[], timer: NodeJS.Timeout }, buffer temporal
-    // de los primeros mensajes de un contacto nuevo mientras se espera el
-    // silencio de FIRST_MESSAGE_DEBOUNCE_MS antes de iniciar la sesión.
-    this.pendingFirstMessages = new Map();
+    // de las burbujas de un contacto mientras se espera el silencio de
+    // MESSAGE_DEBOUNCE_MS antes de procesar el turno conversacional.
+    this.pendingMessages = new Map();
     // Bitácora en memoria (más reciente primero) de lo que hace el bot: cuándo
     // agrupa mensajes, qué le manda al LLM de Ollama Cloud, qué responde, y si
     // el envío por WhatsApp tuvo éxito. Sirve para verificar visualmente desde
@@ -116,16 +92,16 @@ export class WhatsappBotService {
 
   /**
    * Borra la sesión de un contacto para que su próximo mensaje se trate como
-   * si fuera un contacto totalmente nuevo (pasa de nuevo por el buffer de 5s
-   * y el saludo generado por el LLM). Útil para volver a probar el flujo con
-   * un número que ya completó el guion o quedó pausado, sin tener que
-   * esperar a un contacto nuevo. No borra el historial de mensajes visible
-   * en el hilo, solo el estado interno del bot.
+   * si fuera un contacto totalmente nuevo (pasa de nuevo por el buffer y el
+   * saludo generado por el LLM). Útil para volver a probar la conversación
+   * con un número que ya la completó o quedó pausado, sin tener que esperar
+   * a un contacto nuevo. No borra el historial de mensajes visible en el
+   * hilo, solo el estado interno del bot.
    */
   async resetSession(waId) {
-    const pending = this.pendingFirstMessages.get(waId);
+    const pending = this.pendingMessages.get(waId);
     if (pending?.timer) clearTimeout(pending.timer);
-    this.pendingFirstMessages.delete(waId);
+    this.pendingMessages.delete(waId);
 
     await db('whatsapp_bot_sessions').where({ wa_id: waId }).delete();
     this.logActivity({ type: 'reset', waId });
@@ -136,7 +112,7 @@ export class WhatsappBotService {
     if (existing) {
       await this.updateSession(waId, { bot_enabled: enabled });
     } else {
-      await db('whatsapp_bot_sessions').insert({ wa_id: waId, step: 0, status: 'active', bot_enabled: enabled, answers: JSON.stringify({}) });
+      await db('whatsapp_bot_sessions').insert({ wa_id: waId, status: 'active', bot_enabled: enabled, answers: JSON.stringify({}) });
     }
   }
 
@@ -169,23 +145,24 @@ export class WhatsappBotService {
   }
 
   /**
-   * Procesa un mensaje de texto entrante del flujo de Avan. Si el
-   * contacto no tiene sesión, la inicia con el saludo y la primera pregunta
-   * activa (según el guion configurado en ese momento).
+   * Procesa un mensaje de texto entrante. Los turnos de conversación libre
+   * (estado "active", incluyendo el primer contacto) se agrupan en el buffer
+   * de silencio antes de mandarlos al LLM; la selección de horario tras
+   * ofrecer agendar se procesa aparte, sin debounce.
    */
   async handleIncomingMessage(waId, text) {
-    // Si ya hay un buffer de "primer contacto" en curso para este wa_id, esta
-    // burbuja se suma a las anteriores y se reinicia la espera de silencio,
-    // en vez de arrancar una sesión por cada mensaje suelto.
-    if (this.pendingFirstMessages.has(waId)) {
-      this.bufferFirstMessage(waId, text);
+    // Si ya hay un buffer en curso para este wa_id, esta burbuja se suma a
+    // las anteriores y se reinicia la espera de silencio, en vez de procesar
+    // un turno por cada mensaje suelto.
+    if (this.pendingMessages.has(waId)) {
+      this.bufferMessage(waId, text);
       return;
     }
 
     const session = await this.getSession(waId);
 
     if (!session) {
-      this.bufferFirstMessage(waId, text);
+      this.bufferMessage(waId, text);
       return;
     }
 
@@ -206,57 +183,18 @@ export class WhatsappBotService {
       return;
     }
 
-    const stepSequence = session.step_sequence
-      ? (typeof session.step_sequence === 'string' ? JSON.parse(session.step_sequence) : session.step_sequence)
-      : LEGACY_STEP_ORDER;
-    const answers = typeof session.answers === 'string' ? JSON.parse(session.answers) : (session.answers || {});
-    const currentIndex = session.step;
-    const currentKey = stepSequence[currentIndex];
-    const currentStep = await this.stepService.getByKey(currentKey);
-
-    if (!currentStep) {
-      // La pregunta actual fue eliminada/renombrada después de iniciada la
-      // sesión; se registra lo que se tenga y se finaliza para no dejar al
-      // contacto esperando una pregunta que ya no existe.
-      await this.finalize(waId, answers);
-      return;
-    }
-
-    let value = (text || '').trim();
-    if (currentStep.input_type === 'choice') {
-      const choice = parseChoice(text, currentStep.options || []);
-      if (!choice) {
-        await this.send(waId, `⚠️ No reconocí esa opción. Responde solo con el número:\n\n${numberedList(currentStep.options || [])}`);
-        return;
-      }
-      value = choice;
-    } else if (currentKey === 'email' && !value.includes('@')) {
-      await this.send(waId, '⚠️ Por favor ingresa un correo electrónico válido (ejemplo: usuario@gmail.com).');
-      return;
-    }
-
-    answers[currentKey] = value;
-    const nextIndex = currentIndex + 1;
-
-    if (nextIndex >= stepSequence.length) {
-      await this.updateSession(waId, { answers: JSON.stringify(answers) });
-      await this.finalize(waId, answers);
-      return;
-    }
-
-    await this.updateSession(waId, { step: nextIndex, answers: JSON.stringify(answers) });
-    const nextStep = await this.stepService.getByKey(stepSequence[nextIndex]);
-    await this.send(waId, formatQuestion(nextStep, nextIndex + 1, stepSequence.length));
+    // status === 'active': se agrupa antes de procesar el turno.
+    this.bufferMessage(waId, text);
   }
 
   /**
-   * Agrega una burbuja al buffer de "primer contacto" de este wa_id y
-   * reinicia el temporizador de silencio. Cuando el contacto deja de escribir
-   * por FIRST_MESSAGE_DEBOUNCE_MS, se dispara startConversation() con todo lo
-   * acumulado unido en un solo texto.
+   * Agrega una burbuja al buffer de este wa_id y reinicia el temporizador de
+   * silencio. Cuando el contacto deja de escribir por MESSAGE_DEBOUNCE_MS,
+   * se dispara runConversationTurn() con todo lo acumulado unido en un solo
+   * mensaje.
    */
-  bufferFirstMessage(waId, text) {
-    const pending = this.pendingFirstMessages.get(waId) || { messages: [], timer: null };
+  bufferMessage(waId, text) {
+    const pending = this.pendingMessages.get(waId) || { messages: [], timer: null };
     if (text && text.trim()) pending.messages.push(text.trim());
 
     this.logActivity({
@@ -264,85 +202,100 @@ export class WhatsappBotService {
       waId,
       text,
       bufferSize: pending.messages.length,
-      waitMs: FIRST_MESSAGE_DEBOUNCE_MS
+      waitMs: MESSAGE_DEBOUNCE_MS
     });
 
     if (pending.timer) clearTimeout(pending.timer);
     pending.timer = setTimeout(() => {
-      this.pendingFirstMessages.delete(waId);
-      this.startConversation(waId, pending.messages.join('\n')).catch((error) => {
-        this.logActivity({ type: 'conversation_start_failed', waId, error: error.message });
-        console.error(`❌ [WhatsApp Bot] Error al iniciar la conversación con ${waId}:`, error);
+      this.pendingMessages.delete(waId);
+      this.runConversationTurn(waId, pending.messages.join('\n')).catch((error) => {
+        this.logActivity({ type: 'conversation_turn_failed', waId, error: error.message });
+        console.error(`❌ [WhatsApp Bot] Error en el turno de conversación con ${waId}:`, error);
       });
-    }, FIRST_MESSAGE_DEBOUNCE_MS);
+    }, MESSAGE_DEBOUNCE_MS);
 
-    this.pendingFirstMessages.set(waId, pending);
+    this.pendingMessages.set(waId, pending);
   }
 
   /**
-   * Arranca la sesión de un contacto nuevo: genera con el LLM de Ollama Cloud
-   * un saludo humanizado (a partir de todo lo que escribió en sus primeras
-   * burbujas) que cierra con una pregunta que lo dirige al guion, y deja la
-   * sesión lista en el paso 0 para que la siguiente respuesta del contacto se
-   * procese como la respuesta a la primera pregunta activa.
+   * Ejecuta un turno del motor conversacional: arma el contexto (respuestas
+   * ya conocidas + hilo de mensajes reales de WhatsApp), le pide al LLM la
+   * siguiente respuesta natural y los datos que pudo extraer, los guarda, y
+   * si ya reunió lo mínimo (tema + correo) pasa a evaluar y ofrecer agendar.
    */
-  async startConversation(waId, joinedFirstMessage) {
-    const activeSteps = await this.stepService.getActiveOrdered();
-    if (activeSteps.length === 0) {
-      console.warn('⚠️ [WhatsApp Bot] No hay preguntas activas configuradas, no se puede iniciar el flujo.');
-      return;
+  async runConversationTurn(waId, incomingText) {
+    let session = await this.getSession(waId);
+    const isFirstTurn = !session;
+
+    if (!session) {
+      await db('whatsapp_bot_sessions').insert({ wa_id: waId, status: 'active', bot_enabled: true, answers: JSON.stringify({}) });
+      // El contacto pasa de "Conversación Abierta" a "En Calificación" en el
+      // Setter Funnel apenas Avan arranca la conversación con él.
+      await this.moveFunnelStage(waId, 'calificando');
+      session = await this.getSession(waId);
     }
 
-    const stepSequence = activeSteps.map((s) => s.step_key);
-    await db('whatsapp_bot_sessions').insert({
-      wa_id: waId,
-      step: 0,
-      status: 'active',
-      bot_enabled: true,
-      answers: JSON.stringify({}),
-      step_sequence: JSON.stringify(stepSequence)
-    });
-
-    // El contacto pasa de "Conversación Abierta" a "En Calificación" en el
-    // Setter Funnel apenas Avan arranca el guion estructurado con él.
-    await this.moveFunnelStage(waId, 'calificando');
+    const answers = typeof session.answers === 'string' ? JSON.parse(session.answers) : (session.answers || {});
+    const settings = await this.settingsService.get();
+    const thread = await this.whatsappMessageService.getThread(waId, { limit: 40 });
+    const history = thread
+      .filter((m) => m.body && m.body.trim())
+      .map((m) => ({ direction: m.direction, text: m.body }));
 
     this.logActivity({
       type: 'llm_request',
       waId,
-      prompt: joinedFirstMessage,
+      prompt: incomingText,
       model: this.ollamaService.chatModel,
       host: this.ollamaService.host
     });
     const startedAt = Date.now();
-    const welcome = await this.ollamaService.generateWelcomeMessage(joinedFirstMessage);
+    const result = await this.ollamaService.converseAsAvan({
+      history,
+      knownAnswers: answers,
+      incomingText,
+      isFirstTurn,
+      toneInstructions: settings.tone_instructions
+    });
     this.logActivity({
       type: 'llm_response',
       waId,
-      text: welcome.text,
-      source: welcome.source,
+      text: result.reply,
+      source: result.source,
       latencyMs: Date.now() - startedAt
     });
 
-    await this.send(waId, welcome.text);
+    const extracted = result.extracted || {};
+    if (extracted.problem) answers.problem = extracted.problem;
+    if (extracted.location) answers.location = extracted.location;
+    if (extracted.level) answers.level = extracted.level;
+    if (extracted.field) answers.field = extracted.field;
+    if (extracted.email && extracted.email.includes('@')) answers.email = extracted.email;
+
+    await this.updateSession(waId, { answers: JSON.stringify(answers) });
+    await this.send(waId, result.reply);
+
+    const hasMinimum = !!(answers.problem && answers.email);
+    if (result.ready && hasMinimum) {
+      await this.finalize(waId, answers);
+    }
   }
 
   /**
    * Evalúa la viabilidad con IA, envía el reporte por correo (si se recogió
    * uno) y crea/actualiza el lead correspondiente en el funnel de ventas.
-   * Las preguntas desactivadas usan su valor por defecto configurado, para
-   * que el reporte y el lead siempre queden completos.
+   * El ámbito, nivel y carrera usan el valor por defecto configurado en
+   * `whatsapp_bot_settings` si el LLM no logró identificarlos en la
+   * conversación, para que el reporte y el lead siempre queden completos.
    */
   async finalize(waId, answers) {
-    const allSteps = await this.stepService.getAll();
-    const defaults = {};
-    for (const step of allSteps) defaults[step.step_key] = step.default_value || '';
+    const settings = await this.settingsService.get();
 
-    const problem = answers.problem || defaults.problem || 'Tema de tesis por definir';
-    const location = answers.location || defaults.location || 'Perú';
-    const level = answers.level || defaults.level || 'Pregrado (Bachiller/Título)';
-    const field = answers.field || defaults.field || 'Ingeniería de Sistemas y Computación';
-    const email = answers.email || defaults.email || '';
+    const problem = answers.problem || 'Tema de tesis por definir';
+    const location = answers.location || settings.default_location || 'Perú';
+    const level = answers.level || settings.default_academic_level || 'Pregrado (Bachiller/Título)';
+    const field = answers.field || settings.default_field_of_study || 'Ingeniería de Sistemas y Computación';
+    const email = answers.email || '';
 
     const synthesizedTopic = `${problem}: Caso de estudio y propuesta en ${location}`;
     const additionalNotes = `Problema: ${problem} | Ámbito: ${location} | Origen: WhatsApp (Avan, bot automático)`;

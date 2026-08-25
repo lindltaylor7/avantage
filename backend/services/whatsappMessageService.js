@@ -78,6 +78,26 @@ export class WhatsappMessageService {
   }
 
   /**
+   * Inserta un mensaje entrante simulado (usado por el simulador de pruebas
+   * del panel admin, que no pasa por el webhook real de Meta) para que el
+   * motor conversacional del bot pueda reconstruir el hilo con el historial
+   * completo, igual que con mensajes reales.
+   */
+  async createSimulatedInbound(waId, body) {
+    const [id] = await db('whatsapp_messages').insert({
+      wa_id: waId,
+      contact_name: null,
+      message_id: `sim-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      message_type: 'text',
+      body,
+      direction: 'inbound',
+      channel: 'Simulado (Panel Admin)',
+      received_at: new Date()
+    });
+    return this.getById(id);
+  }
+
+  /**
    * Envía un mensaje de texto libre a un contacto vía la Graph API. Solo
    * funciona dentro de la ventana de 24h desde el último mensaje del cliente;
    * fuera de ella, WhatsApp exige usar una plantilla aprobada.
