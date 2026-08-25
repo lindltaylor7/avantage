@@ -28,6 +28,7 @@
     </header>
 
     <p v-if="errorMessage" class="info-box alert-box">⚠️ {{ errorMessage }}</p>
+    <p v-if="resetMessage" class="info-box success-box">✅ {{ resetMessage }}</p>
 
     <!-- Estado de credenciales: por qué el bot podría no estar respondiendo -->
     <section v-if="configStatus" class="config-status-banner" :class="{ 'is-ok': allWhatsappConfigOk }">
@@ -290,6 +291,7 @@ const stats = ref({ total: 0, contacts: 0 });
 const rawEvents = ref([]);
 const isLoading = ref(false);
 const errorMessage = ref('');
+const resetMessage = ref('');
 const autoRefresh = ref(true);
 const hostHint = window.location.host;
 
@@ -447,6 +449,8 @@ async function toggleBot() {
 
 async function resetBotSession() {
   if (!selectedWaId.value) return;
+  errorMessage.value = '';
+  resetMessage.value = '';
   try {
     const response = await apiFetch(`/api/whatsapp/conversations/${encodeURIComponent(selectedWaId.value)}/bot/reset`, {
       method: 'POST'
@@ -454,6 +458,8 @@ async function resetBotSession() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'No se pudo reiniciar la conversación.');
     await Promise.all([fetchBotSession(selectedWaId.value), fetchBotActivity()]);
+    resetMessage.value = `Conversación con ${selectedWaId.value} reiniciada: su próximo mensaje se procesará como si fuera nuevo.`;
+    setTimeout(() => { resetMessage.value = ''; }, 4000);
   } catch (error) {
     errorMessage.value = error.message;
   }
@@ -730,8 +736,13 @@ onUnmounted(() => {
 }
 
 .alert-box {
-  border-color: rgba(239, 68, 68, 0.4);
-  color: #E0717C;
+  border-color: rgba(178, 58, 69, 0.4);
+  color: var(--accent-rose);
+}
+
+.success-box {
+  border-color: rgba(47, 125, 90, 0.4);
+  color: var(--accent-emerald);
 }
 
 .subsection-title {
