@@ -1,5 +1,8 @@
+import { randomUUID } from 'crypto';
 import { db } from '../db/connection.js';
 import { WhatsappBotStepService } from './whatsappBotStepService.js';
+
+const MAX_ACTIVITY_LOG = 100;
 
 // Rango de espera antes de cada mensaje automático (simula el tiempo de
 // "escribiendo..." de una persona real y evita ráfagas de mensajes
@@ -76,6 +79,25 @@ export class WhatsappBotService {
     // de los primeros mensajes de un contacto nuevo mientras se espera el
     // silencio de FIRST_MESSAGE_DEBOUNCE_MS antes de iniciar la sesión.
     this.pendingFirstMessages = new Map();
+    // Bitácora en memoria (más reciente primero) de lo que hace el bot: cuándo
+    // agrupa mensajes, qué le manda al LLM de Ollama Cloud, qué responde, y si
+    // el envío por WhatsApp tuvo éxito. Sirve para verificar visualmente desde
+    // el panel de WhatsApp que el flujo está funcionando, sin depender de los
+    // logs del servidor.
+    this.activity = [];
+  }
+
+  logActivity(entry) {
+    this.activity.unshift({ id: randomUUID(), at: new Date().toISOString(), ...entry });
+    if (this.activity.length > MAX_ACTIVITY_LOG) this.activity.length = MAX_ACTIVITY_LOG;
+  }
+
+  getActivity() {
+    return this.activity;
+  }
+
+  clearActivity() {
+    this.activity = [];
   }
 
   async getSession(waId) {
@@ -97,7 +119,13 @@ export class WhatsappBotService {
 
   async send(waId, text) {
     await sleep(randomDelay());
-    await this.whatsappMessageService.sendTextMessage(waId, text);
+    try {
+      await this.whatsappMessageService.sendTextMessage(waId, text);
+      this.logActivity({ type: 'send_success', waId, text });
+    } catch (error) {
+      this.logActivity({ type: 'send_failed', waId, text, error: error.message });
+      throw error;
+    }
   }
 
   /**
@@ -176,10 +204,19 @@ export class WhatsappBotService {
     const pending = this.pendingFirstMessages.get(waId) || { messages: [], timer: null };
     if (text && text.trim()) pending.messages.push(text.trim());
 
+    this.logActivity({
+      type: 'buffer',
+      waId,
+      text,
+      bufferSize: pending.messages.length,
+      waitMs: FIRST_MESSAGE_DEBOUNCE_MS
+    });
+
     if (pending.timer) clearTimeout(pending.timer);
     pending.timer = setTimeout(() => {
       this.pendingFirstMessages.delete(waId);
       this.startConversation(waId, pending.messages.join('\n')).catch((error) => {
+        this.logActivity({ type: 'conversation_start_failed', waId, error: error.message });
         console.error(`❌ [WhatsApp Bot] Error al iniciar la conversación con ${waId}:`, error);
       });
     }, FIRST_MESSAGE_DEBOUNCE_MS);
@@ -211,7 +248,23 @@ export class WhatsappBotService {
       step_sequence: JSON.stringify(stepSequence)
     });
 
+    this.logActivity({
+      type: 'llm_request',
+      waId,
+      prompt: joinedFirstMessage,
+      model: this.ollamaService.chatModel,
+      host: this.ollamaService.host
+    });
+    const startedAt = Date.now();
     const welcome = await this.ollamaService.generateWelcomeMessage(joinedFirstMessage);
+    this.logActivity({
+      type: 'llm_response',
+      waId,
+      text: welcome.text,
+      source: welcome.source,
+      latencyMs: Date.now() - startedAt
+    });
+
     await this.send(waId, welcome.text);
   }
 

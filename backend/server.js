@@ -844,6 +844,66 @@ app.put('/api/whatsapp/bot-steps', requireAuth, requirePermission('leads.view'),
 });
 
 /**
+ * Bitácora en memoria de la actividad del bot de WhatsApp: cuándo agrupa
+ * mensajes de un contacto nuevo, qué le manda al LLM de Ollama Cloud, qué
+ * respondió, y si el envío por WhatsApp tuvo éxito. Permite verificar
+ * visualmente desde el panel de WhatsApp que el flujo está funcionando.
+ */
+app.get('/api/whatsapp/bot-activity', requireAuth, requirePermission('leads.view'), (req, res) => {
+  res.json({ activity: whatsappBotService.getActivity() });
+});
+
+app.delete('/api/whatsapp/bot-activity', requireAuth, requirePermission('leads.view'), (req, res) => {
+  whatsappBotService.clearActivity();
+  res.json({ success: true });
+});
+
+/**
+ * Estado (sin exponer valores secretos) de las credenciales necesarias para
+ * que el bot pueda enviar mensajes reales por WhatsApp y para que el LLM de
+ * Ollama Cloud responda. Se usa para mostrar avisos claros en el panel si
+ * falta alguna, en vez de que los mensajes fallen en silencio.
+ */
+app.get('/api/whatsapp/config-status', requireAuth, requirePermission('leads.view'), (req, res) => {
+  res.json({
+    whatsapp: {
+      hasPhoneNumberId: !!process.env.META_WHATSAPP_PHONE_NUMBER_ID,
+      hasAccessToken: !!(process.env.META_WHATSAPP_ACCESS_TOKEN || process.env.META_PAGE_ACCESS_TOKEN),
+      hasAppSecret: !!process.env.META_APP_SECRET,
+      hasVerifyToken: !!process.env.META_WHATSAPP_VERIFY_TOKEN
+    },
+    ollama: {
+      hasApiKey: !!process.env.OLLAMA_API_KEY,
+      host: process.env.OLLAMA_HOST || 'https://ollama.com',
+      chatModel: process.env.OLLAMA_CHAT_MODEL || 'llama3:latest'
+    }
+  });
+});
+
+/**
+ * Simulador de prueba: procesa un mensaje como si viniera de WhatsApp, sin
+ * pasar por el webhook real de Meta ni por la Graph API. Sirve para probar el
+ * agrupado de mensajes y la respuesta del LLM de Ollama Cloud aunque las
+ * credenciales de envío de WhatsApp todavía no estén configuradas; el
+ * resultado se ve en /api/whatsapp/bot-activity. No guarda el mensaje en la
+ * tabla de mensajes reales (no debe usarse con un wa_id real).
+ */
+app.post('/api/whatsapp/bot-test/simulate', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const waId = (req.body?.waId || '').trim();
+    const text = (req.body?.text || '').trim();
+    if (!waId || !text) {
+      return res.status(400).json({ error: 'waId y text son obligatorios.' });
+    }
+    await whatsappBotService.handleIncomingMessage(waId, text);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error al simular un mensaje de WhatsApp:', error);
+    res.status(500).json({ error: 'Error al simular el mensaje.', details: error.message });
+  }
+});
+
+/**
  * Listado de columnas (etapas) del Kanban de Leads, ordenadas por posición.
  */
 app.get('/api/funnel-columns', requireAuth, requirePermission('leads.view'), async (req, res) => {

@@ -29,6 +29,32 @@
 
     <p v-if="errorMessage" class="info-box alert-box">⚠️ {{ errorMessage }}</p>
 
+    <!-- Estado de credenciales: por qué el bot podría no estar respondiendo -->
+    <section v-if="configStatus" class="config-status-banner" :class="{ 'is-ok': allWhatsappConfigOk }">
+      <h4>{{ allWhatsappConfigOk ? '✅ Envío de WhatsApp configurado' : '⚠️ El bot no puede enviar mensajes reales todavía' }}</h4>
+      <ul class="config-status-list">
+        <li :class="configStatus.whatsapp.hasPhoneNumberId ? 'ok' : 'missing'">
+          {{ configStatus.whatsapp.hasPhoneNumberId ? '✅' : '❌' }} <code>META_WHATSAPP_PHONE_NUMBER_ID</code>
+        </li>
+        <li :class="configStatus.whatsapp.hasAccessToken ? 'ok' : 'missing'">
+          {{ configStatus.whatsapp.hasAccessToken ? '✅' : '❌' }} <code>META_WHATSAPP_ACCESS_TOKEN</code> (o <code>META_PAGE_ACCESS_TOKEN</code>)
+        </li>
+        <li :class="configStatus.whatsapp.hasAppSecret ? 'ok' : 'missing'">
+          {{ configStatus.whatsapp.hasAppSecret ? '✅' : '❌' }} <code>META_APP_SECRET</code> (firma del webhook)
+        </li>
+        <li :class="configStatus.ollama.hasApiKey ? 'ok' : 'missing'">
+          {{ configStatus.ollama.hasApiKey ? '✅' : '⚠️' }} <code>OLLAMA_API_KEY</code>
+          <span class="config-status-hint">({{ configStatus.ollama.chatModel }} en {{ configStatus.ollama.host }}{{ configStatus.ollama.hasApiKey ? '' : ', usará el saludo de respaldo' }})</span>
+        </li>
+      </ul>
+      <p v-if="!allWhatsappConfigOk" class="config-status-note">
+        Mientras falten las variables de WhatsApp, el bot sí procesa los mensajes y sí llama al LLM
+        (puedes verlo abajo en "Actividad del bot"), pero la respuesta final falla al intentar
+        enviarse por la Graph API. Usa el simulador de abajo para probar el flujo sin depender del
+        envío real.
+      </p>
+    </section>
+
     <section class="info-box">
       <h4>📋 Configuración en Meta</h4>
       <ul>
@@ -56,6 +82,85 @@
           <span class="stat-value">{{ stats.contacts || 0 }}</span>
         </div>
       </div>
+    </section>
+
+    <!-- Simulador de prueba del bot + LLM -->
+    <h3 class="subsection-title">🧪 Simulador de prueba (bot + LLM de Ollama Cloud)</h3>
+    <section class="info-box">
+      <p>
+        Simula mensajes entrantes de un contacto sin depender del webhook real de Meta ni del envío
+        por WhatsApp. Útil para ver que el agrupado de 5 segundos y la llamada al LLM funcionan.
+        Usa un <strong>wa_id de prueba</strong> (no un número real) para no mezclarlo con leads reales.
+      </p>
+    </section>
+    <section class="simulator-panel">
+      <form class="simulator-form" @submit.prevent="sendSimulatedMessage">
+        <div class="simulator-field">
+          <label class="field-label">wa_id de prueba</label>
+          <input v-model="simWaId" type="text" class="form-input-sm" placeholder="test-12345" />
+        </div>
+        <div class="simulator-field simulator-field-grow">
+          <label class="field-label">Mensaje a simular</label>
+          <input
+            v-model="simText"
+            type="text"
+            class="form-input-sm"
+            placeholder="Ej: hola, quiero saber sobre mi tesis"
+            @keydown.enter.prevent="sendSimulatedMessage"
+          />
+        </div>
+        <button type="submit" class="btn-send" :disabled="isSimulating || !simText.trim() || !simWaId.trim()">
+          {{ isSimulating ? 'Enviando...' : '📤 Simular mensaje' }}
+        </button>
+        <button type="button" class="btn-action-secondary" @click="resetSimWaId">🆕 Nuevo wa_id de prueba</button>
+      </form>
+
+      <div class="simulator-history" v-if="simMessagesSent.length">
+        <span class="preview-label">Mensajes simulados enviados a <code>{{ simWaId }}</code>:</span>
+        <div class="sim-message-chips">
+          <span v-for="(m, i) in simMessagesSent" :key="i" class="sim-message-chip">{{ m }}</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Actividad del bot: visibilidad de lo que se manda/recibe del LLM -->
+    <h3 class="subsection-title">
+      📊 Actividad del bot / LLM
+      <button type="button" class="btn-clear-activity" @click="clearActivity" title="Limpiar bitácora">🗑️ Limpiar</button>
+    </h3>
+    <section v-if="!isLoading && botActivity.length === 0" class="empty-state small">
+      <p>Sin actividad todavía. Escribe por WhatsApp o usa el simulador de arriba.</p>
+    </section>
+    <section v-else class="activity-list">
+      <article v-for="entry in botActivity" :key="entry.id" class="activity-card" :class="activityClass(entry.type)">
+        <header class="activity-card-header">
+          <span class="activity-type">{{ activityIcon(entry.type) }} {{ activityLabel(entry.type) }}</span>
+          <span class="activity-wa">{{ entry.waId }}</span>
+          <span class="activity-time">{{ formatTime(entry.at) }}</span>
+        </header>
+
+        <p v-if="entry.type === 'buffer'" class="activity-text">
+          "{{ entry.text }}" <span class="activity-hint">(burbuja #{{ entry.bufferSize }}, esperando {{ entry.waitMs / 1000 }}s de silencio)</span>
+        </p>
+        <p v-else-if="entry.type === 'llm_request'" class="activity-text">
+          <span class="activity-hint">Prompt enviado a {{ entry.model }} ({{ entry.host }}):</span><br />
+          "{{ entry.prompt }}"
+        </p>
+        <p v-else-if="entry.type === 'llm_response'" class="activity-text">
+          "{{ entry.text }}"
+          <span class="activity-hint">
+            (fuente: {{ entry.source === 'llm' ? 'Ollama Cloud LLM' : 'respaldo fijo' }}, {{ entry.latencyMs }}ms)
+          </span>
+        </p>
+        <p v-else-if="entry.type === 'send_success'" class="activity-text">"{{ entry.text }}"</p>
+        <p v-else-if="entry.type === 'send_failed'" class="activity-text">
+          "{{ entry.text }}"<br />
+          <span class="activity-error">❌ {{ entry.error }}</span>
+        </p>
+        <p v-else-if="entry.type === 'conversation_start_failed'" class="activity-text">
+          <span class="activity-error">❌ {{ entry.error }}</span>
+        </p>
+      </article>
     </section>
 
     <!-- Bandeja de conversaciones -->
@@ -185,7 +290,41 @@ const isSending = ref(false);
 const threadScrollEl = ref(null);
 const botSession = ref(null);
 
+const configStatus = ref(null);
+const botActivity = ref([]);
+const simWaId = ref(`test-${Math.floor(100000 + Math.random() * 900000)}`);
+const simText = ref('');
+const isSimulating = ref(false);
+const simMessagesSent = ref([]);
+
 let pollHandle = null;
+
+const allWhatsappConfigOk = computed(() => {
+  if (!configStatus.value) return false;
+  const w = configStatus.value.whatsapp;
+  return w.hasPhoneNumberId && w.hasAccessToken && w.hasAppSecret;
+});
+
+const ACTIVITY_META = {
+  buffer: { icon: '📥', label: 'Mensaje agrupado', className: 'activity-buffer' },
+  llm_request: { icon: '🧠', label: 'Petición al LLM', className: 'activity-llm' },
+  llm_response: { icon: '💬', label: 'Respuesta del LLM', className: 'activity-llm' },
+  send_success: { icon: '✅', label: 'Enviado por WhatsApp', className: 'activity-ok' },
+  send_failed: { icon: '❌', label: 'Falló el envío por WhatsApp', className: 'activity-error-card' },
+  conversation_start_failed: { icon: '⚠️', label: 'Error al iniciar la conversación', className: 'activity-error-card' }
+};
+
+function activityIcon(type) {
+  return ACTIVITY_META[type]?.icon || '•';
+}
+
+function activityLabel(type) {
+  return ACTIVITY_META[type]?.label || type;
+}
+
+function activityClass(type) {
+  return ACTIVITY_META[type]?.className || '';
+}
 
 const selectedContactName = computed(() => {
   const conv = conversations.value.find((c) => c.wa_id === selectedWaId.value);
@@ -345,10 +484,72 @@ async function fetchRawEvents() {
   }
 }
 
+async function fetchConfigStatus() {
+  try {
+    const response = await apiFetch('/api/whatsapp/config-status');
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Error al obtener el estado de configuración.');
+    configStatus.value = data;
+  } catch (error) {
+    errorMessage.value = error.message;
+  }
+}
+
+async function fetchBotActivity() {
+  try {
+    const response = await apiFetch('/api/whatsapp/bot-activity');
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Error al obtener la actividad del bot.');
+    botActivity.value = data.activity || [];
+  } catch (error) {
+    errorMessage.value = error.message;
+  }
+}
+
+async function clearActivity() {
+  try {
+    const response = await apiFetch('/api/whatsapp/bot-activity', { method: 'DELETE' });
+    if (!response.ok) throw new Error('No se pudo limpiar la bitácora.');
+    botActivity.value = [];
+  } catch (error) {
+    errorMessage.value = error.message;
+  }
+}
+
+function resetSimWaId() {
+  simWaId.value = `test-${Math.floor(100000 + Math.random() * 900000)}`;
+  simMessagesSent.value = [];
+}
+
+async function sendSimulatedMessage() {
+  const waId = simWaId.value.trim();
+  const text = simText.value.trim();
+  if (!waId || !text) return;
+
+  isSimulating.value = true;
+  errorMessage.value = '';
+  try {
+    const response = await apiFetch('/api/whatsapp/bot-test/simulate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ waId, text })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No se pudo simular el mensaje.');
+    simMessagesSent.value.push(text);
+    simText.value = '';
+    await fetchBotActivity();
+  } catch (error) {
+    errorMessage.value = error.message;
+  } finally {
+    isSimulating.value = false;
+  }
+}
+
 async function fetchAll() {
   isLoading.value = true;
   errorMessage.value = '';
-  const tasks = [fetchConversations(), fetchStats(), fetchRawEvents()];
+  const tasks = [fetchConversations(), fetchStats(), fetchRawEvents(), fetchConfigStatus(), fetchBotActivity()];
   if (selectedWaId.value) tasks.push(fetchThread(selectedWaId.value), fetchBotSession(selectedWaId.value));
   await Promise.all(tasks);
   isLoading.value = false;
@@ -938,6 +1139,206 @@ onUnmounted(() => {
   white-space: pre;
   font-family: 'Courier New', monospace;
   margin: 0;
+}
+
+/* Config status banner */
+.config-status-banner {
+  background: rgba(244, 63, 94, 0.08);
+  border: 1px solid rgba(244, 63, 94, 0.3);
+  border-radius: 14px;
+  padding: 1rem 1.1rem;
+}
+
+.config-status-banner.is-ok {
+  background: rgba(34, 197, 94, 0.08);
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+.config-status-banner h4 {
+  font-size: 0.9rem;
+  margin-bottom: 0.6rem;
+  color: var(--text-main);
+}
+
+.config-status-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+}
+
+.config-status-list li.ok {
+  color: var(--accent-emerald);
+}
+
+.config-status-list li.missing {
+  color: #fca5a5;
+}
+
+.config-status-hint {
+  color: var(--text-sub);
+  font-size: 0.78rem;
+}
+
+.config-status-note {
+  margin-top: 0.7rem;
+  font-size: 0.82rem;
+  color: var(--text-sub);
+}
+
+/* Simulator */
+.simulator-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.simulator-form {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.simulator-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 160px;
+}
+
+.simulator-field-grow {
+  flex: 1;
+}
+
+.form-input-sm {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 0.55rem 0.75rem;
+  color: var(--text-main);
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+}
+
+.form-input-sm:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.simulator-history {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.sim-message-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.sim-message-chip {
+  background: rgba(76, 134, 255, 0.12);
+  border: 1px solid rgba(76, 134, 255, 0.3);
+  color: var(--accent-cyan);
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.75rem;
+}
+
+/* Activity feed */
+.btn-clear-activity {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-sub);
+  border-radius: 8px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.72rem;
+  cursor: pointer;
+  margin-left: 0.75rem;
+  vertical-align: middle;
+}
+
+.btn-clear-activity:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.activity-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--border-color);
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+}
+
+.activity-card.activity-buffer {
+  border-left-color: var(--accent-amber);
+}
+
+.activity-card.activity-llm {
+  border-left-color: #8b5cf6;
+}
+
+.activity-card.activity-ok {
+  border-left-color: var(--accent-emerald);
+}
+
+.activity-card.activity-error-card {
+  border-left-color: var(--accent-rose);
+}
+
+.activity-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  margin-bottom: 0.4rem;
+}
+
+.activity-type {
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.activity-wa {
+  color: var(--accent-cyan);
+  font-family: 'Courier New', monospace;
+}
+
+.activity-time {
+  margin-left: auto;
+  color: var(--text-sub);
+  font-size: 0.72rem;
+}
+
+.activity-text {
+  font-size: 0.82rem;
+  color: var(--text-sub);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.activity-hint {
+  font-size: 0.72rem;
+  opacity: 0.75;
+}
+
+.activity-error {
+  color: #fca5a5;
 }
 
 @media (max-width: 900px) {
