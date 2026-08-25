@@ -8,7 +8,7 @@
         </div>
         <div>
           <h3 style="font-family: var(--font-heading); font-size: 1.15rem; color: var(--text-main); margin: 0;">
-            TesiBot Perú AI
+            Avan · Avantage Group
           </h3>
           <p style="font-size: 0.75rem; color: var(--accent-emerald); margin: 0; display: flex; align-items: center; gap: 0.3rem;">
             <span style="width: 6px; height: 6px; border-radius: 50%; background: var(--accent-emerald); display: inline-block;"></span>
@@ -187,7 +187,7 @@ function initChat() {
   chatMessages.value = [
     {
       sender: 'bot',
-      text: '¡Hola! 👋 Soy TesiBot Perú, tu asistente académico con inteligencia artificial.\n\nVoy a hacerte 5 preguntas breves para formular y evaluar la viabilidad de tu tema de tesis en Perú.\n\n📌 **Pregunta 1 de 5:** ¿Cuál es el problema, tecnología o tema principal que deseas investigar?'
+      text: '¡Hola! 👋 Soy Avan, el asistente académico de Avantage Group.\n\nVoy a hacerte 5 preguntas breves para formular y evaluar la viabilidad de tu tema de tesis en Perú.\n\n📌 **Pregunta 1 de 5:** ¿Cuál es el problema, tecnología o tema principal que deseas investigar?'
     }
   ];
   currentStep.value = 1;

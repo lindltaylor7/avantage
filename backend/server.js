@@ -799,7 +799,7 @@ app.post('/api/whatsapp/conversations/:waId/messages', requireAuth, requirePermi
     }
     const message = await whatsappMessageService.sendTextMessage(req.params.waId, body);
 
-    // Si un asesor responde manualmente, se pausa TesiBot para esa
+    // Si un asesor responde manualmente, se pausa Avan para esa
     // conversación (evita que el bot automático interrumpa a un humano
     // que ya está atendiendo al contacto).
     await whatsappBotService.setBotEnabled(req.params.waId, false);
@@ -812,7 +812,7 @@ app.post('/api/whatsapp/conversations/:waId/messages', requireAuth, requirePermi
 });
 
 /**
- * Estado del flujo automático de TesiBot para una conversación (paso actual,
+ * Estado del flujo automático de Avan para una conversación (paso actual,
  * si terminó, si está activo).
  */
 app.get('/api/whatsapp/conversations/:waId/bot', requireAuth, requirePermission('leads.view'), async (req, res) => {
@@ -826,7 +826,7 @@ app.get('/api/whatsapp/conversations/:waId/bot', requireAuth, requirePermission(
 });
 
 /**
- * Activa o pausa manualmente el bot de TesiBot para una conversación.
+ * Activa o pausa manualmente el bot Avan para una conversación.
  */
 app.patch('/api/whatsapp/conversations/:waId/bot', requireAuth, requirePermission('leads.view'), async (req, res) => {
   try {
@@ -856,7 +856,7 @@ app.post('/api/whatsapp/conversations/:waId/bot/reset', requireAuth, requirePerm
 });
 
 /**
- * Guion editable de las preguntas de TesiBot por WhatsApp (texto, opciones,
+ * Guion editable de las preguntas de Avan por WhatsApp (texto, opciones,
  * orden, activo/inactivo y valor por defecto).
  */
 app.get('/api/whatsapp/bot-steps', requireAuth, requirePermission('leads.view'), async (req, res) => {

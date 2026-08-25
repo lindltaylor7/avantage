@@ -374,16 +374,16 @@ const botStatusIcon = computed(() => {
 
 const botStatusLabel = computed(() => {
   if (!botSession.value) return '';
-  if (botSession.value.status === 'completed') return 'TesiBot completado';
+  if (botSession.value.status === 'completed') return 'Avan completado';
   if (!botSession.value.bot_enabled) return 'Bot pausado';
-  return `TesiBot: ${BOT_STEP_LABELS[botSession.value.step] || 'en curso'}`;
+  return `Avan: ${BOT_STEP_LABELS[botSession.value.step] || 'en curso'}`;
 });
 
 const botStatusHint = computed(() => {
   if (!botSession.value) return '';
   return botSession.value.status === 'completed'
     ? 'El contacto ya completó el flujo automático y se registró como lead.'
-    : 'TesiBot está conversando automáticamente con este contacto.';
+    : 'Avan está conversando automáticamente con este contacto.';
 });
 
 async function fetchConversations() {

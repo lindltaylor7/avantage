@@ -1,7 +1,7 @@
 import { db } from '../db/connection.js';
 
 /**
- * Guion editable de las preguntas de TesiBot por WhatsApp: texto, orden,
+ * Guion editable de las preguntas de Avan por WhatsApp: texto, orden,
  * activo/inactivo, opciones (para preguntas de selección) y valor por
  * defecto a usar cuando una pregunta está desactivada.
  */

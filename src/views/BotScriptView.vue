@@ -3,7 +3,7 @@
     <header class="console-header">
       <div class="header-titles">
         <h2 class="section-heading">
-          <span class="heading-icon">🤖</span> Consola de Agentes · TesiBot (WhatsApp)
+          <span class="heading-icon">🤖</span> Consola de Agentes · Avan (WhatsApp)
         </h2>
         <p class="section-subheading">
           Cada tarjeta es un agente del proceso conversacional. Edita su mensaje, actívalo o

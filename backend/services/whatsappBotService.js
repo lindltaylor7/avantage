@@ -62,7 +62,7 @@ function formatQuestion(step, number, total) {
 }
 
 /**
- * Flujo conversacional automático de TesiBot por WhatsApp, guiado por el
+ * Flujo conversacional automático de Avan por WhatsApp, guiado por el
  * guion editable en `whatsapp_bot_steps` (texto, orden y activo/inactivo
  * configurables desde el panel admin). Al finalizar, evalúa la viabilidad,
  * envía el reporte por correo (si se recogió un correo) y registra/actualiza
@@ -134,6 +134,23 @@ export class WhatsappBotService {
     }
   }
 
+  /**
+   * Mueve al lead de este contacto a una etapa del Setter Funnel. El lead ya
+   * existe siempre en este punto (whatsappWebhookService lo crea/encuentra
+   * por teléfono antes de pasarle el mensaje al bot), así que solo se
+   * actualiza su status; si por algún motivo no existe, se ignora en vez de
+   * interrumpir la conversación.
+   */
+  async moveFunnelStage(waId, status) {
+    try {
+      const lead = await this.leadService.findByPhone(waId);
+      if (!lead) return;
+      await this.leadService.updateLeadStatus(lead.id, status);
+    } catch (error) {
+      console.error(`❌ [WhatsApp Bot] Error al mover el lead de ${waId} a la etapa "${status}" del Setter Funnel:`, error);
+    }
+  }
+
   async send(waId, text) {
     await sleep(randomDelay());
     try {
@@ -146,7 +163,7 @@ export class WhatsappBotService {
   }
 
   /**
-   * Procesa un mensaje de texto entrante del flujo de TesiBot. Si el
+   * Procesa un mensaje de texto entrante del flujo de Avan. Si el
    * contacto no tiene sesión, la inicia con el saludo y la primera pregunta
    * activa (según el guion configurado en ese momento).
    */
@@ -275,6 +292,10 @@ export class WhatsappBotService {
       step_sequence: JSON.stringify(stepSequence)
     });
 
+    // El contacto pasa de "Conversación Abierta" a "En Calificación" en el
+    // Setter Funnel apenas Avan arranca el guion estructurado con él.
+    await this.moveFunnelStage(waId, 'calificando');
+
     this.logActivity({
       type: 'llm_request',
       waId,
@@ -313,7 +334,7 @@ export class WhatsappBotService {
     const email = answers.email || defaults.email || '';
 
     const synthesizedTopic = `${problem}: Caso de estudio y propuesta en ${location}`;
-    const additionalNotes = `Problema: ${problem} | Ámbito: ${location} | Origen: WhatsApp (TesiBot automático)`;
+    const additionalNotes = `Problema: ${problem} | Ámbito: ${location} | Origen: WhatsApp (Avan, bot automático)`;
 
     await this.send(
       waId,
@@ -346,7 +367,11 @@ export class WhatsappBotService {
         additionalNotes,
         overallViabilityScore: evaluation.overallViabilityScore,
         viabilityLevel: evaluation.viabilityLevel,
-        source: 'WhatsApp Directo'
+        source: 'WhatsApp Directo',
+        // Avan ya terminó de calificarlo y le mandó su reporte; en el Setter
+        // Funnel pasa a "Transferido a Closer" para que un asesor le dé
+        // seguimiento humano.
+        status: 'transferido_closer'
       };
 
       const existingLead = await this.leadService.findByPhone(waId);

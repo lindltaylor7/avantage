@@ -93,7 +93,7 @@ export class WhatsappWebhookService {
               source: detectWhatsappChannel(message.referral)
             });
 
-            // El bot de TesiBot solo conversa con contactos identificados por
+            // El bot Avan solo conversa con contactos identificados por
             // un número real (no BSUID), solo ante mensajes de texto, y solo
             // si el mensaje es realmente nuevo (Meta puede reenviar el mismo
             // evento por reintentos; sin este chequeo el bot procesaría el
