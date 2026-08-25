@@ -60,15 +60,21 @@
           <span class="notification-badge red-badge">0</span>
         </div>
 
-        <!-- User Avatar Circle with Online Dot -->
+        <!-- User Avatar + Name -->
         <div class="user-menu-container" ref="userMenuRef">
-          <div class="avatar-wrapper" @click="isUserMenuOpen = !isUserMenuOpen">
-            <div class="avatar-circle">
-              <img v-if="authState.user?.avatar" :src="authState.user.avatar" alt="Avatar" />
-              <span v-else class="avatar-initials">{{ userInitials }}</span>
-            </div>
-            <span class="online-indicator"></span>
-          </div>
+          <button type="button" class="avatar-wrapper" @click="isUserMenuOpen = !isUserMenuOpen">
+            <span class="avatar-circle-wrap">
+              <span class="avatar-circle">
+                <img v-if="authState.user?.avatar" :src="authState.user.avatar" alt="Avatar" />
+                <span v-else class="avatar-initials">{{ userInitials }}</span>
+              </span>
+              <span class="online-indicator"></span>
+            </span>
+            <span class="avatar-name">{{ (authState.user?.name || 'Administrador').split(' ')[0] }}</span>
+            <svg class="avatar-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
 
           <!-- Dropdown User Menu -->
           <div v-if="isUserMenuOpen" class="user-dropdown glass-dropdown">
@@ -118,12 +124,13 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { authState, clearSession } from '../auth.js';
+import { getTheme, toggleTheme as toggleStoredTheme } from '../theme.js';
 
 const emit = defineEmits(['toggle-sidebar']);
 const route = useRoute();
 const router = useRouter();
 
-const isLightMode = ref(false);
+const isLightMode = ref(getTheme() === 'light');
 const isUserMenuOpen = ref(false);
 const userMenuRef = ref(null);
 
@@ -145,7 +152,7 @@ const userInitials = computed(() => {
 });
 
 function toggleTheme() {
-  isLightMode.value = !isLightMode.value;
+  isLightMode.value = toggleStoredTheme() === 'light';
 }
 
 function handleLogout() {
@@ -175,15 +182,15 @@ onUnmounted(() => {
 }
 
 .navbar-inner {
-  background-color: #171821;
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  background-color: var(--bg-card-solid);
+  border: 1px solid var(--border-color);
   border-radius: 12px;
   height: 56px;
   padding: 0 1rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--shadow-sm);
 }
 
 .navbar-left {
@@ -195,7 +202,7 @@ onUnmounted(() => {
 .icon-btn {
   background: transparent;
   border: none;
-  color: #9ca3af;
+  color: var(--text-muted);
   width: 36px;
   height: 36px;
   border-radius: 8px;
@@ -207,8 +214,8 @@ onUnmounted(() => {
 }
 
 .icon-btn:hover {
-  color: #ffffff;
-  background-color: rgba(255, 255, 255, 0.07);
+  color: var(--text-main);
+  background-color: var(--surface-2);
 }
 
 .icon-btn svg {
@@ -218,10 +225,10 @@ onUnmounted(() => {
 
 .page-title {
   font-family: var(--font-heading);
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: #e5e7eb;
-  letter-spacing: 0.02em;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-main);
+  letter-spacing: -0.01em;
 }
 
 .navbar-right {
@@ -252,7 +259,7 @@ onUnmounted(() => {
 .red-badge {
   background-color: #ef4444;
   color: #ffffff;
-  border: 1px solid #171821;
+  border: 1px solid var(--bg-card-solid);
 }
 
 .user-menu-container {
@@ -261,8 +268,38 @@ onUnmounted(() => {
 }
 
 .avatar-wrapper {
-  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: transparent;
+  border: none;
+  padding: 0.2rem 0.3rem 0.2rem 0.2rem;
+  border-radius: 9999px;
   cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.avatar-wrapper:hover {
+  background: var(--surface-2);
+}
+
+.avatar-circle-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.avatar-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+}
+
+.avatar-chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+  flex-shrink: 0;
 }
 
 .avatar-circle {
@@ -276,7 +313,7 @@ onUnmounted(() => {
   color: #ffffff;
   font-weight: 700;
   font-size: 0.85rem;
-  border: 2px solid rgba(255, 255, 255, 0.1);
+  border: 2px solid var(--border-color);
   overflow: hidden;
   transition: transform 0.2s ease;
 }
@@ -298,7 +335,7 @@ onUnmounted(() => {
   width: 10px;
   height: 10px;
   background-color: #10b981;
-  border: 2px solid #171821;
+  border: 2px solid var(--bg-card-solid);
   border-radius: 50%;
 }
 
@@ -307,10 +344,10 @@ onUnmounted(() => {
   top: 48px;
   right: 0;
   width: 230px;
-  background-color: #1a1b26;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background-color: var(--bg-card-solid);
+  border: 1px solid var(--border-color);
   border-radius: 12px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-lg);
   padding: 0.75rem;
   z-index: 150;
 }
@@ -322,12 +359,12 @@ onUnmounted(() => {
 .user-name {
   font-weight: 700;
   font-size: 0.9rem;
-  color: #ffffff;
+  color: var(--text-main);
 }
 
 .user-email {
   font-size: 0.75rem;
-  color: #9ca3af;
+  color: var(--text-muted);
   margin-bottom: 0.35rem;
   word-break: break-all;
 }
@@ -346,7 +383,7 @@ onUnmounted(() => {
 
 .dropdown-divider {
   height: 1px;
-  background-color: rgba(255, 255, 255, 0.08);
+  background-color: var(--border-color);
   margin: 0.5rem 0;
 }
 
@@ -356,7 +393,7 @@ onUnmounted(() => {
   gap: 0.6rem;
   padding: 0.5rem 0.65rem;
   border-radius: 8px;
-  color: #d1d5db;
+  color: var(--text-sub);
   text-decoration: none;
   font-size: 0.825rem;
   transition: all 0.2s ease;
@@ -368,8 +405,8 @@ onUnmounted(() => {
 }
 
 .dropdown-item:hover {
-  background-color: rgba(255, 255, 255, 0.07);
-  color: #ffffff;
+  background-color: var(--surface-2);
+  color: var(--text-main);
 }
 
 .logout-item {

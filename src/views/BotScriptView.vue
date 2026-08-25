@@ -385,7 +385,7 @@ onMounted(fetchSteps);
 .btn-action-primary {
   background: linear-gradient(135deg, var(--primary), var(--primary-hover));
   color: #ffffff;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid var(--surface-4);
   border-radius: 10px;
   padding: 0.6rem 1.15rem;
   font-size: 0.86rem;
@@ -405,7 +405,7 @@ onMounted(fetchSteps);
 }
 
 .btn-action-secondary {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-2);
   color: var(--text-main);
   border: 1px solid var(--border-color);
   border-radius: 10px;
@@ -421,7 +421,7 @@ onMounted(fetchSteps);
 }
 
 .btn-action-secondary:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-3);
 }
 
 .spin-animation {
@@ -458,10 +458,11 @@ onMounted(fetchSteps);
 }
 
 .stat-tile {
-  background: var(--bg-card);
+  background: var(--bg-card-solid);
   border: 1px solid var(--border-color);
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   padding: 0.9rem 1.1rem;
+  box-shadow: var(--shadow-sm);
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
@@ -469,8 +470,9 @@ onMounted(fetchSteps);
 
 .stat-value {
   font-family: var(--font-heading);
-  font-size: 1.5rem;
+  font-size: 1.75rem;
   font-weight: 800;
+  letter-spacing: -0.01em;
   color: var(--text-main);
 }
 
@@ -555,7 +557,7 @@ onMounted(fetchSteps);
   align-items: center;
   gap: 0.6rem;
   width: 100%;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-1);
   border: 1px solid transparent;
   border-radius: 12px;
   padding: 0.55rem 0.6rem;
@@ -567,7 +569,7 @@ onMounted(fetchSteps);
 }
 
 .roster-item:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-2);
 }
 
 .roster-item.is-selected {
@@ -627,7 +629,7 @@ onMounted(fetchSteps);
   width: 30px;
   height: 30px;
   border-radius: 9px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-2);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -832,7 +834,7 @@ onMounted(fetchSteps);
 }
 
 .step-textarea, .default-input, .option-input {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 0.55rem 0.7rem;
@@ -930,7 +932,7 @@ onMounted(fetchSteps);
 }
 
 .chat-bubble.incoming {
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   align-self: flex-end;
 }

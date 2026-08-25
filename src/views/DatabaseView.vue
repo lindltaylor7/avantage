@@ -935,7 +935,7 @@ onMounted(() => {
 .btn-action-primary {
   background: linear-gradient(135deg, var(--primary), var(--primary-hover));
   color: #ffffff;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid var(--surface-4);
   border-radius: 10px;
   padding: 0.6rem 1.2rem;
   font-size: 0.86rem;
@@ -955,7 +955,7 @@ onMounted(() => {
 }
 
 .btn-action-secondary {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-2);
   color: var(--text-main);
   border: 1px solid var(--border-color);
   border-radius: 10px;
@@ -970,8 +970,8 @@ onMounted(() => {
 }
 
 .btn-action-secondary:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 255, 255, 0.25);
+  background: var(--surface-3);
+  border-color: var(--surface-5);
 }
 
 .spin-animation {
@@ -1000,7 +1000,7 @@ onMounted(() => {
 
 .stat-card:hover {
   transform: translateY(-2px);
-  border-color: rgba(255, 255, 255, 0.2);
+  border-color: var(--surface-4);
 }
 
 .stat-icon-wrapper {
@@ -1160,12 +1160,12 @@ onMounted(() => {
 .th-options { width: 18%; text-align: right; }
 
 .lead-table-row {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid var(--surface-2);
   transition: background 0.15s ease;
 }
 
 .lead-table-row:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-1);
 }
 
 .leads-ref-table td {
@@ -1176,7 +1176,7 @@ onMounted(() => {
 .client-name-text {
   font-size: 0.88rem;
   font-weight: 700;
-  color: #60A5FA;
+  color: var(--accent-cyan);
   font-family: var(--font-heading);
   letter-spacing: 0.02em;
   line-height: 1.35;
@@ -1293,11 +1293,11 @@ onMounted(() => {
 .prospect-modal-container {
   max-width: 1040px;
   width: 95vw;
-  background: #16161B;
+  background: var(--bg-card-solid);
   border: 1px solid var(--border-color);
   border-radius: 20px;
   max-height: 90vh;
-  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.85);
+  box-shadow: var(--shadow-lg);
 }
 
 .prospect-modal-header {
@@ -1320,7 +1320,7 @@ onMounted(() => {
   border-radius: 10px;
   background: rgba(16, 94, 255, 0.2);
   border: 1px solid rgba(16, 94, 255, 0.4);
-  color: #60A5FA;
+  color: var(--accent-cyan);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1369,7 +1369,7 @@ onMounted(() => {
   align-items: center;
   gap: 0.5rem;
   padding-bottom: 0.6rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--surface-2);
 }
 
 .section-header-icon {
@@ -1421,7 +1421,7 @@ onMounted(() => {
   width: 100%;
   padding: 0.65rem 0.85rem 0.65rem 2.4rem;
   background: rgba(14, 14, 18, 0.9);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--surface-3);
   border-radius: 10px;
   color: var(--text-main);
   font-size: 0.85rem;
@@ -1457,7 +1457,7 @@ onMounted(() => {
 }
 
 .btn-footer-cancel {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-2);
   color: var(--text-main);
   border: 1px solid var(--border-color);
   border-radius: 10px;
@@ -1469,7 +1469,7 @@ onMounted(() => {
 }
 
 .btn-footer-cancel:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--surface-3);
 }
 
 .btn-footer-submit {
@@ -1499,7 +1499,7 @@ onMounted(() => {
 .prospect-badge-id {
   font-size: 0.72rem;
   font-weight: 700;
-  color: #60A5FA;
+  color: var(--accent-cyan);
   background: rgba(96, 165, 250, 0.15);
   padding: 0.2rem 0.5rem;
   border-radius: 6px;
@@ -1508,7 +1508,7 @@ onMounted(() => {
 .status-chip {
   font-size: 0.72rem;
   color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-2);
   padding: 0.2rem 0.5rem;
   border-radius: 6px;
   text-transform: capitalize;
@@ -1556,7 +1556,7 @@ onMounted(() => {
 }
 
 .drawer-card {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-1);
   border: 1px solid var(--border-color);
   border-radius: 12px;
   padding: 0.85rem;
@@ -1594,7 +1594,7 @@ onMounted(() => {
 }
 
 .drawer-topic-box {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-1);
   border: 1px solid var(--border-color);
   border-radius: 12px;
   padding: 0.85rem;

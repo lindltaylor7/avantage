@@ -279,7 +279,7 @@ onMounted(fetchAll);
 }
 
 .section-subheading code {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-2);
   padding: 0.1rem 0.35rem;
   border-radius: 5px;
   font-size: 0.85em;
@@ -291,7 +291,7 @@ onMounted(fetchAll);
 }
 
 .btn-action-secondary {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-2);
   color: var(--text-main);
   border: 1px solid var(--border-color);
   border-radius: 10px;
@@ -307,7 +307,7 @@ onMounted(fetchAll);
 }
 
 .btn-action-secondary:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-3);
 }
 
 .btn-action-secondary:disabled {
@@ -432,7 +432,7 @@ onMounted(fetchAll);
 }
 
 .filter-pill {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   color: var(--text-sub);
   border-radius: 999px;

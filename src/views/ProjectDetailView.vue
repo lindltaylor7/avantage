@@ -494,7 +494,7 @@ function progressColor(percentage) {
   if (percentage >= 100) return '#10B981';
   if (percentage >= 50) return '#105EFF';
   if (percentage > 0) return '#F59E0B';
-  return 'rgba(255, 255, 255, 0.15)';
+  return 'var(--surface-4)';
 }
 
 onMounted(() => {
@@ -512,10 +512,10 @@ onMounted(() => {
 }
 
 .status-creado { background: rgba(16, 185, 129, 0.15); color: #6EE7B7; border: 1px solid rgba(16, 185, 129, 0.35); }
-.status-iniciado { background: rgba(245, 158, 11, 0.15); color: #FCD34D; border: 1px solid rgba(245, 158, 11, 0.35); }
-.status-en-desarrollo { background: rgba(16, 94, 255, 0.15); color: #6E9BFF; border: 1px solid rgba(16, 94, 255, 0.35); }
-.status-entregado { background: rgba(191, 194, 199, 0.15); color: #D8DADD; border: 1px solid rgba(191, 194, 199, 0.35); }
-.status-cancelado { background: rgba(244, 63, 94, 0.15); color: #FDA4AF; border: 1px solid rgba(244, 63, 94, 0.35); }
+.status-iniciado { background: rgba(245, 158, 11, 0.15); color: var(--accent-amber); border: 1px solid rgba(245, 158, 11, 0.35); }
+.status-en-desarrollo { background: rgba(16, 94, 255, 0.15); color: var(--on-tint-strong); border: 1px solid rgba(16, 94, 255, 0.35); }
+.status-entregado { background: rgba(191, 194, 199, 0.15); color: var(--accent-silver); border: 1px solid rgba(191, 194, 199, 0.35); }
+.status-cancelado { background: rgba(244, 63, 94, 0.15); color: var(--accent-rose); border: 1px solid rgba(244, 63, 94, 0.35); }
 
 .tab-bar {
   display: flex;
@@ -585,7 +585,7 @@ onMounted(() => {
 }
 
 .kanban-count {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-2);
   border-radius: 9999px;
   padding: 0.1rem 0.55rem;
   font-size: 0.72rem;
@@ -614,7 +614,7 @@ onMounted(() => {
 }
 
 .task-card:hover {
-  border-color: rgba(255, 255, 255, 0.25);
+  border-color: var(--surface-5);
 }
 
 .task-checkbox-row {

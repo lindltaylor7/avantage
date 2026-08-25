@@ -514,7 +514,7 @@ onMounted(fetchAll);
   width: 100%;
   height: 100%;
   border-radius: 50%;
-  background: #18181B;
+  background: var(--bg-card-solid);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -529,7 +529,7 @@ onMounted(fetchAll);
   height: 14px;
   border-radius: 50%;
   background: #F59E0B;
-  border: 2px solid #18181B;
+  border: 2px solid var(--bg-card-solid);
 }
 
 .ig-status-dot.connected {
@@ -556,7 +556,7 @@ onMounted(fetchAll);
 }
 
 .ig-badge-type {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   color: var(--text-sub);
   font-size: 0.72rem;
@@ -567,7 +567,7 @@ onMounted(fetchAll);
 
 .ig-display-name {
   font-size: 0.92rem;
-  color: #F472B6;
+  color: var(--accent-pink);
   margin: 0;
   font-weight: 600;
 }
@@ -582,7 +582,7 @@ onMounted(fetchAll);
 
 .ig-website-link {
   font-size: 0.82rem;
-  color: #60A5FA;
+  color: var(--accent-cyan);
   text-decoration: none;
   font-weight: 500;
 }
@@ -629,12 +629,13 @@ onMounted(fetchAll);
 }
 
 .stat-card {
-  background: var(--bg-card);
+  background: var(--bg-card-solid);
   border: 1px solid var(--border-color);
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   padding: 1.15rem 1.25rem;
   display: flex;
   align-items: center;
+  box-shadow: var(--shadow-sm);
   gap: 1rem;
   backdrop-filter: blur(12px);
 }
@@ -669,8 +670,9 @@ onMounted(fetchAll);
 }
 
 .stat-value {
-  font-size: 1.6rem;
+  font-size: 1.75rem;
   font-weight: 800;
+  letter-spacing: -0.01em;
   color: var(--text-main);
   line-height: 1.2;
 }
@@ -741,7 +743,7 @@ onMounted(fetchAll);
 .ig-connected-bar {
   background: rgba(16, 185, 129, 0.1);
   border: 1px solid rgba(16, 185, 129, 0.3);
-  color: #34D399;
+  color: var(--accent-emerald);
   border-radius: 12px;
   padding: 0.65rem 1rem;
   font-size: 0.85rem;
@@ -772,7 +774,7 @@ onMounted(fetchAll);
 }
 
 .filter-pill {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   color: var(--text-muted);
   padding: 0.45rem 0.85rem;
@@ -784,14 +786,14 @@ onMounted(fetchAll);
 }
 
 .filter-pill:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-3);
   color: var(--text-main);
 }
 
 .filter-pill.active {
   background: linear-gradient(45deg, rgba(240, 148, 51, 0.2), rgba(188, 24, 136, 0.25));
   border-color: #EC4899;
-  color: #F472B6;
+  color: var(--accent-pink);
 }
 
 .view-switch-tabs {
@@ -816,8 +818,8 @@ onMounted(fetchAll);
 }
 
 .tab-btn.active {
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
+  background: var(--text-main);
+  color: var(--bg-card-solid);
 }
 
 /* Lista de Interacciones */
@@ -897,8 +899,8 @@ onMounted(fetchAll);
 
 .badge-comment { background: rgba(249, 115, 22, 0.18); color: #FB923C; }
 .badge-mention { background: rgba(168, 85, 247, 0.18); color: #C084FC; }
-.badge-direct_message, .badge-message { background: rgba(59, 130, 246, 0.18); color: #60A5FA; }
-.badge-story_reply { background: rgba(236, 72, 153, 0.18); color: #F472B6; }
+.badge-direct_message, .badge-message { background: rgba(59, 130, 246, 0.18); color: var(--accent-cyan); }
+.badge-story_reply { background: rgba(236, 72, 153, 0.18); color: var(--accent-pink); }
 
 .interaction-time {
   font-size: 0.75rem;
@@ -947,7 +949,7 @@ onMounted(fetchAll);
 }
 
 .ig-link-btn {
-  color: #F472B6;
+  color: var(--accent-pink);
   text-decoration: none;
   font-weight: 600;
   white-space: nowrap;
@@ -982,14 +984,14 @@ onMounted(fetchAll);
 }
 
 .ig-quick-btn.external {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-2);
   color: var(--text-sub);
   border: 1px solid var(--border-color);
 }
 
 .ig-quick-btn.external:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
+  background: var(--surface-3);
+  color: var(--text-main);
 }
 
 /* Grid de Publicaciones & Reels */
@@ -1025,7 +1027,7 @@ onMounted(fetchAll);
 
 .ig-media-type-tag {
   background: rgba(236, 72, 153, 0.15);
-  color: #F472B6;
+  color: var(--accent-pink);
   padding: 0.2rem 0.55rem;
   border-radius: 8px;
   font-size: 0.75rem;
@@ -1049,7 +1051,7 @@ onMounted(fetchAll);
   justify-content: space-between;
   align-items: center;
   padding-top: 0.65rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-top: 1px solid var(--surface-2);
 }
 
 .ig-media-stats {
@@ -1065,7 +1067,7 @@ onMounted(fetchAll);
 
 .ig-media-link {
   font-size: 0.8rem;
-  color: #F472B6;
+  color: var(--accent-pink);
   text-decoration: none;
   font-weight: 600;
 }

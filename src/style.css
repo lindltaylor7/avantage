@@ -1,25 +1,107 @@
 :root {
-  --bg-dark: #121214;
-  --bg-card: rgba(27, 27, 30, 0.75);
-  --bg-card-hover: rgba(38, 38, 42, 0.85);
-  --border-color: rgba(255, 255, 255, 0.09);
+  /* ---- Light theme (default) — professional CRM palette ---- */
+  --bg-dark: #F5F6FA;
+  --bg-page-alt: #EEF1F7;
+  --bg-card: #FFFFFF;
+  --bg-card-solid: #FFFFFF;
+  --bg-card-hover: #FBFCFE;
+  --bg-sidebar: #FFFFFF;
+  --border-color: #E4E7EC;
+  --border-strong: #D0D5DD;
   --border-glow: rgba(16, 94, 255, 0.35);
 
   --primary: #105EFF;
   --primary-hover: #0B47C7;
-  --accent-cyan: #4C86FF;
-  --accent-silver: #BFC2C7;
+  --accent-cyan: #2563EB;
+  --accent-silver: #94A3B8;
   --accent-emerald: #10B981;
   --accent-amber: #F59E0B;
   --accent-rose: #F43F5E;
+  --accent-pink: #DB2777;
+
+  --text-main: #0F172A;
+  --text-muted: #94A3B8;
+  --text-sub: #475569;
+
+  /* Neutral "surface" tint ramp: subtle fills for chips, inputs, hover
+     states. Values flip meaning (dark-tinted vs. white-tinted) per theme so
+     component CSS never has to branch on the theme itself. */
+  --surface-1: rgba(15, 23, 42, 0.03);
+  --surface-2: rgba(15, 23, 42, 0.05);
+  --surface-3: rgba(15, 23, 42, 0.08);
+  --surface-4: rgba(15, 23, 42, 0.12);
+  --surface-5: rgba(15, 23, 42, 0.18);
+
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-md: 0 8px 24px -8px rgba(16, 24, 40, 0.12);
+  --shadow-lg: 0 24px 48px -16px rgba(16, 24, 40, 0.2);
+
+  /* Corner-radius scale — generous rounding, bento-card look. */
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+
+  --scrollbar-track: rgba(15, 23, 42, 0.04);
+  --scrollbar-thumb: rgba(15, 23, 42, 0.16);
+  --scrollbar-thumb-hover: rgba(15, 23, 42, 0.28);
+
+  --font-heading: 'Outfit', 'Plus Jakarta Sans', sans-serif;
+  --font-subheading: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-body: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+
+  /* Brand colors for social platform badges/icons (same in both themes). */
+  --brand-whatsapp: #25D366;
+  --brand-instagram-1: #f09433;
+  --brand-instagram-2: #dc2743;
+  --brand-instagram-3: #bc1888;
+  --brand-facebook: #1877F2;
+  --brand-email: #6B7280;
+
+  /* Text readable on top of a rgba(16,94,255,0.1-0.15) "primary tint" chip
+     or panel — e.g. status badges, highlighted info boxes. */
+  --on-tint-strong: #1D4ED8;
+  --on-tint-body: #1E3A8A;
+  --on-tint-muted: #3B5BDB;
+}
+
+/* ---- Dark theme — opt-in via the navbar toggle, preference remembered ---- */
+:root[data-theme="dark"] {
+  --bg-dark: #121214;
+  --bg-page-alt: #16161A;
+  --bg-card: rgba(27, 27, 30, 0.75);
+  --bg-card-solid: #1B1B1F;
+  --bg-card-hover: rgba(38, 38, 42, 0.85);
+  --bg-sidebar: #121318;
+  --border-color: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --border-glow: rgba(16, 94, 255, 0.35);
+
+  --accent-cyan: #4C86FF;
+  --accent-silver: #BFC2C7;
+  --accent-pink: #F472B6;
 
   --text-main: #FFFFFF;
   --text-muted: #9A9DA3;
   --text-sub: #D3D5D8;
 
-  --font-heading: 'Outfit', 'Plus Jakarta Sans', sans-serif;
-  --font-subheading: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-body: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --surface-1: rgba(255, 255, 255, 0.02);
+  --surface-2: rgba(255, 255, 255, 0.05);
+  --surface-3: rgba(255, 255, 255, 0.08);
+  --surface-4: rgba(255, 255, 255, 0.14);
+  --surface-5: rgba(255, 255, 255, 0.22);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 8px 20px -6px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 20px 40px -15px rgba(0, 0, 0, 0.55);
+
+  --on-tint-strong: #6E9BFF;
+  --on-tint-body: #EFF6FF;
+  --on-tint-muted: #A9C1FF;
+
+  --scrollbar-track: rgba(0, 0, 0, 0.2);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.16);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.3);
 }
 
 * {
@@ -33,12 +115,19 @@ body {
   background-color: var(--bg-dark);
   color: var(--text-main);
   background-image:
-    radial-gradient(at 0% 0%, rgba(16, 94, 255, 0.16) 0px, transparent 50%),
-    radial-gradient(at 100% 100%, rgba(191, 194, 199, 0.08) 0px, transparent 50%),
-    radial-gradient(at 50% 50%, rgba(16, 94, 255, 0.05) 0px, transparent 50%);
+    radial-gradient(at 0% 0%, rgba(16, 94, 255, 0.07) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(37, 99, 235, 0.05) 0px, transparent 50%);
   background-attachment: fixed;
   min-height: 100vh;
   line-height: 1.6;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+:root[data-theme="dark"] body {
+  background-image:
+    radial-gradient(at 0% 0%, rgba(16, 94, 255, 0.16) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(191, 194, 199, 0.08) 0px, transparent 50%),
+    radial-gradient(at 50% 50%, rgba(16, 94, 255, 0.05) 0px, transparent 50%);
 }
 
 #app {
@@ -55,26 +144,27 @@ body {
   padding: 0 1.5rem;
 }
 
-/* Glassmorphism Panel */
+/* Card panel: solid white surface with a soft shadow (light), or the
+   original frosted-glass look (dark). */
 .glass-panel {
   background: var(--bg-card);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--border-color);
   border-radius: 20px;
-  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.55);
+  box-shadow: var(--shadow-lg);
   transition: all 0.3s ease;
 }
 
 .glass-panel:hover {
-  border-color: rgba(255, 255, 255, 0.18);
+  border-color: var(--border-strong);
 }
 
 /* Header Component */
 .site-header {
   padding: 1.75rem 0;
   border-bottom: 1px solid var(--border-color);
-  background: rgba(18, 18, 20, 0.85);
+  background: var(--bg-card-solid);
   backdrop-filter: blur(12px);
   position: sticky;
   top: 0;
@@ -107,7 +197,7 @@ body {
   font-family: var(--font-heading);
   font-weight: 800;
   letter-spacing: -0.03em;
-  color: #14141A;
+  color: #FFFFFF;
   box-shadow: 0 4px 15px rgba(16, 94, 255, 0.4);
 }
 
@@ -118,9 +208,7 @@ body {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   white-space: nowrap;
-  background: linear-gradient(90deg, #FFFFFF, var(--accent-silver));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  color: var(--text-main);
 }
 
 .logo-text p {
@@ -176,8 +264,9 @@ body {
 /* Typography & Headings */
 h2.section-heading {
   font-family: var(--font-heading);
-  font-size: 1.5rem;
-  font-weight: 700;
+  font-size: 1.75rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   color: var(--text-main);
   margin-bottom: 0.5rem;
   display: flex;
@@ -187,9 +276,53 @@ h2.section-heading {
 
 p.section-subheading {
   font-family: var(--font-subheading);
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   color: var(--text-muted);
   margin-bottom: 1.5rem;
+}
+
+/* Icon tile: white rounded badge with a soft shadow, used for app/module
+   icons — bright, obvious, and consistent regardless of theme (matches the
+   "colorful icons on a white tile" language of the reference UI). */
+.icon-tile {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-md);
+  background: var(--bg-card-solid);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  flex-shrink: 0;
+}
+
+.icon-tile.tinted {
+  box-shadow: none;
+  border: 1px solid var(--border-color);
+}
+
+/* Big-number stat: bold headline number + small label, the "New projects 84"
+   pattern — used where we have a real count to show (never a fabricated
+   trend/percentage). */
+.stat-figure {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.stat-figure .stat-figure-value {
+  font-family: var(--font-heading);
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--text-main);
+  line-height: 1.1;
+}
+
+.stat-figure .stat-figure-label {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  font-weight: 500;
 }
 
 /* Form Styles */
@@ -207,7 +340,7 @@ p.section-subheading {
 
 .form-input, .form-select, .form-textarea {
   width: 100%;
-  background: rgba(20, 20, 23, 0.8);
+  background: var(--surface-1);
   border: 1px solid var(--border-color);
   border-radius: 12px;
   padding: 0.75rem 1rem;
@@ -220,8 +353,8 @@ p.section-subheading {
 .form-input:focus, .form-select:focus, .form-textarea:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(16, 94, 255, 0.25);
-  background: rgba(20, 20, 23, 0.95);
+  box-shadow: 0 0 0 3px rgba(16, 94, 255, 0.18);
+  background: var(--bg-card-solid);
 }
 
 .form-textarea {
@@ -260,7 +393,7 @@ p.section-subheading {
 }
 
 .btn-secondary {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   color: var(--text-main);
   border-radius: 10px;
@@ -272,15 +405,15 @@ p.section-subheading {
 }
 
 .btn-secondary:hover {
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: var(--surface-4);
+  border-color: var(--border-strong);
 }
 
 /* Viability Gauge Card */
 .score-card {
   text-align: center;
   padding: 2rem;
-  background: radial-gradient(circle at center, rgba(38, 38, 42, 0.6), rgba(18, 18, 20, 0.9));
+  background: var(--surface-1);
   border-radius: 16px;
   border: 1px solid var(--border-glow);
   margin-bottom: 1.5rem;
@@ -304,7 +437,7 @@ p.section-subheading {
 
 .gauge-bg {
   fill: none;
-  stroke: rgba(255, 255, 255, 0.08);
+  stroke: var(--surface-3);
   stroke-width: 10;
 }
 
@@ -339,28 +472,33 @@ p.section-subheading {
 }
 
 .level-alta {
-  background: rgba(16, 185, 129, 0.18);
-  color: #34D399;
+  background: rgba(16, 185, 129, 0.14);
+  color: #059669;
   border: 1px solid rgba(16, 185, 129, 0.4);
 }
 
 .level-media-alta {
-  background: rgba(16, 94, 255, 0.18);
-  color: #6E9BFF;
+  background: rgba(16, 94, 255, 0.12);
+  color: #1D4ED8;
   border: 1px solid rgba(16, 94, 255, 0.4);
 }
 
 .level-media {
-  background: rgba(245, 158, 11, 0.18);
-  color: #FBBF24;
+  background: rgba(245, 158, 11, 0.14);
+  color: #B45309;
   border: 1px solid rgba(245, 158, 11, 0.4);
 }
 
 .level-baja {
-  background: rgba(244, 63, 94, 0.18);
-  color: #FB7185;
+  background: rgba(244, 63, 94, 0.12);
+  color: #BE123C;
   border: 1px solid rgba(244, 63, 94, 0.4);
 }
+
+:root[data-theme="dark"] .level-alta { color: #34D399; }
+:root[data-theme="dark"] .level-media-alta { color: #6E9BFF; }
+:root[data-theme="dark"] .level-media { color: #FBBF24; }
+:root[data-theme="dark"] .level-baja { color: #FB7185; }
 
 /* Metric Progress Bar */
 .metric-item {
@@ -377,7 +515,7 @@ p.section-subheading {
 .metric-bar-bg {
   width: 100%;
   height: 8px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-3);
   border-radius: 9999px;
   overflow: hidden;
 }
@@ -403,7 +541,7 @@ p.section-subheading {
 }
 
 .info-box {
-  background: rgba(20, 20, 23, 0.6);
+  background: var(--surface-1);
   border: 1px solid var(--border-color);
   border-radius: 14px;
   padding: 1.1rem;
@@ -433,7 +571,7 @@ p.section-subheading {
 
 /* Email Banner Notification */
 .email-banner {
-  background: linear-gradient(135deg, rgba(16, 94, 255, 0.15), rgba(191, 194, 199, 0.1));
+  background: linear-gradient(135deg, rgba(16, 94, 255, 0.1), rgba(37, 99, 235, 0.05));
   border: 1px solid rgba(16, 94, 255, 0.3);
   border-radius: 14px;
   padding: 1rem 1.25rem;
@@ -458,7 +596,7 @@ p.section-subheading {
   left: 0;
   width: 100vw;
   height: 100vh;
-  background: rgba(0, 0, 0, 0.75);
+  background: rgba(15, 23, 42, 0.55);
   backdrop-filter: blur(8px);
   z-index: 1000;
   display: flex;
@@ -467,8 +605,12 @@ p.section-subheading {
   padding: 1.5rem;
 }
 
+:root[data-theme="dark"] .modal-overlay {
+  background: rgba(0, 0, 0, 0.75);
+}
+
 .modal-content {
-  background: #1B1B1F;
+  background: var(--bg-card-solid);
   border: 1px solid var(--border-color);
   border-radius: 20px;
   width: 100%;
@@ -476,7 +618,7 @@ p.section-subheading {
   max-height: 85vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+  box-shadow: var(--shadow-lg);
 }
 
 .modal-header {
@@ -512,9 +654,9 @@ p.section-subheading {
 .spinner {
   width: 20px;
   height: 20px;
-  border: 3px solid rgba(255, 255, 255, 0.3);
+  border: 3px solid var(--surface-4);
   border-radius: 50%;
-  border-top-color: #FFFFFF;
+  border-top-color: var(--primary);
   animation: spin 0.8s linear infinite;
 }
 
@@ -529,22 +671,43 @@ p.section-subheading {
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--scrollbar-track);
   border-radius: 9999px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.16);
+  background: var(--scrollbar-thumb);
   border-radius: 9999px;
   transition: background 0.2s ease;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: var(--scrollbar-thumb-hover);
 }
 
 .custom-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.16) rgba(0, 0, 0, 0.2);
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 
+/* ---- Shared brand icon badges (WhatsApp / Instagram / Facebook / Email) ---- */
+.brand-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 8px;
+}
+
+.brand-icon svg {
+  width: 60%;
+  height: 60%;
+}
+
+.brand-icon.whatsapp { background: var(--brand-whatsapp); color: #fff; }
+.brand-icon.instagram {
+  background: linear-gradient(135deg, var(--brand-instagram-1), var(--brand-instagram-2), var(--brand-instagram-3));
+  color: #fff;
+}
+.brand-icon.facebook { background: var(--brand-facebook); color: #fff; }
+.brand-icon.email { background: var(--brand-email); color: #fff; }

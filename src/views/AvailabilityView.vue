@@ -299,7 +299,7 @@ onUnmounted(() => {
 .btn-action-primary {
   background: linear-gradient(135deg, var(--primary), var(--primary-hover));
   color: #ffffff;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid var(--surface-4);
   border-radius: 10px;
   padding: 0.6rem 1.15rem;
   font-size: 0.86rem;
@@ -319,7 +319,7 @@ onUnmounted(() => {
 }
 
 .btn-action-secondary {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-2);
   color: var(--text-main);
   border: 1px solid var(--border-color);
   border-radius: 10px;
@@ -332,7 +332,7 @@ onUnmounted(() => {
 }
 
 .btn-action-secondary:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-3);
 }
 
 .alert-box {
@@ -427,8 +427,8 @@ onUnmounted(() => {
 .grid-cell {
   height: 22px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--surface-2);
+  border: 1px solid var(--surface-2);
   cursor: pointer;
   transition: background 0.1s ease;
 }

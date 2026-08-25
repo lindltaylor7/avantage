@@ -146,11 +146,11 @@
 
     <!-- Delimitación y Enfoque Recomendado -->
     <div class="info-box" style="background: rgba(16, 94, 255, 0.12); border-color: rgba(16, 94, 255, 0.4);">
-      <h4 style="color: #6E9BFF;">🎯 Delimitación Recomendada para Plan de Tesis</h4>
-      <p style="font-size: 0.95rem; font-style: italic; color: #EFF6FF; margin-bottom: 0.75rem;">
+      <h4 style="color: var(--on-tint-strong);">🎯 Delimitación Recomendada para Plan de Tesis</h4>
+      <p style="font-size: 0.95rem; font-style: italic; color: var(--on-tint-body); margin-bottom: 0.75rem;">
         {{ report.evaluation.recommendedDelimitation }}
       </p>
-      <div style="font-size: 0.85rem; color: #A9C1FF;">
+      <div style="font-size: 0.85rem; color: var(--on-tint-muted);">
         <strong>Enfoque Metodológico Sugerido:</strong> {{ report.evaluation.suggestedMethodology.approach }} | 
         <strong>Diseño:</strong> {{ report.evaluation.suggestedMethodology.design }}<br/>
         <strong>Ámbito / Muestra recomendada:</strong> {{ report.evaluation.suggestedMethodology.sampleOrDataTarget }}

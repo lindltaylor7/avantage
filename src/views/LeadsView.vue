@@ -1419,7 +1419,7 @@ onMounted(() => {
 .btn-action-primary {
   background: linear-gradient(135deg, var(--primary), var(--primary-hover));
   color: #ffffff;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid var(--surface-4);
   border-radius: 10px;
   padding: 0.6rem 1.15rem;
   font-size: 0.86rem;
@@ -1440,7 +1440,7 @@ onMounted(() => {
 }
 
 .btn-action-secondary {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-2);
   color: var(--text-main);
   border: 1px solid var(--border-color);
   border-radius: 10px;
@@ -1456,8 +1456,8 @@ onMounted(() => {
 }
 
 .btn-action-secondary:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 255, 255, 0.25);
+  background: var(--surface-3);
+  border-color: var(--surface-5);
 }
 
 .btn-action-ghost {
@@ -1474,8 +1474,8 @@ onMounted(() => {
 
 .btn-action-ghost:hover {
   color: var(--text-main);
-  border-color: rgba(255, 255, 255, 0.3);
-  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--surface-5);
+  background: var(--surface-1);
 }
 
 .btn-action-danger {
@@ -1521,7 +1521,7 @@ onMounted(() => {
 
 .stat-card:hover {
   transform: translateY(-2px);
-  border-color: rgba(255, 255, 255, 0.2);
+  border-color: var(--surface-4);
 }
 
 .stat-icon-wrapper {
@@ -1645,7 +1645,7 @@ onMounted(() => {
 }
 
 .filter-pill {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   border-radius: 9999px;
   color: var(--text-muted);
@@ -1657,7 +1657,7 @@ onMounted(() => {
 }
 
 .filter-pill:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-3);
   color: var(--text-main);
 }
 
@@ -1710,7 +1710,7 @@ onMounted(() => {
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   color: var(--text-main);
   display: flex;
@@ -1766,7 +1766,7 @@ onMounted(() => {
 }
 
 .kanban-column:hover {
-  border-color: rgba(255, 255, 255, 0.18);
+  border-color: var(--surface-4);
 }
 
 .kanban-column.is-final-column {
@@ -1840,7 +1840,7 @@ onMounted(() => {
   width: 22px;
   height: 22px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   color: var(--text-muted);
   font-size: 0.65rem;
@@ -1878,7 +1878,7 @@ onMounted(() => {
 }
 
 .col-menu-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-3);
   color: var(--text-main);
 }
 
@@ -1914,7 +1914,7 @@ onMounted(() => {
 }
 
 .kanban-lead-card:hover {
-  border-color: rgba(255, 255, 255, 0.25);
+  border-color: var(--surface-5);
   transform: translateY(-2px);
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
 }
@@ -1975,7 +1975,7 @@ onMounted(() => {
   font-weight: 700;
   font-family: var(--font-heading);
   color: var(--col-accent);
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-3);
   padding: 0.15rem 0.55rem;
   border-radius: 9999px;
   border: 1px solid var(--col-accent);
@@ -1998,7 +1998,7 @@ onMounted(() => {
   font-size: 0.72rem;
   color: var(--text-muted);
   font-family: var(--font-body);
-  border-top: 1px dashed rgba(255, 255, 255, 0.12);
+  border-top: 1px dashed var(--surface-3);
   padding-top: 0.35rem;
   margin-top: 0.2rem;
 }
@@ -2014,7 +2014,7 @@ onMounted(() => {
   font-weight: 700;
   color: var(--text-muted);
   font-family: var(--font-body);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-2);
   padding: 0.1rem 0.4rem;
   border-radius: 4px;
 }
@@ -2132,7 +2132,7 @@ onMounted(() => {
   font-size: 0.7rem;
   font-family: var(--font-body);
   color: var(--text-sub);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-1);
   padding: 0.2rem 0.45rem;
   border-radius: 6px;
   width: fit-content;
@@ -2143,7 +2143,7 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   padding-top: 0.35rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-top: 1px solid var(--surface-2);
   margin-top: 0.2rem;
 }
 
@@ -2174,7 +2174,7 @@ onMounted(() => {
   justify-content: center;
   font-size: 0.75rem;
   text-decoration: none;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   transition: all 0.15s ease;
 }
@@ -2245,7 +2245,7 @@ onMounted(() => {
   height: 24px;
   min-width: 24px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   color: var(--text-main);
   font-size: 0.62rem;
@@ -2259,7 +2259,7 @@ onMounted(() => {
 
 .col-page-btn.nav-extreme-btn {
   font-size: 0.58rem;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-1);
 }
 
 .col-page-btn:hover:not(:disabled) {
@@ -2298,7 +2298,7 @@ onMounted(() => {
 }
 
 .page-pill:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-3);
   color: var(--text-main);
 }
 
@@ -2346,8 +2346,8 @@ onMounted(() => {
 }
 
 .footer-start-btn {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--surface-2);
+  border: 1px solid var(--surface-4);
   color: var(--text-main);
   font-size: 0.65rem;
   font-weight: 600;
@@ -2378,13 +2378,13 @@ onMounted(() => {
   flex: 0 0 260px;
   width: 260px;
   min-height: 200px;
-  border: 2px dashed rgba(255, 255, 255, 0.15);
+  border: 2px dashed var(--surface-4);
   border-radius: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--surface-1);
   transition: all 0.25s ease;
 }
 
@@ -2448,7 +2448,7 @@ onMounted(() => {
 
 .modal-close-btn:hover {
   color: var(--text-main);
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-3);
 }
 
 .custom-input, .custom-select {
@@ -2473,7 +2473,7 @@ onMounted(() => {
 .emoji-choice-btn {
   height: 36px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   font-size: 1.1rem;
   display: flex;
@@ -2484,7 +2484,7 @@ onMounted(() => {
 }
 
 .emoji-choice-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--surface-3);
   transform: scale(1.1);
 }
 
@@ -2523,7 +2523,7 @@ onMounted(() => {
 .checkbox-group {
   margin-top: 1rem;
   padding: 0.75rem;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-1);
   border-radius: 10px;
   border: 1px solid var(--border-color);
 }
@@ -2581,7 +2581,7 @@ onMounted(() => {
 }
 
 .info-card-panel {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-1);
   border: 1px solid var(--border-color);
   border-radius: 12px;
   padding: 0.85rem;
@@ -2620,7 +2620,7 @@ onMounted(() => {
 }
 
 .lead-notes-box {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-1);
   border: 1px solid var(--border-color);
   border-radius: 12px;
   padding: 0.85rem;
@@ -2653,7 +2653,7 @@ onMounted(() => {
   margin-top: 1.25rem;
   padding: 1rem;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-1);
   border: 1px solid var(--border-color);
 }
 

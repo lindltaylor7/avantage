@@ -50,8 +50,9 @@ function handleToggleSidebar() {
 .admin-layout {
   display: flex;
   min-height: 100vh;
-  background-color: #0e0f14;
-  color: #ffffff;
+  background-color: var(--bg-dark);
+  color: var(--text-main);
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 .sidebar-overlay {
@@ -60,7 +61,7 @@ function handleToggleSidebar() {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(15, 23, 42, 0.5);
   backdrop-filter: blur(4px);
   z-index: 110;
 }

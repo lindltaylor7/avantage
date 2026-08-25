@@ -33,7 +33,7 @@
         <iframe
           v-if="htmlContent"
           :srcdoc="htmlContent"
-          style="width: 100%; height: 500px; border: none; border-radius: 12px; background: #0F172A;"
+          style="width: 100%; height: 500px; border: none; border-radius: 12px; background: var(--bg-card-solid);"
           title="Vista Previa de Correo"
         ></iframe>
         <div v-else style="text-align: center; padding: 2rem; color: var(--text-muted);">

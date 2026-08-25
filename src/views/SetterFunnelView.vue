@@ -1478,7 +1478,7 @@ onMounted(() => {
 }
 
 .btn-action-secondary {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   color: var(--text-main);
   padding: 0.65rem 1.15rem;
@@ -1493,8 +1493,8 @@ onMounted(() => {
 }
 
 .btn-action-secondary:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: var(--surface-3);
+  border-color: var(--surface-4);
 }
 
 .btn-action-ghost {
@@ -1510,7 +1510,7 @@ onMounted(() => {
 
 .btn-action-ghost:hover {
   color: var(--text-main);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-2);
 }
 
 .btn-action-danger {
@@ -1557,7 +1557,7 @@ onMounted(() => {
 
 .stat-card:hover {
   transform: translateY(-2px);
-  border-color: rgba(255, 255, 255, 0.16);
+  border-color: var(--surface-4);
 }
 
 .stat-icon-wrapper {
@@ -1649,7 +1649,7 @@ onMounted(() => {
 }
 
 .channel-pill {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   color: var(--text-muted);
   padding: 0.45rem 0.85rem;
@@ -1661,7 +1661,7 @@ onMounted(() => {
 }
 
 .channel-pill:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-3);
   color: var(--text-main);
 }
 
@@ -1674,19 +1674,19 @@ onMounted(() => {
 .channel-pill.whatsapp-pill.active {
   background: rgba(16, 185, 129, 0.22);
   border-color: #10B981;
-  color: #34D399;
+  color: var(--accent-emerald);
 }
 
 .channel-pill.fb-pill.active {
   background: rgba(16, 94, 255, 0.22);
   border-color: #3B82F6;
-  color: #60A5FA;
+  color: var(--accent-cyan);
 }
 
 .channel-pill.ig-pill.active {
   background: rgba(217, 70, 239, 0.22);
   border-color: #D946EF;
-  color: #F472B6;
+  color: var(--accent-pink);
 }
 
 /* Filtros por Viabilidad */
@@ -1697,7 +1697,7 @@ onMounted(() => {
 }
 
 .filter-pill {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   color: var(--text-muted);
   padding: 0.4rem 0.75rem;
@@ -1709,8 +1709,8 @@ onMounted(() => {
 }
 
 .filter-pill.active {
-  background: rgba(255, 255, 255, 0.18);
-  border-color: rgba(255, 255, 255, 0.35);
+  background: var(--surface-4);
+  border-color: var(--surface-5);
   color: var(--text-main);
 }
 
@@ -1740,7 +1740,7 @@ onMounted(() => {
 }
 
 .board-nav-btn {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   color: var(--text-main);
   width: 32px;
@@ -1754,7 +1754,7 @@ onMounted(() => {
 }
 
 .board-nav-btn:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--surface-4);
 }
 
 .board-nav-hint {
@@ -1940,7 +1940,7 @@ onMounted(() => {
 
 .col-arrow-btn:hover:not(:disabled), .col-menu-btn:hover {
   color: var(--text-main);
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-3);
 }
 
 .col-arrow-btn:disabled {
@@ -1979,7 +1979,7 @@ onMounted(() => {
 
 .kanban-lead-card:hover {
   transform: translateY(-2px);
-  border-color: rgba(255, 255, 255, 0.22);
+  border-color: var(--surface-4);
   box-shadow: 0 8px 20px -8px rgba(0, 0, 0, 0.6);
 }
 
@@ -2030,24 +2030,24 @@ onMounted(() => {
 
 .channel-tag-badge.channel-whatsapp {
   background: rgba(16, 185, 129, 0.16);
-  color: #34D399;
+  color: var(--accent-emerald);
   border: 1px solid rgba(16, 185, 129, 0.35);
 }
 
 .channel-tag-badge.channel-facebook {
   background: rgba(59, 130, 246, 0.16);
-  color: #60A5FA;
+  color: var(--accent-cyan);
   border: 1px solid rgba(59, 130, 246, 0.35);
 }
 
 .channel-tag-badge.channel-instagram {
   background: rgba(217, 70, 239, 0.16);
-  color: #F472B6;
+  color: var(--accent-pink);
   border: 1px solid rgba(217, 70, 239, 0.35);
 }
 
 .channel-tag-badge.channel-direct {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-2);
   color: var(--text-sub);
   border: 1px solid var(--border-color);
 }
@@ -2059,10 +2059,10 @@ onMounted(() => {
   border-radius: 8px;
 }
 
-.viability-high { background: rgba(16, 185, 129, 0.18); color: #34D399; }
-.viability-medium { background: rgba(245, 158, 11, 0.18); color: #FBBF24; }
-.viability-low { background: rgba(244, 63, 94, 0.18); color: #FB7185; }
-.viability-unknown { background: rgba(255, 255, 255, 0.08); color: var(--text-muted); }
+.viability-high { background: rgba(16, 185, 129, 0.18); color: var(--accent-emerald); }
+.viability-medium { background: rgba(245, 158, 11, 0.18); color: var(--accent-amber); }
+.viability-low { background: rgba(244, 63, 94, 0.18); color: var(--accent-rose); }
+.viability-unknown { background: var(--surface-2); color: var(--text-muted); }
 
 .card-lead-name-box {
   display: flex;
@@ -2109,7 +2109,7 @@ onMounted(() => {
 }
 
 .card-academic-badge {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-1);
   padding: 0.25rem 0.5rem;
   border-radius: 6px;
   font-size: 0.75rem;
@@ -2125,7 +2125,7 @@ onMounted(() => {
   justify-content: space-between;
   margin-top: 0.25rem;
   padding-top: 0.45rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-top: 1px solid var(--surface-2);
 }
 
 .footer-meta {
@@ -2156,7 +2156,7 @@ onMounted(() => {
   justify-content: center;
   font-size: 0.75rem;
   text-decoration: none;
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   color: var(--text-main);
   cursor: pointer;
@@ -2176,7 +2176,7 @@ onMounted(() => {
 }
 
 .quick-icon-btn.detail:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--surface-4);
 }
 
 /* Silueta Drop Preview */
@@ -2267,7 +2267,7 @@ onMounted(() => {
 }
 
 .col-page-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-3);
   color: var(--text-main);
 }
 
@@ -2324,7 +2324,7 @@ onMounted(() => {
 
 .final-tag {
   background: rgba(16, 185, 129, 0.15);
-  color: #34D399;
+  color: var(--accent-emerald);
   padding: 0.1rem 0.4rem;
   border-radius: 6px;
   font-weight: 600;
@@ -2334,7 +2334,7 @@ onMounted(() => {
 .add-column-ghost-card {
   width: 280px;
   min-width: 280px;
-  border: 2px dashed rgba(255, 255, 255, 0.15);
+  border: 2px dashed var(--surface-4);
   border-radius: 18px;
   padding: 2rem 1.5rem;
   display: flex;
@@ -2342,7 +2342,7 @@ onMounted(() => {
   justify-content: center;
   cursor: pointer;
   transition: all 0.2s ease;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--surface-1);
 }
 
 .add-column-ghost-card:hover {
@@ -2377,7 +2377,7 @@ onMounted(() => {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.75);
+  background: rgba(15, 23, 42, 0.55);
   backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
@@ -2386,8 +2386,12 @@ onMounted(() => {
   padding: 1.5rem;
 }
 
+:root[data-theme="dark"] .modal-overlay {
+  background: rgba(0, 0, 0, 0.75);
+}
+
 .modal-content {
-  background: #18181B;
+  background: var(--bg-card-solid);
   border: 1px solid var(--border-color);
   border-radius: 20px;
   box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.8);
@@ -2432,7 +2436,7 @@ onMounted(() => {
 }
 
 .modal-close-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-3);
   color: var(--text-main);
 }
 
@@ -2484,7 +2488,7 @@ onMounted(() => {
 }
 
 .emoji-option-btn {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 0.4rem;
@@ -2517,7 +2521,8 @@ onMounted(() => {
 }
 
 .color-option-btn.active {
-  border-color: #fff;
+  border-color: var(--bg-card-solid);
+  box-shadow: 0 0 0 2px var(--primary);
   transform: scale(1.08);
 }
 
@@ -2564,7 +2569,7 @@ onMounted(() => {
 }
 
 .setter-quick-bar {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-1);
   border: 1px solid var(--border-color);
   border-radius: 14px;
   padding: 1rem;
@@ -2660,7 +2665,7 @@ onMounted(() => {
 }
 
 .detail-notes-box {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-1);
   padding: 0.6rem;
   border-radius: 6px;
   font-size: 0.85rem;
@@ -2733,12 +2738,12 @@ onMounted(() => {
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--surface-4);
   border-radius: 4px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: var(--surface-5);
 }
 
 @media (max-width: 768px) {

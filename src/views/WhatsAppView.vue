@@ -682,7 +682,7 @@ onUnmounted(() => {
 }
 
 .section-subheading code, .info-box code {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-2);
   padding: 0.1rem 0.35rem;
   border-radius: 5px;
   font-size: 0.85em;
@@ -696,7 +696,7 @@ onUnmounted(() => {
 }
 
 .btn-action-secondary {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-2);
   color: var(--text-main);
   border: 1px solid var(--border-color);
   border-radius: 10px;
@@ -712,7 +712,7 @@ onUnmounted(() => {
 }
 
 .btn-action-secondary:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-3);
 }
 
 .btn-action-secondary:disabled {
@@ -754,22 +754,24 @@ onUnmounted(() => {
 }
 
 .stat-card {
-  background: var(--bg-card);
+  background: var(--bg-card-solid);
   border: 1px solid var(--border-color);
-  border-radius: 14px;
-  padding: 1.1rem;
+  border-radius: var(--radius-lg);
+  padding: 1.1rem 1.25rem;
   display: flex;
   align-items: center;
+  box-shadow: var(--shadow-sm);
   gap: 0.85rem;
 }
 
 .stat-icon-wrapper {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+  width: 46px;
+  height: 46px;
+  border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
   font-size: 1.3rem;
   flex-shrink: 0;
 }
@@ -788,9 +790,10 @@ onUnmounted(() => {
 }
 
 .stat-value {
-  font-size: 1.4rem;
-  font-weight: 700;
+  font-size: 1.75rem;
+  font-weight: 800;
   font-family: var(--font-heading);
+  letter-spacing: -0.01em;
   color: var(--text-main);
 }
 
@@ -923,7 +926,7 @@ onUnmounted(() => {
 }
 
 .channel-direct {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-2);
   color: var(--text-sub);
 }
 
@@ -975,7 +978,7 @@ onUnmounted(() => {
 }
 
 .btn-bot-toggle {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-2);
   color: var(--text-main);
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -987,7 +990,7 @@ onUnmounted(() => {
 }
 
 .btn-bot-toggle:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-3);
 }
 
 .btn-bot-reset {
@@ -1022,7 +1025,7 @@ onUnmounted(() => {
 
 .bubble.inbound {
   align-self: flex-start;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-2);
   color: var(--text-main);
   border-bottom-left-radius: 3px;
 }
@@ -1067,7 +1070,7 @@ onUnmounted(() => {
 .reply-input {
   flex: 1;
   resize: none;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   border-radius: 10px;
   padding: 0.55rem 0.75rem;
@@ -1150,7 +1153,7 @@ onUnmounted(() => {
 }
 
 .badge-neutral {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-2);
   color: var(--text-sub);
 }
 
@@ -1252,7 +1255,7 @@ onUnmounted(() => {
 }
 
 .form-input-sm {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   border-radius: 10px;
   padding: 0.55rem 0.75rem;
@@ -1302,7 +1305,7 @@ onUnmounted(() => {
 
 .btn-clear-activity:hover {
   color: var(--text-main);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-2);
 }
 
 .activity-list {

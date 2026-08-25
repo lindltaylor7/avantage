@@ -9,22 +9,18 @@
         <p class="welcome-text">
           Tienes <strong>{{ pendingCommunicationsCount }}</strong> comunicaciones pendientes para hoy, te recomendamos revisarlas.
         </p>
+        <router-link v-if="pendingCommunicationsCount > 0" to="/admin/leads" class="welcome-cta">
+          Ver comunicaciones pendientes →
+        </router-link>
       </div>
 
       <div class="welcome-illustration-wrapper">
-        <img 
-          src="/welcome_illustration.png" 
-          alt="Bienvenida Avantage Group" 
-          class="welcome-img"
-          @error="handleImgError"
-        />
-        <!-- SVG Vector Fallback if image fails loading -->
-        <svg v-if="imgFailed" class="fallback-svg" viewBox="0 0 240 180" fill="none">
-          <rect x="20" y="120" width="200" height="12" rx="4" fill="#2d3748"/>
-          <rect x="50" y="60" width="140" height="60" rx="8" fill="#1e293b" stroke="#3b82f6" stroke-width="2"/>
-          <circle cx="120" cy="40" r="16" fill="#3b82f6"/>
-          <path d="M100 80h40v20h-40z" fill="#60a5fa"/>
-          <circle cx="160" cy="110" r="8" fill="#10b981"/>
+        <svg class="fallback-svg" viewBox="0 0 240 180" fill="none">
+          <rect x="20" y="120" width="200" height="12" rx="4" fill="var(--surface-4)"/>
+          <rect x="50" y="60" width="140" height="60" rx="8" fill="var(--surface-3)" stroke="var(--primary)" stroke-width="2"/>
+          <circle cx="120" cy="40" r="16" fill="var(--primary)"/>
+          <path d="M100 80h40v20h-40z" fill="var(--accent-cyan)"/>
+          <circle cx="160" cy="110" r="8" fill="var(--accent-emerald)"/>
         </svg>
       </div>
     </div>
@@ -70,7 +66,7 @@
         :to="tool.to"
         class="module-card"
       >
-        <div class="module-icon-bg">{{ tool.icon }}</div>
+        <div class="module-icon-bg" :class="tool.tintClass">{{ tool.icon }}</div>
         <div class="module-content">
           <h4 class="module-label">{{ tool.label }}</h4>
           <p class="module-desc">{{ tool.description }}</p>
@@ -89,7 +85,6 @@
 import { ref, computed, onMounted } from 'vue';
 import { authState, hasPermission } from '../auth.js';
 
-const imgFailed = ref(false);
 const pendingCommunications = ref([]);
 
 const welcomeName = computed(() => {
@@ -102,18 +97,14 @@ const welcomeName = computed(() => {
 const pendingCommunicationsCount = computed(() => pendingCommunications.value.length);
 
 const TOOLS = [
-  { key: 'leads.view', label: 'Funnel de Leads', description: 'Gestión comercial de candidatos y clientes en tablero Kanban', icon: '📇', to: '/admin/leads' },
-  { key: 'leads.view', label: 'Setter Funnel', description: 'Triaje de leads y conversaciones de WhatsApp, Facebook e Instagram', icon: '🎯', to: '/admin/setter-funnel' },
-  { key: 'leads.view', label: 'Instagram', description: 'Comentarios, DMs, menciones e interacciones de Instagram Business', icon: '📸', to: '/admin/instagram' },
-  { key: 'projects.view', label: 'Proyectos & Avances', description: 'Gestión de proyectos, entregables, cronogramas y tareas', icon: '🚀', to: '/admin/projects' },
-  { key: 'roles.manage', label: 'Roles y Permisos', description: 'Administración de usuarios, roles de acceso y herramientas', icon: '🔐', to: '/admin/roles' }
+  { key: 'leads.view', label: 'Funnel de Leads', description: 'Gestión comercial de candidatos y clientes en tablero Kanban', icon: '📇', to: '/admin/leads', tintClass: 'tint-amber' },
+  { key: 'leads.view', label: 'Setter Funnel', description: 'Triaje de leads y conversaciones de WhatsApp, Facebook e Instagram', icon: '🎯', to: '/admin/setter-funnel', tintClass: 'tint-pink' },
+  { key: 'leads.view', label: 'Instagram', description: 'Comentarios, DMs, menciones e interacciones de Instagram Business', icon: '📸', to: '/admin/instagram', tintClass: 'tint-purple' },
+  { key: 'projects.view', label: 'Proyectos & Avances', description: 'Gestión de proyectos, entregables, cronogramas y tareas', icon: '🚀', to: '/admin/projects', tintClass: 'tint-rose' },
+  { key: 'roles.manage', label: 'Roles y Permisos', description: 'Administración de usuarios, roles de acceso y herramientas', icon: '🔐', to: '/admin/roles', tintClass: 'tint-blue' }
 ];
 
 const availableTools = computed(() => TOOLS.filter(tool => hasPermission(tool.key)));
-
-function handleImgError() {
-  imgFailed.value = true;
-}
 
 async function fetchDashboardStats() {
   try {
@@ -146,16 +137,16 @@ onMounted(() => {
 
 /* Welcome Banner matching exact image layout */
 .welcome-banner {
-  background-color: #181921;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
-  padding: 2rem 2.25rem;
+  background-color: var(--bg-card-solid);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xl);
+  padding: 2.25rem 2.5rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
   position: relative;
   overflow: hidden;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-md);
 }
 
 .welcome-content {
@@ -165,22 +156,44 @@ onMounted(() => {
 
 .welcome-title {
   font-family: var(--font-heading);
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: #3b82f6;
+  font-size: 1.9rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text-main);
   margin-bottom: 0.6rem;
-  line-height: 1.3;
+  line-height: 1.2;
 }
 
 .welcome-text {
   font-size: 0.925rem;
-  color: #9ca3af;
+  color: var(--text-muted);
   line-height: 1.5;
 }
 
 .welcome-text strong {
-  color: #ffffff;
+  color: var(--text-main);
   font-weight: 700;
+}
+
+.welcome-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 1.1rem;
+  background: var(--primary);
+  color: #ffffff;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.6rem 1.2rem;
+  border-radius: 9999px;
+  text-decoration: none;
+  box-shadow: 0 8px 20px -6px rgba(16, 94, 255, 0.5);
+  transition: all 0.2s ease;
+}
+
+.welcome-cta:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px -6px rgba(16, 94, 255, 0.6);
 }
 
 .welcome-illustration-wrapper {
@@ -192,13 +205,6 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
-.welcome-img {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-  filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.4));
-}
-
 .fallback-svg {
   width: 100%;
   height: 100%;
@@ -206,11 +212,11 @@ onMounted(() => {
 
 /* Section Cards matching reference image */
 .section-card {
-  background-color: #171821;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
+  background-color: var(--bg-card-solid);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
   padding: 1.5rem;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--shadow-sm);
 }
 
 .section-header {
@@ -224,13 +230,13 @@ onMounted(() => {
   font-family: var(--font-heading);
   font-size: 1.1rem;
   font-weight: 700;
-  color: #ffffff;
+  color: var(--text-main);
 }
 
 .count-pill {
-  background: rgba(59, 130, 246, 0.2);
-  color: #60a5fa;
-  border: 1px solid rgba(59, 130, 246, 0.4);
+  background: rgba(16, 94, 255, 0.12);
+  color: var(--on-tint-strong);
+  border: 1px solid rgba(16, 94, 255, 0.3);
   font-size: 0.75rem;
   font-weight: 700;
   padding: 0.15rem 0.55rem;
@@ -244,28 +250,28 @@ onMounted(() => {
 .empty-state {
   padding: 2.5rem 1.5rem;
   text-align: center;
-  background-color: rgba(0, 0, 0, 0.2);
+  background-color: var(--surface-1);
   border-radius: 10px;
-  border: 1px dashed rgba(255, 255, 255, 0.08);
+  border: 1px dashed var(--border-color);
 }
 
 .empty-icon {
   width: 42px;
   height: 42px;
-  stroke: #4b5563;
+  stroke: var(--text-muted);
   margin-bottom: 0.75rem;
 }
 
 .empty-title {
   font-weight: 600;
   font-size: 0.95rem;
-  color: #d1d5db;
+  color: var(--text-sub);
   margin-bottom: 0.25rem;
 }
 
 .empty-subtitle {
   font-size: 0.825rem;
-  color: #6b7280;
+  color: var(--text-muted);
 }
 
 .communications-list {
@@ -278,8 +284,8 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 1rem;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--surface-1);
+  border: 1px solid var(--border-color);
   padding: 0.85rem 1.1rem;
   border-radius: 10px;
 }
@@ -295,16 +301,16 @@ onMounted(() => {
 .comm-name {
   font-weight: 600;
   font-size: 0.9rem;
-  color: #ffffff;
+  color: var(--text-main);
 }
 
 .comm-meta {
   font-size: 0.78rem;
-  color: #9ca3af;
+  color: var(--text-muted);
 }
 
 .btn-sm-action {
-  background: #1d6bf3;
+  background: var(--primary);
   color: #ffffff;
   padding: 0.4rem 0.85rem;
   border-radius: 8px;
@@ -322,7 +328,7 @@ onMounted(() => {
   font-family: var(--font-heading);
   font-size: 1rem;
   font-weight: 700;
-  color: #9ca3af;
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -334,9 +340,9 @@ onMounted(() => {
 }
 
 .module-card {
-  background-color: #171821;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
+  background-color: var(--bg-card-solid);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
   padding: 1.25rem;
   text-decoration: none;
   display: flex;
@@ -348,23 +354,27 @@ onMounted(() => {
 
 .module-card:hover {
   transform: translateY(-3px);
-  border-color: rgba(59, 130, 246, 0.4);
-  box-shadow: 0 10px 25px rgba(29, 107, 243, 0.15);
-  background-color: #1c1d28;
+  box-shadow: var(--shadow-md);
+  background-color: var(--bg-card-hover);
 }
 
 .module-icon-bg {
   width: 48px;
   height: 48px;
-  border-radius: 12px;
-  background: rgba(59, 130, 246, 0.12);
-  border: 1px solid rgba(59, 130, 246, 0.25);
+  border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 1.5rem;
   flex-shrink: 0;
+  border: 1px solid transparent;
 }
+
+.module-icon-bg.tint-amber { background: rgba(245, 158, 11, 0.12); border-color: rgba(245, 158, 11, 0.25); }
+.module-icon-bg.tint-pink { background: rgba(219, 39, 119, 0.12); border-color: rgba(219, 39, 119, 0.25); }
+.module-icon-bg.tint-purple { background: rgba(139, 92, 246, 0.12); border-color: rgba(139, 92, 246, 0.25); }
+.module-icon-bg.tint-rose { background: rgba(244, 63, 94, 0.12); border-color: rgba(244, 63, 94, 0.25); }
+.module-icon-bg.tint-blue { background: rgba(16, 94, 255, 0.12); border-color: rgba(16, 94, 255, 0.25); }
 
 .module-content {
   flex: 1;
@@ -374,35 +384,35 @@ onMounted(() => {
   font-family: var(--font-heading);
   font-size: 0.95rem;
   font-weight: 700;
-  color: #ffffff;
+  color: var(--text-main);
   margin-bottom: 0.25rem;
 }
 
 .module-desc {
   font-size: 0.78rem;
-  color: #9ca3af;
+  color: var(--text-muted);
   line-height: 1.35;
 }
 
 .module-arrow {
-  color: #4b5563;
+  color: var(--text-muted);
   font-size: 1.2rem;
   transition: transform 0.2s ease, color 0.2s ease;
 }
 
 .module-card:hover .module-arrow {
-  color: #3b82f6;
+  color: var(--primary);
   transform: translateX(4px);
 }
 
 .empty-tools-card {
   grid-column: 1 / -1;
-  background-color: #171821;
-  border: 1px dashed rgba(255, 255, 255, 0.1);
+  background-color: var(--bg-card-solid);
+  border: 1px dashed var(--border-strong);
   padding: 2rem;
   border-radius: 14px;
   text-align: center;
-  color: #9ca3af;
+  color: var(--text-muted);
 }
 
 @media (max-width: 768px) {
