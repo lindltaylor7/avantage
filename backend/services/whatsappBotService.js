@@ -108,6 +108,23 @@ export class WhatsappBotService {
     await db('whatsapp_bot_sessions').where({ wa_id: waId }).update({ ...data, updated_at: db.fn.now() });
   }
 
+  /**
+   * Borra la sesión de un contacto para que su próximo mensaje se trate como
+   * si fuera un contacto totalmente nuevo (pasa de nuevo por el buffer de 5s
+   * y el saludo generado por el LLM). Útil para volver a probar el flujo con
+   * un número que ya completó el guion o quedó pausado, sin tener que
+   * esperar a un contacto nuevo. No borra el historial de mensajes visible
+   * en el hilo, solo el estado interno del bot.
+   */
+  async resetSession(waId) {
+    const pending = this.pendingFirstMessages.get(waId);
+    if (pending?.timer) clearTimeout(pending.timer);
+    this.pendingFirstMessages.delete(waId);
+
+    await db('whatsapp_bot_sessions').where({ wa_id: waId }).delete();
+    this.logActivity({ type: 'reset', waId });
+  }
+
   async setBotEnabled(waId, enabled) {
     const existing = await this.getSession(waId);
     if (existing) {
@@ -149,7 +166,17 @@ export class WhatsappBotService {
       return;
     }
 
-    if (!session.bot_enabled || session.status === 'completed') return;
+    if (!session.bot_enabled || session.status === 'completed') {
+      this.logActivity({
+        type: 'skipped',
+        waId,
+        text,
+        reason: session.status === 'completed'
+          ? 'La conversación ya está marcada como "completed" (terminó el flujo antes); el bot no vuelve a responder automáticamente. Usa "🔄 Reiniciar conversación" en el panel para probarla de nuevo.'
+          : 'El bot está pausado para este contacto (alguien respondió manualmente). Actívalo con "▶️ Activar bot" en el panel.'
+      });
+      return;
+    }
 
     const stepSequence = session.step_sequence
       ? (typeof session.step_sequence === 'string' ? JSON.parse(session.step_sequence) : session.step_sequence)

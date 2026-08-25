@@ -160,6 +160,13 @@
         <p v-else-if="entry.type === 'conversation_start_failed'" class="activity-text">
           <span class="activity-error">❌ {{ entry.error }}</span>
         </p>
+        <p v-else-if="entry.type === 'skipped'" class="activity-text">
+          "{{ entry.text }}"<br />
+          <span class="activity-error">🚫 {{ entry.reason }}</span>
+        </p>
+        <p v-else-if="entry.type === 'reset'" class="activity-text activity-hint">
+          El estado del bot para este contacto se borró; su próximo mensaje se procesará como si fuera nuevo.
+        </p>
       </article>
     </section>
 
@@ -208,6 +215,9 @@
             </span>
             <button type="button" class="btn-bot-toggle" @click="toggleBot">
               {{ botSession?.bot_enabled ? '⏸️ Pausar bot' : '▶️ Activar bot' }}
+            </button>
+            <button type="button" class="btn-bot-toggle btn-bot-reset" @click="resetBotSession" title="Borra el estado del bot para este contacto: su próximo mensaje se procesará como si fuera nuevo.">
+              🔄 Reiniciar conversación
             </button>
           </header>
 
@@ -311,7 +321,9 @@ const ACTIVITY_META = {
   llm_response: { icon: '💬', label: 'Respuesta del LLM', className: 'activity-llm' },
   send_success: { icon: '✅', label: 'Enviado por WhatsApp', className: 'activity-ok' },
   send_failed: { icon: '❌', label: 'Falló el envío por WhatsApp', className: 'activity-error-card' },
-  conversation_start_failed: { icon: '⚠️', label: 'Error al iniciar la conversación', className: 'activity-error-card' }
+  conversation_start_failed: { icon: '⚠️', label: 'Error al iniciar la conversación', className: 'activity-error-card' },
+  skipped: { icon: '🚫', label: 'El bot ignoró el mensaje', className: 'activity-error-card' },
+  reset: { icon: '🔄', label: 'Conversación reiniciada', className: 'activity-ok' }
 };
 
 function activityIcon(type) {
@@ -434,6 +446,20 @@ async function toggleBot() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'No se pudo cambiar el estado del bot.');
     botSession.value = data.session;
+  } catch (error) {
+    errorMessage.value = error.message;
+  }
+}
+
+async function resetBotSession() {
+  if (!selectedWaId.value) return;
+  try {
+    const response = await apiFetch(`/api/whatsapp/conversations/${encodeURIComponent(selectedWaId.value)}/bot/reset`, {
+      method: 'POST'
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No se pudo reiniciar la conversación.');
+    await Promise.all([fetchBotSession(selectedWaId.value), fetchBotActivity()]);
   } catch (error) {
     errorMessage.value = error.message;
   }
@@ -962,6 +988,15 @@ onUnmounted(() => {
 
 .btn-bot-toggle:hover {
   background: rgba(255, 255, 255, 0.1);
+}
+
+.btn-bot-reset {
+  border-color: rgba(139, 92, 246, 0.4);
+  color: #c4b5fd;
+}
+
+.btn-bot-reset:hover {
+  background: rgba(139, 92, 246, 0.12);
 }
 
 .thread-phone {

@@ -816,6 +816,21 @@ app.patch('/api/whatsapp/conversations/:waId/bot', requireAuth, requirePermissio
 });
 
 /**
+ * Reinicia la sesión del bot para un contacto (como si fuera nuevo), sin
+ * borrar el historial de mensajes. Útil cuando una conversación de prueba ya
+ * quedó "completed" o pausada y no vuelve a responder automáticamente.
+ */
+app.post('/api/whatsapp/conversations/:waId/bot/reset', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    await whatsappBotService.resetSession(req.params.waId);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error al reiniciar la sesión del bot de WhatsApp:', error);
+    res.status(500).json({ error: 'Error al reiniciar la sesión del bot.', details: error.message });
+  }
+});
+
+/**
  * Guion editable de las preguntas de TesiBot por WhatsApp (texto, opciones,
  * orden, activo/inactivo y valor por defecto).
  */
