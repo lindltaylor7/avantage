@@ -260,6 +260,26 @@
         </div>
       </article>
     </section>
+
+    <!-- Prueba de conexión cruda -->
+    <h3 class="subsection-title">🔌 Prueba de conexión (eventos crudos)</h3>
+    <p class="subsection-hint">
+      Últimos eventos recibidos tal cual llegan a <code>/api/webhooks/instagram</code>. Úsalo para confirmar que tu app
+      de Meta realmente está enviando notificaciones a este servidor (por ejemplo, con el botón "Test" en
+      Meta → Panel de la app → Webhooks → Instagram).
+    </p>
+    <section v-if="!isLoading && rawEvents.length === 0" class="empty-state small">
+      <p>Sin eventos de prueba todavía. Envía un "Test" desde Meta → Webhooks, o comenta/mensajea la cuenta conectada.</p>
+    </section>
+    <section v-else class="events-list">
+      <article v-for="event in rawEvents" :key="event.id" class="event-card">
+        <header class="event-card-header">
+          <span class="event-time">{{ formatEventTime(event.receivedAt) }}</span>
+          <span class="signature-badge" :class="signatureBadgeClass(event)">{{ signatureBadgeText(event) }}</span>
+        </header>
+        <pre class="event-payload">{{ formatBody(event.body) }}</pre>
+      </article>
+    </section>
   </main>
 </template>
 
@@ -280,6 +300,7 @@ const profile = ref(null);
 const configStatus = ref(null);
 const interactions = ref([]);
 const mediaList = ref([]);
+const rawEvents = ref([]);
 const stats = ref({ total: 0, comments: 0, mentions: 0, dms: 0, reactions: 0 });
 const isLoading = ref(false);
 const errorMessage = ref('');
@@ -337,8 +358,18 @@ async function fetchMedia() {
   }
 }
 
+async function fetchRawEvents() {
+  try {
+    const res = await apiFetch('/api/webhooks/instagram/events');
+    const data = await res.json();
+    if (res.ok) rawEvents.value = data.events || [];
+  } catch (err) {
+    console.warn('Error al cargar eventos crudos del webhook de Instagram:', err);
+  }
+}
+
 async function fetchAll() {
-  await Promise.all([fetchProfile(), fetchConfigStatus(), fetchInteractions(), fetchMedia()]);
+  await Promise.all([fetchProfile(), fetchConfigStatus(), fetchInteractions(), fetchMedia(), fetchRawEvents()]);
 }
 
 function getUserInitial(name) {
@@ -387,6 +418,28 @@ function formatTime(isoString) {
 function truncate(text, maxLength) {
   if (!text) return '';
   return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
+}
+
+function signatureBadgeClass(event) {
+  if (!event.hasSecret) return 'badge-neutral';
+  return event.signatureValid ? 'badge-ok' : 'badge-error';
+}
+
+function signatureBadgeText(event) {
+  if (!event.hasSecret) return 'Sin verificar (META_APP_SECRET vacío)';
+  return event.signatureValid ? '✅ Firma válida' : '❌ Firma inválida';
+}
+
+function formatEventTime(isoString) {
+  if (!isoString) return '—';
+  return new Date(isoString).toLocaleString('es-PE', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit'
+  });
+}
+
+function formatBody(body) {
+  return JSON.stringify(body, null, 2);
 }
 
 onMounted(fetchAll);
@@ -1093,6 +1146,89 @@ onMounted(fetchAll);
 .empty-hint {
   font-size: 0.82rem;
   color: var(--text-muted);
+}
+
+/* Prueba de conexión cruda */
+.subsection-title {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--text-main);
+  margin: 2rem 0 0.4rem;
+}
+
+.subsection-hint {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0 0 1rem;
+  max-width: 780px;
+}
+
+.empty-state.small {
+  padding: 1.5rem;
+}
+
+.events-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.event-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 1rem 1.1rem;
+  backdrop-filter: blur(12px);
+}
+
+.event-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+
+.event-time {
+  font-size: 0.82rem;
+  color: var(--text-sub);
+}
+
+.signature-badge {
+  border-radius: 999px;
+  padding: 0.2rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge-neutral {
+  background: var(--surface-2);
+  color: var(--text-sub);
+}
+
+.badge-ok {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+}
+
+.badge-error {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+
+.event-payload {
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  font-size: 0.78rem;
+  color: var(--text-sub);
+  overflow-x: auto;
+  white-space: pre;
+  font-family: 'Courier New', monospace;
+  margin: 0;
 }
 
 @media (max-width: 768px) {
