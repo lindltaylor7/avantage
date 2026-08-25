@@ -598,7 +598,7 @@ app.get('/api/instagram/config-status', requireAuth, requirePermission('leads.vi
   res.json({
     hasPageAccessToken: !!process.env.META_PAGE_ACCESS_TOKEN,
     hasInstagramAccountId: !!process.env.META_INSTAGRAM_ACCOUNT_ID,
-    hasAppSecret: !!process.env.META_APP_SECRET,
+    hasAppSecret: instagramWebhookService.hasAppSecret(),
     hasVerifyToken: !!(process.env.META_INSTAGRAM_VERIFY_TOKEN || process.env.META_VERIFY_TOKEN)
   });
 });
@@ -627,7 +627,7 @@ app.get('/api/webhooks/instagram', (req, res) => {
  */
 app.post('/api/webhooks/instagram', (req, res) => {
   const signature = req.headers['x-hub-signature-256'];
-  const hasSecret = !!process.env.META_APP_SECRET;
+  const hasSecret = instagramWebhookService.hasAppSecret();
   const signatureValid = hasSecret ? instagramWebhookService.verifySignature(req.rawBody, signature) : null;
 
   const fields = (req.body?.entry || []).flatMap((e) => (e.changes || []).map((c) => c.field));

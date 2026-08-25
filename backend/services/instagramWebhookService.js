@@ -51,16 +51,30 @@ export class InstagramWebhookService {
   }
 
   /**
+   * App Secret usado para validar la firma de este webhook. Si la
+   * suscripción de Instagram vive en una app de Meta distinta a la del resto
+   * (Página/WhatsApp), META_INSTAGRAM_APP_SECRET permite usar un secreto
+   * propio; si no está definido, se usa el general META_APP_SECRET.
+   */
+  hasAppSecret() {
+    return !!(process.env.META_INSTAGRAM_APP_SECRET || process.env.META_APP_SECRET);
+  }
+
+  /**
    * Valida la firma X-Hub-Signature-256 del payload (POST) usando el App Secret de Meta.
    */
   verifySignature(rawBody, signatureHeader) {
-    const appSecret = process.env.META_APP_SECRET;
+    const appSecret = process.env.META_INSTAGRAM_APP_SECRET || process.env.META_APP_SECRET;
     if (!appSecret || !rawBody || !signatureHeader || !signatureHeader.startsWith('sha256=')) {
       return false;
     }
 
     const expected = crypto.createHmac('sha256', appSecret).update(rawBody).digest('hex');
     const provided = signatureHeader.slice('sha256='.length);
+
+  console.log('esperado:', expected);
+  console.log('recibido:', provided);
+  console.log('rawBody length:', rawBody.length);
 
     const expectedBuf = Buffer.from(expected, 'hex');
     const providedBuf = Buffer.from(provided, 'hex');
@@ -76,7 +90,9 @@ export class InstagramWebhookService {
     for (const change of changes) {
       try {
         console.log(`📸 [Instagram Webhook] Evento de cambio procesado: campo="${change.field}"`);
-        if (change.field === 'comments' || change.field === 'feed') {
+        if (change.field === 'comments') {
+          await this.pageInteractionService.createFromInstagramCommentChange(entry?.id, change.value || {}, entry?.time);
+        } else if (change.field === 'feed') {
           await this.pageInteractionService.createFromFeedChange(entry?.id, change.value || {});
         }
       } catch (error) {
