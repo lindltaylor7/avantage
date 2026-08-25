@@ -779,12 +779,20 @@ const DEFAULT_SETTER_COLUMNS = [
     position: 1
   },
   {
+    key: 'congelado',
+    label: 'Congelado',
+    icon: '🧊',
+    color: '#8D9199',
+    final: false,
+    position: 2
+  },
+  {
     key: 'cita_agendada',
     label: 'Cita Agendada',
     icon: '📅',
     color: '#C9922E',
     final: false,
-    position: 2
+    position: 3
   },
   {
     key: 'transferido_closer',
@@ -792,7 +800,7 @@ const DEFAULT_SETTER_COLUMNS = [
     icon: '🤝',
     color: '#2F6FB0',
     final: false,
-    position: 3
+    position: 4
   },
   {
     key: 'ganado',
@@ -800,7 +808,7 @@ const DEFAULT_SETTER_COLUMNS = [
     icon: '🏆',
     color: '#2F7D5A',
     final: true,
-    position: 4
+    position: 5
   },
   {
     key: 'descartado',
@@ -808,7 +816,7 @@ const DEFAULT_SETTER_COLUMNS = [
     icon: '🚫',
     color: '#B23A45',
     final: false,
-    position: 5
+    position: 6
   }
 ];
 
@@ -1312,7 +1320,7 @@ function confirmResetColumns() {
 
 function persistSetterColumns() {
   try {
-    localStorage.setItem('setter_funnel_columns_v1', JSON.stringify(columns.value));
+    localStorage.setItem('setter_funnel_columns_v2', JSON.stringify(columns.value));
   } catch (e) {
     console.warn('No se pudo guardar columnas en localStorage:', e);
   }
@@ -1320,7 +1328,7 @@ function persistSetterColumns() {
 
 function loadSetterColumns() {
   try {
-    const saved = localStorage.getItem('setter_funnel_columns_v1');
+    const saved = localStorage.getItem('setter_funnel_columns_v2');
     if (saved) {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed) && parsed.length > 0) {

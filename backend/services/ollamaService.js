@@ -39,12 +39,9 @@ function cosineSimilarity(vecA, vecB) {
  */
 function describeMissingPriority(knownAnswers) {
   const answers = knownAnswers || {};
-  if (!answers.problem) return 'el tema o problema de tesis que quiere investigar (todavía no lo sabes).';
-  if (!answers.email) return 'su correo electrónico para enviarle el reporte (ya sabes su tema, ahora pide el correo).';
-  if (!answers.level) return 'su nivel académico (Pregrado o Posgrado) — pregúntalo como mucho una vez, si no responde sigue con el valor por defecto.';
-  if (!answers.field) return 'su carrera o campo de estudio — pregúntalo como mucho una vez, si no responde sigue con el valor por defecto.';
-  if (!answers.location) return 'el ámbito o región de Perú donde se enfoca el estudio — pregúntalo como mucho una vez, si no responde sigue con el valor por defecto.';
-  return 'nada obligatorio: ya tienes tema y correo, puedes marcar "ready": true.';
+  if (!answers.problem) return 'el tema o problema de tesis que quiere investigar (todavía no lo sabes) — esta es tu única pregunta por ahora.';
+  if (!answers.email) return 'ya conoces el tema: ahora pide, una sola vez y de forma liviana, su correo para la invitación de la videollamada con el asesor. Sea cual sea la respuesta, después de esto marca "ready": true.';
+  return 'ya tienes tema (y ya preguntaste por el correo): marca "ready": true y cierra el turno con una respuesta breve.';
 }
 
 /**
@@ -247,10 +244,11 @@ Detalles adicionales: ${additionalNotes || 'Ninguno'}`;
   /**
    * Motor conversacional de Avan por WhatsApp: en vez de un guion fijo de
    * preguntas numeradas, en cada turno el LLM decide qué responder y qué
-   * preguntar (tono natural), va extrayendo del hilo los datos necesarios
-   * para evaluar la tesis, y avisa cuándo ya tiene lo suficiente para
-   * generar el reporte. Si no hay conexión a Ollama Cloud (sin API key, o la
-   * llamada falla), se usa una lógica de respaldo mínima basada en reglas.
+   * preguntar (tono natural), y avisa cuándo ya conoce el tema de tesis (lo
+   * único obligatorio) para que el sistema proponga agendar la llamada con
+   * un asesor — el correo es opcional, solo para la invitación del Meet. Si
+   * no hay conexión a Ollama Cloud (sin API key, o la llamada falla), se usa
+   * una lógica de respaldo mínima basada en reglas.
    */
   async converseAsAvan({ history, knownAnswers, incomingText, isFirstTurn, toneInstructions }) {
     const activeApiKey = this.apiKey || process.env.OLLAMA_API_KEY || '';
@@ -261,27 +259,27 @@ Detalles adicionales: ${additionalNotes || 'Ninguno'}`;
       return this.fallbackConversationTurn(knownAnswers, incomingText, isFirstTurn);
     }
 
-    const systemPrompt = `Eres Avan, el asistente académico de Avantage Group (Perú), conversando por WhatsApp con alguien interesado en evaluar gratis la viabilidad de su tema de tesis (regulación SUNEDU/CONCYTEC).
+    const systemPrompt = `Eres Avan, el asistente de Avantage Group (Perú), conversando por WhatsApp con alguien interesado en su tema de tesis.
 
-TU OBJETIVO: a través de una conversación natural (NUNCA un cuestionario numerado), llegar a conocer, EN ESTE ORDEN DE PRIORIDAD:
-1. El problema o tema de tesis que quiere investigar — OBLIGATORIO. Mientras no lo sepas, esta es SIEMPRE tu única pregunta.
-2. Un correo electrónico donde enviarle el reporte completo — OBLIGATORIO. Solo pregúntalo después de conocer el tema.
-3. El ámbito específico (región, institución, sector en Perú) — opcional, hay un valor por defecto.
-4. Su nivel académico (Pregrado o Posgrado) — opcional, hay un valor por defecto.
-5. Su carrera o campo de estudio — opcional, hay un valor por defecto.
+TU OBJETIVO: a través de una conversación natural, cercana y breve (NUNCA un cuestionario ni un formulario), entender de qué trata el tema o problema de tesis de la persona, y luego dirigir la conversación hacia agendar una llamada breve con un asesor de Avantage Group que pueda profundizar y orientarla — ESE es el cierre que buscas, no generar un reporte ni anunciar un puntaje de viabilidad (eso ya no se le comunica al lead por chat).
+
+LO QUE NECESITAS SABER, EN ESTE ORDEN DE PRIORIDAD:
+1. El tema o problema de tesis que quiere investigar — OBLIGATORIO. Mientras no lo sepas, esta es SIEMPRE tu única pregunta; no avances a nada más.
+2. Correo electrónico — OPCIONAL. Una vez que ya conoces el tema y estás por proponer la llamada, pregúntalo UNA sola vez y de forma liviana (ej. "para mandarte la invitación de la videollamada, ¿tienes un correo a la mano?"). Si no lo da o prefiere no darlo, sigue adelante sin insistir — no es un requisito para agendar.
+3. Ámbito, nivel académico o carrera — opcionales, hay valores por defecto configurados. Regístralos solo si la persona los menciona espontáneamente; NO se los preguntes activamente, no son parte de tu objetivo con este lead.
 
 REGLA DURA: NUNCA pidas el correo electrónico antes de conocer el tema de tesis, sin importar lo que digan las instrucciones adicionales del equipo. Si "problem" en DATOS YA CONFIRMADOS está vacío o null, tu pregunta tiene que ser sobre el tema de tesis — no sobre el correo, ni sobre nivel/carrera/ámbito.
 
 REGLAS DE TONO Y FORMATO (es WhatsApp, no un formulario):
-- Máximo 2-4 líneas por mensaje. Cercano, empático, natural. Nunca enumeres preguntas ni digas "Pregunta X de Y". Sin listas ni viñetas. Máximo 1-2 emojis.
+- Máximo 2-4 líneas por mensaje. Cercano, empático, natural, nada de tono corporativo o de encuesta. Nunca enumeres preguntas ni digas "Pregunta X de Y". Sin listas ni viñetas. Máximo 1-2 emojis.
 - Haz UNA sola pregunta a la vez: la más relevante según lo que ya sabes (ver "DATOS YA CONFIRMADOS" abajo) y lo que la persona acaba de escribir.
-- Si ya tienes tema y correo pero no mencionaron nivel/carrera/ámbito, pregunta como máximo una vez más por lo que falte — si igual no lo dan, sigue adelante con el valor por defecto en vez de insistir.
+- No le prometas ni menciones un "reporte de viabilidad", "evaluación con IA" ni ningún puntaje — el valor que le ofreces es la llamada con el asesor, no un análisis automático.
 - Reconoce en tus propias palabras algo ESPECÍFICO de lo que la persona escribió. No inventes que dijo algo que no dijo. Si el mensaje fue solo un saludo sin contenido (ej. "Hola"), no inventes que ya contó su tema: saluda y pregúntale directamente por su tema de tesis.
 - Si preguntan si eres una IA o un bot, sé transparente. Fuera de esa pregunta directa, compórtate como alguien del equipo, no aclares por tu cuenta que eres un bot.
 ${isFirstTurn ? '- Este es el PRIMER mensaje de la conversación: tu "reply" tiene que empezar presentándote brevemente como Avan, del equipo de Avantage Group, antes de cualquier otra cosa.' : ''}
 ${toneInstructions ? `\nINSTRUCCIONES ADICIONALES DEL EQUIPO (nunca contradicen la REGLA DURA de arriba):\n${toneInstructions}\n` : ''}
 
-CUÁNDO TERMINAR: marca "ready": true SOLO cuando ya tengas tema de tesis Y correo electrónico válido, y sientas que la conversación cubrió lo esencial. Cuando marques ready:true, tu "reply" debe ser BREVE (una confirmación de que vas a revisar su tema, ej. "Perfecto, dame un momento para revisar esto 👀") — el sistema se encarga de enviar el resto del reporte automáticamente después.
+CUÁNDO TERMINAR: marca "ready": true en cuanto ya conozcas el tema de tesis Y ya hayas intentado (una vez) pedir el correo para la llamada — sin importar si te lo dieron o no. No necesitas más turnos después de eso. Cuando marques ready:true, tu "reply" debe ser BREVE (ej. "Perfecto, dame un momento 👀") — el sistema se encarga de proponer la llamada con el asesor automáticamente después.
 
 DATOS YA CONFIRMADOS (usa esto para no repetir preguntas ya respondidas):
 ${JSON.stringify(knownAnswers || {})}
@@ -353,12 +351,12 @@ Responde ÚNICAMENTE en JSON válido con esta forma exacta (usa null en los camp
   /**
    * Respaldo mínimo basado en reglas para cuando Ollama Cloud no está
    * disponible: no reemplaza la calidad de la conversación con IA, pero
-   * evita dejar al contacto sin respuesta. Pide tema y correo en ese orden;
-   * en cuanto los tiene, marca "ready".
+   * evita dejar al contacto sin respuesta. En cuanto tiene el tema, marca
+   * "ready" (el correo es opcional, se captura solo si aparece en el texto).
    */
   fallbackConversationTurn(knownAnswers, incomingText, isFirstTurn) {
     const answers = knownAnswers || {};
-    const greeting = isFirstTurn ? '¡Hola! 👋 Soy Avan, el asistente académico de Avantage Group. ' : '';
+    const greeting = isFirstTurn ? '¡Hola! 👋 Soy Avan, del equipo de Avantage Group. ' : '';
 
     if (!answers.problem) {
       return {
@@ -369,24 +367,82 @@ Responde ÚNICAMENTE en JSON válido con esta forma exacta (usa null en los camp
       };
     }
 
-    if (!answers.email) {
-      const looksLikeEmail = (incomingText || '').includes('@');
-      return {
-        reply: looksLikeEmail
-          ? 'Perfecto, dame un momento para revisar esto 👀'
-          : '¿A qué correo electrónico te envío el reporte completo de viabilidad?',
-        extracted: looksLikeEmail ? { email: incomingText.trim() } : {},
-        ready: looksLikeEmail,
-        source: 'fallback'
-      };
-    }
-
+    const looksLikeEmail = (incomingText || '').includes('@');
     return {
-      reply: 'Perfecto, dame un momento para revisar esto 👀',
-      extracted: {},
+      reply: 'Perfecto, dame un momento 👀',
+      extracted: looksLikeEmail ? { email: incomingText.trim() } : {},
       ready: true,
       source: 'fallback'
     };
+  }
+
+  /**
+   * Interpreta en lenguaje natural qué día pide el lead para su llamada
+   * ("mañana", "el jueves", "el 28", una fecha explícita, etc.) y lo
+   * convierte a "YYYY-MM-DD" (calendario de Lima). Devuelve date: null si no
+   * logra identificar un día claro dentro de un rango razonable.
+   */
+  async parseSchedulingDate(text, todayIso) {
+    const activeApiKey = this.apiKey || process.env.OLLAMA_API_KEY || '';
+    let activeHost = this.host || 'https://ollama.com';
+    if (activeHost === 'https://api.ollama.com') activeHost = 'https://ollama.com';
+
+    if (!activeApiKey && !activeHost.includes('localhost') && !activeHost.includes('127.0.0.1')) {
+      return this.fallbackParseSchedulingDate(text, todayIso);
+    }
+
+    const prompt = `Hoy es ${todayIso} (formato YYYY-MM-DD, zona horaria de Lima, Perú).
+
+Alguien acaba de responder esto cuando le preguntaron qué día prefiere para una llamada:
+"""${text}"""
+
+Interpreta a qué fecha se refiere (puede decir "mañana", "el jueves", "el 28", "en dos semanas", una fecha explícita, etc.) y conviértela a formato YYYY-MM-DD, siempre una fecha de hoy en adelante (nunca en el pasado) y dentro de los próximos 30 días. Si el texto NO expresa ningún día concreto (ej. "cuando puedas", "no sé", o simplemente no habla de fechas), responde null.
+
+Responde ÚNICAMENTE en JSON válido: {"date": "YYYY-MM-DD" o null}`;
+
+    try {
+      const generateUrl = this.getApiUrl(activeHost, '/generate');
+      const response = await fetch(generateUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(activeApiKey ? { 'Authorization': `Bearer ${activeApiKey}` } : {})
+        },
+        body: JSON.stringify({ model: this.chatModel, prompt, stream: false, format: 'json' }),
+        signal: AbortSignal.timeout(15000)
+      });
+
+      if (!response.ok) return this.fallbackParseSchedulingDate(text, todayIso);
+
+      const data = await response.json();
+      const cleanResponse = (data.response || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
+      const parsed = JSON.parse(cleanResponse);
+      const date = typeof parsed.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.date) ? parsed.date : null;
+      return { date, source: 'llm' };
+    } catch (err) {
+      console.warn('Ollama Cloud LLM date parsing notice:', err.message);
+      return this.fallbackParseSchedulingDate(text, todayIso);
+    }
+  }
+
+  /**
+   * Respaldo mínimo sin IA: reconoce "hoy" y "mañana" respecto a `todayIso`.
+   * Cualquier otra expresión (nombres de día, fechas explícitas, etc.)
+   * devuelve null — sin IA no vale la pena adivinar más que lo obvio.
+   */
+  fallbackParseSchedulingDate(text, todayIso) {
+    const normalized = (text || '').toLowerCase();
+    const [y, m, d] = todayIso.split('-').map(Number);
+    const todayUTC = Date.UTC(y, m - 1, d);
+
+    if (/\bhoy\b/.test(normalized)) {
+      return { date: todayIso, source: 'fallback' };
+    }
+    if (/\bmanana\b|\bmañana\b/.test(normalized)) {
+      const tomorrow = new Date(todayUTC + 86400000);
+      return { date: tomorrow.toISOString().slice(0, 10), source: 'fallback' };
+    }
+    return { date: null, source: 'fallback' };
   }
 
   /**

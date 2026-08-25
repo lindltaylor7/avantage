@@ -186,15 +186,39 @@ export class GoogleCalendarService {
   }
 
   /**
-   * Calcula los próximos bloques libres del asesor cruzando su horario
-   * semanal recurrente (`advisor_availability`) con los eventos ya
-   * existentes en su Google Calendar real (vía freebusy), para ofrecerlos
-   * como opciones concretas de agendamiento (ej. desde el bot de WhatsApp).
+   * Descarta de `candidates` los bloques que se cruzan con eventos ya
+   * existentes en el Google Calendar real del asesor. Se usa events.list (no
+   * freebusy.query) porque el scope pedido al asesor es "calendar.events"
+   * (solo eventos), y freebusy.query exige el scope más amplio
+   * "calendar"/"calendar.readonly" que no solicitamos.
    */
-  async getUpcomingFreeSlots(userId, { days = 14, limit = 6, slotMinutes = 30, minLeadTimeMinutes = 120 } = {}) {
-    const availabilityRows = await db('advisor_availability').where({ user_id: userId }).select('day_of_week', 'start_time');
-    if (availabilityRows.length === 0) return [];
+  async filterAgainstCalendar(userId, candidates) {
+    if (candidates.length === 0) return [];
 
+    const client = await this.getAuthorizedClient(userId);
+    const calendar = google.calendar({ version: 'v3', auth: client });
+    const { data } = await calendar.events.list({
+      calendarId: 'primary',
+      timeMin: candidates[0].start.toISOString(),
+      timeMax: candidates[candidates.length - 1].end.toISOString(),
+      singleEvents: true,
+      orderBy: 'startTime'
+    });
+    const busyPeriods = (data.items || [])
+      .filter((event) => event.status !== 'cancelled' && event.start?.dateTime && event.end?.dateTime)
+      .map((event) => ({ start: new Date(event.start.dateTime).getTime(), end: new Date(event.end.dateTime).getTime() }));
+
+    return candidates.filter((slot) => !busyPeriods.some((busy) => (
+      slot.start.getTime() < busy.end && slot.end.getTime() > busy.start
+    )));
+  }
+
+  /**
+   * Bloques candidatos (sin cruzar aún con el calendario real) para los
+   * próximos `days` días a partir de hoy, según el horario semanal
+   * recurrente del asesor (`advisor_availability`).
+   */
+  buildCandidateSlots(availabilityRows, { days, slotMinutes, minLeadTimeMinutes }) {
     const startsByDay = new Map();
     for (const row of availabilityRows) {
       if (!startsByDay.has(row.day_of_week)) startsByDay.set(row.day_of_week, []);
@@ -227,30 +251,64 @@ export class GoogleCalendarService {
       }
     }
 
+    candidates.sort((a, b) => a.start - b.start);
+    return candidates;
+  }
+
+  /**
+   * Calcula los próximos bloques libres del asesor cruzando su horario
+   * semanal recurrente con los eventos ya existentes en su Google Calendar
+   * real, para ofrecerlos como opciones concretas de agendamiento. Se usa
+   * como respaldo cuando un día específico pedido no tiene espacio, para
+   * sugerir las próximas opciones reales en vez de un simple "no hay".
+   */
+  async getUpcomingFreeSlots(userId, { days = 14, limit = 6, slotMinutes = 30, minLeadTimeMinutes = 120 } = {}) {
+    const availabilityRows = await db('advisor_availability').where({ user_id: userId }).select('day_of_week', 'start_time');
+    if (availabilityRows.length === 0) return [];
+
+    const candidates = this.buildCandidateSlots(availabilityRows, { days, slotMinutes, minLeadTimeMinutes });
+    if (candidates.length === 0) return [];
+
+    const freeSlots = await this.filterAgainstCalendar(userId, candidates);
+    return freeSlots.slice(0, limit).map((slot) => ({
+      startTime: slot.start.toISOString(),
+      endTime: slot.end.toISOString(),
+      label: formatSlotLabel(slot.start)
+    }));
+  }
+
+  /**
+   * Bloques libres del asesor para UN día específico (`dateStr` en formato
+   * "YYYY-MM-DD", calendario de Lima) — usado cuando el lead ya dijo qué día
+   * prefiere, en vez de mostrarle una lista genérica de próximos horarios.
+   */
+  async getFreeSlotsForDate(userId, dateStr, { slotMinutes = 30, minLeadTimeMinutes = 120 } = {}) {
+    const availabilityRows = await db('advisor_availability').where({ user_id: userId }).select('day_of_week', 'start_time');
+    if (availabilityRows.length === 0) return [];
+
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dayStartUTC = Date.UTC(y, m - 1, d) + LIMA_UTC_OFFSET_MS;
+    const jsWeekday = new Date(dayStartUTC).getUTCDay();
+    const dayOfWeek = (jsWeekday + 6) % 7;
+    const starts = availabilityRows.filter((row) => row.day_of_week === dayOfWeek).map((row) => row.start_time);
+    if (starts.length === 0) return [];
+
+    const now = new Date();
+    const minStart = new Date(now.getTime() + minLeadTimeMinutes * 60000);
+
+    const candidates = [];
+    for (const hhmm of starts) {
+      const [h, mnt] = hhmm.split(':').map(Number);
+      const startUTC = dayStartUTC + (h * 3600 + mnt * 60) * 1000;
+      const start = new Date(startUTC);
+      if (start < minStart) continue;
+      candidates.push({ start, end: new Date(startUTC + slotMinutes * 60000) });
+    }
     if (candidates.length === 0) return [];
     candidates.sort((a, b) => a.start - b.start);
 
-    // Nota: se usa events.list (no freebusy.query) porque el scope pedido al
-    // asesor es "calendar.events" (solo eventos), y freebusy.query exige el
-    // scope más amplio "calendar"/"calendar.readonly" que no solicitamos.
-    const client = await this.getAuthorizedClient(userId);
-    const calendar = google.calendar({ version: 'v3', auth: client });
-    const { data } = await calendar.events.list({
-      calendarId: 'primary',
-      timeMin: candidates[0].start.toISOString(),
-      timeMax: candidates[candidates.length - 1].end.toISOString(),
-      singleEvents: true,
-      orderBy: 'startTime'
-    });
-    const busyPeriods = (data.items || [])
-      .filter((event) => event.status !== 'cancelled' && event.start?.dateTime && event.end?.dateTime)
-      .map((event) => ({ start: new Date(event.start.dateTime).getTime(), end: new Date(event.end.dateTime).getTime() }));
-
-    const freeSlots = candidates.filter((slot) => !busyPeriods.some((busy) => (
-      slot.start.getTime() < busy.end && slot.end.getTime() > busy.start
-    )));
-
-    return freeSlots.slice(0, limit).map((slot) => ({
+    const freeSlots = await this.filterAgainstCalendar(userId, candidates);
+    return freeSlots.map((slot) => ({
       startTime: slot.start.toISOString(),
       endTime: slot.end.toISOString(),
       label: formatSlotLabel(slot.start)

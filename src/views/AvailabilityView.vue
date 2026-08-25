@@ -62,6 +62,37 @@
       <a :href="googleTestResult.meetLink" target="_blank" rel="noopener">{{ googleTestResult.meetLink }}</a>
     </p>
 
+    <!-- Próximas reuniones agendadas por Avan -->
+    <section class="meetings-card">
+      <div class="meetings-header">
+        <h4>📞 Próximas reuniones agendadas</h4>
+        <button class="btn-action-secondary meetings-refresh" @click="fetchUpcomingMeetings" :disabled="isLoadingMeetings">
+          {{ isLoadingMeetings ? 'Cargando...' : '🔄 Actualizar' }}
+        </button>
+      </div>
+
+      <p v-if="upcomingMeetings.length === 0 && !isLoadingMeetings" class="meetings-empty">
+        No hay reuniones agendadas todavía. Cuando Avan cierre una cita por WhatsApp, va a aparecer aquí.
+      </p>
+
+      <ul v-else class="meetings-list">
+        <li v-for="meeting in upcomingMeetings" :key="meeting.id" class="meeting-row">
+          <div class="meeting-when">
+            <span class="meeting-date">{{ formatMeetingDate(meeting.start_time) }}</span>
+            <span class="meeting-time">{{ formatMeetingTime(meeting.start_time) }}</span>
+          </div>
+          <div class="meeting-info">
+            <strong class="meeting-name">{{ meeting.lead_full_name || 'Contacto de WhatsApp' }}</strong>
+            <span class="meeting-topic">{{ meeting.lead_topic || meeting.topic || 'Sin tema registrado' }}</span>
+            <span class="meeting-contact">📱 {{ meeting.wa_id }}<template v-if="meeting.lead_email"> · ✉️ {{ meeting.lead_email }}</template></span>
+          </div>
+          <a v-if="meeting.meet_link" :href="meeting.meet_link" target="_blank" rel="noopener" class="btn-action-primary meeting-join-btn">
+            🎥 Unirse
+          </a>
+        </li>
+      </ul>
+    </section>
+
     <!-- Atajos rápidos -->
     <section class="presets-row">
       <span class="presets-label">Atajos:</span>
@@ -158,6 +189,34 @@ const googleStatus = ref({ configured: false, connected: false, email: null });
 const isConnectingGoogle = ref(false);
 const isTestingGoogle = ref(false);
 const googleTestResult = ref(null);
+
+const upcomingMeetings = ref([]);
+const isLoadingMeetings = ref(false);
+
+const MEETING_DATE_FORMATTER = new Intl.DateTimeFormat('es-PE', { timeZone: 'America/Lima', weekday: 'short', day: 'numeric', month: 'short' });
+const MEETING_TIME_FORMATTER = new Intl.DateTimeFormat('es-PE', { timeZone: 'America/Lima', hour: 'numeric', minute: '2-digit', hour12: true });
+
+function formatMeetingDate(isoStr) {
+  const label = MEETING_DATE_FORMATTER.format(new Date(isoStr)).replace(/\./g, '');
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function formatMeetingTime(isoStr) {
+  return MEETING_TIME_FORMATTER.format(new Date(isoStr)).replace(/\./g, '');
+}
+
+async function fetchUpcomingMeetings() {
+  isLoadingMeetings.value = true;
+  try {
+    const response = await apiFetch('/api/meetings/upcoming');
+    const data = await response.json();
+    if (response.ok) upcomingMeetings.value = data.meetings || [];
+  } catch (error) {
+    console.warn('No se pudo obtener las próximas reuniones:', error);
+  } finally {
+    isLoadingMeetings.value = false;
+  }
+}
 
 const gridStyle = computed(() => ({
   gridTemplateColumns: `70px repeat(${DAYS.length}, 1fr)`
@@ -363,6 +422,7 @@ onMounted(() => {
   consumeGoogleRedirectResult();
   fetchAvailability();
   fetchGoogleStatus();
+  fetchUpcomingMeetings();
   window.addEventListener('mouseup', handleGlobalMouseUp);
 });
 
@@ -534,6 +594,112 @@ onUnmounted(() => {
 .google-actions {
   display: flex;
   gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.meetings-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 1.1rem 1.25rem;
+}
+
+.meetings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.85rem;
+}
+
+.meetings-header h4 {
+  font-size: 0.9rem;
+  color: var(--accent-cyan);
+}
+
+.meetings-refresh {
+  padding: 0.35rem 0.8rem;
+  font-size: 0.78rem;
+}
+
+.meetings-empty {
+  font-size: 0.85rem;
+  color: var(--text-sub);
+}
+
+.meetings-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.meeting-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 0.9rem;
+  background: var(--surface-1);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  flex-wrap: wrap;
+}
+
+.meeting-when {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 74px;
+  padding: 0.3rem 0.6rem;
+  background: rgba(76, 63, 145, 0.1);
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.meeting-date {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--on-tint-strong);
+  text-transform: uppercase;
+}
+
+.meeting-time {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-main);
+}
+
+.meeting-info {
+  flex: 1;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.meeting-name {
+  font-size: 0.9rem;
+  color: var(--text-main);
+}
+
+.meeting-topic {
+  font-size: 0.8rem;
+  color: var(--text-sub);
+}
+
+.meeting-contact {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.meeting-join-btn {
+  width: auto;
+  padding: 0.5rem 1rem;
+  font-size: 0.82rem;
+  text-decoration: none;
   flex-shrink: 0;
 }
 

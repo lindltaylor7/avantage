@@ -92,7 +92,11 @@ export class LeadService {
 
   /**
    * Registra como lead al primer contacto por WhatsApp de un número nuevo
-   * (si ya existe un lead con ese teléfono, no crea uno duplicado).
+   * (si ya existe un lead con ese teléfono, no crea uno duplicado). Arranca
+   * en "conversacion_abierta" (una etapa exclusiva del Setter Funnel, donde
+   * Avan todavía lo está calificando) para que NO aparezca todavía en el
+   * Funnel de Ventas — ahí solo debe llegar una vez que se agenda una
+   * llamada o se transfiere a un asesor (ver whatsappBotService.js).
    */
   async findOrCreateFromWhatsApp({ phone, fullName, source }) {
     const existing = await this.findByPhone(phone);
@@ -103,7 +107,7 @@ export class LeadService {
       phone,
       topic: `Consulta por WhatsApp de ${fullName || phone}`,
       source: source || 'WhatsApp Directo',
-      status: 'nuevo'
+      status: 'conversacion_abierta'
     });
   }
 

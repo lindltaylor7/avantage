@@ -81,26 +81,26 @@ export class WhatsappWebhookService {
         try {
           const { isNew } = await this.messageService.createFromMessage(value, message);
 
-          // Solo se crea el lead en el CRM cuando el remitente compartió un
-          // número real ("from"); los contactos identificados solo por
-          // "from_user_id" (p. ej. vinculados por Instagram) no tienen un
-          // teléfono utilizable para el campo "phone" del lead.
-          if (message.from) {
-            const contact = (value.contacts || []).find((c) => c.wa_id === message.from);
-            await this.leadService.findOrCreateFromWhatsApp({
-              phone: message.from,
-              fullName: contact?.profile?.name,
-              source: detectWhatsappChannel(message.referral)
-            });
+          // Se crea/actualiza el lead tanto si el remitente compartió un
+          // número real ("from") como si solo viene identificado por un
+          // Business-Scoped User ID ("from_user_id" — típico de alguien que
+          // escribió tras tocar "Enviar mensaje" en un anuncio o publicación
+          // de Instagram/Facebook sin compartir su número). El "phone" del
+          // lead queda con ese mismo identificador; sendTextMessage() ya
+          // sabe responderle a un BSUID vía el campo "recipient" de la Graph
+          // API, así que excluirlo aquí solo dejaba a esos leads sin bot.
+          const contact = (value.contacts || []).find((c) => (c.wa_id || c.user_id) === senderId);
+          await this.leadService.findOrCreateFromWhatsApp({
+            phone: senderId,
+            fullName: contact?.profile?.name,
+            source: detectWhatsappChannel(message.referral)
+          });
 
-            // El bot Avan solo conversa con contactos identificados por
-            // un número real (no BSUID), solo ante mensajes de texto, y solo
-            // si el mensaje es realmente nuevo (Meta puede reenviar el mismo
-            // evento por reintentos; sin este chequeo el bot procesaría el
-            // mismo mensaje dos veces y duplicaría preguntas).
-            if (isNew && this.botService && message.type === 'text' && message.text?.body) {
-              await this.botService.handleIncomingMessage(message.from, message.text.body);
-            }
+          // Solo ante mensajes de texto, y solo si el mensaje es realmente
+          // nuevo (Meta puede reenviar el mismo evento por reintentos; sin
+          // este chequeo el bot procesaría el mismo mensaje dos veces).
+          if (isNew && this.botService && message.type === 'text' && message.text?.body) {
+            await this.botService.handleIncomingMessage(senderId, message.text.body);
           }
         } catch (error) {
           console.error(`❌ [WhatsApp Webhook] Error al guardar el mensaje ${message.id}:`, error);

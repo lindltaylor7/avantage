@@ -940,17 +940,28 @@ watch(selectedLead, () => {
   quoteSuccess.value = null;
 });
 
+// Leads que Avan todavía está calificando por WhatsApp (Setter Funnel) no
+// cuentan como leads comerciales todavía: no aparecen en ninguna columna ni
+// estadística del Funnel de Ventas hasta que se agenda una llamada o se
+// transfieren a un asesor (ver whatsappBotService.js).
+const SETTER_ONLY_STATUSES = new Set(['conversacion_abierta', 'calificando', 'congelado']);
+// Un lead que ya se agendó o se transfirió "gradúa" del Setter Funnel al
+// Funnel de Ventas, entrando a esta columna (recién ahí es un lead comercial).
+const GRADUATED_STATUS_TO_SALES_COLUMN = { cita_agendada: 'nuevo', transferido_closer: 'nuevo' };
+
+const visibleLeads = computed(() => leads.value.filter(l => !SETTER_ONLY_STATUSES.has(l.status)));
+
 // Estadísticas de Resumen
 const highViabilityCount = computed(() => {
-  return leads.value.filter(l => (l.viability_level || '').toLowerCase().includes('alta')).length;
+  return visibleLeads.value.filter(l => (l.viability_level || '').toLowerCase().includes('alta')).length;
 });
 
 const wonProjectsCount = computed(() => {
-  return leads.value.filter(l => l.project_id || l.status === 'ganado').length;
+  return visibleLeads.value.filter(l => l.project_id || l.status === 'ganado').length;
 });
 
 const avgViabilityScore = computed(() => {
-  const scored = leads.value.filter(l => typeof l.overall_viability_score === 'number');
+  const scored = visibleLeads.value.filter(l => typeof l.overall_viability_score === 'number');
   if (scored.length === 0) return 0;
   const sum = scored.reduce((acc, curr) => acc + curr.overall_viability_score, 0);
   return Math.round(sum / scored.length);
@@ -965,7 +976,7 @@ const filteredLeadsByColumn = computed(() => {
 
   const query = searchQuery.value.trim().toLowerCase();
 
-  for (const lead of leads.value) {
+  for (const lead of visibleLeads.value) {
     // Filtro por texto multicampo (incluyendo nombre completo, tema, email, celular, etc.)
     if (query) {
       const cleanId = query.replace(/^#/, '');
@@ -989,9 +1000,12 @@ const filteredLeadsByColumn = computed(() => {
       if (selectedViabilityFilter.value === 'baja' && !lvl.includes('baja')) continue;
     }
 
-    // Ubicar en columna correspondiente
-    if (grouped[lead.status]) {
-      grouped[lead.status].push(lead);
+    // Ubicar en columna correspondiente — un status "graduado" del Setter
+    // Funnel (cita_agendada/transferido_closer) entra por la columna que le
+    // corresponda como lead comercial nuevo, no por su status literal.
+    const effectiveStatus = GRADUATED_STATUS_TO_SALES_COLUMN[lead.status] || lead.status;
+    if (grouped[effectiveStatus]) {
+      grouped[effectiveStatus].push(lead);
     } else {
       // Si el estado no coincide con ninguna columna activa, asignar a la primera columna
       const firstKey = columns.value[0]?.key || 'nuevo';

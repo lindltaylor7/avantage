@@ -25,6 +25,7 @@ import { AdvisorAvailabilityService } from './services/advisorAvailabilityServic
 import { InstagramService } from './services/instagramService.js';
 import { InstagramWebhookService } from './services/instagramWebhookService.js';
 import { GoogleCalendarService } from './services/googleCalendarService.js';
+import { ScheduledMeetingService } from './services/scheduledMeetingService.js';
 import { signToken, requireAuth, requirePermission, signGoogleOAuthState, verifyGoogleOAuthState } from './middleware/auth.js';
 
 import { uploadProjectUpdateAttachment, uploadDir } from './middleware/upload.js';
@@ -39,6 +40,11 @@ const QUOTE_ELIGIBLE_STATUSES = ['contactado', 'en_negociacion'];
 // Frecuencia del sondeo del conteo de seguidores de la página (Meta no lo
 // notifica por webhook), 1 hora por defecto.
 const FOLLOWER_POLL_INTERVAL_MS = Number(process.env.META_FOLLOWER_POLL_INTERVAL_MS) || 60 * 60 * 1000;
+
+// Frecuencia del barrido de conversaciones inactivas de Avan (recordatorio
+// a la 1h de silencio, "Congelado" a las 2h) — no necesita ser muy fino,
+// los umbrales son de horas.
+const STALE_CONVERSATION_SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 
 dotenv.config();
 
@@ -87,7 +93,8 @@ const pageFollowerService = new PageFollowerService();
 const whatsappMessageService = new WhatsappMessageService();
 const whatsappBotSettingsService = new WhatsappBotSettingsService();
 const googleCalendarService = new GoogleCalendarService();
-const whatsappBotService = new WhatsappBotService({ ollamaService, emailService, leadService, whatsappMessageService, settingsService: whatsappBotSettingsService, googleCalendarService });
+const scheduledMeetingService = new ScheduledMeetingService();
+const whatsappBotService = new WhatsappBotService({ ollamaService, emailService, leadService, whatsappMessageService, settingsService: whatsappBotSettingsService, googleCalendarService, scheduledMeetingService });
 const whatsappWebhookService = new WhatsappWebhookService({ botService: whatsappBotService });
 const advisorAvailabilityService = new AdvisorAvailabilityService();
 const instagramService = new InstagramService();
@@ -280,6 +287,21 @@ app.post('/api/google/test-event', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('❌ Error al crear el evento de prueba en Google Calendar:', error);
     res.status(500).json({ error: 'No se pudo crear el evento de prueba.', details: error.message });
+  }
+});
+
+/**
+ * Próximas reuniones que Avan agendó automáticamente por WhatsApp (registro
+ * propio en `scheduled_meetings`, más rápido que consultar la API de Google
+ * en vivo), para verlas dentro del panel sin salir a Google Calendar.
+ */
+app.get('/api/meetings/upcoming', requireAuth, async (req, res) => {
+  try {
+    const meetings = await scheduledMeetingService.getUpcoming();
+    res.json({ meetings });
+  } catch (error) {
+    console.error('❌ Error al obtener las próximas reuniones:', error);
+    res.status(500).json({ error: 'Error al obtener las próximas reuniones.', details: error.message });
   }
 });
 
@@ -1607,4 +1629,10 @@ app.listen(PORT, () => {
       });
     }, FOLLOWER_POLL_INTERVAL_MS);
   }
+
+  setInterval(() => {
+    whatsappBotService.checkStaleConversations().catch((error) => {
+      console.error('❌ [WhatsApp Bot] Error en el barrido de conversaciones inactivas:', error);
+    });
+  }, STALE_CONVERSATION_SWEEP_INTERVAL_MS);
 });

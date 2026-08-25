@@ -22,6 +22,28 @@ const BOOKING_ADVISOR_USER_ID = Number(process.env.GOOGLE_BOOKING_ADVISOR_USER_I
 // silencio para juntar todo en un solo mensaje antes de procesar el turno.
 const MESSAGE_DEBOUNCE_MS = Number(process.env.WHATSAPP_BOT_FIRST_MESSAGE_DEBOUNCE_MS) || 5000;
 
+// Seguimiento por inactividad: si el contacto deja a Avan "en visto" 1 hora,
+// se le manda un recordatorio; si sigue una hora más sin responder, el lead
+// se mueve a "Congelado" en el Setter Funnel y el bot deja de insistir.
+const INACTIVITY_NUDGE_MS = 60 * 60 * 1000;
+const INACTIVITY_FREEZE_MS = 60 * 60 * 1000;
+
+const DATE_LABEL_FORMATTER = new Intl.DateTimeFormat('es-PE', {
+  timeZone: 'America/Lima', weekday: 'long', day: 'numeric', month: 'long'
+});
+
+function formatDateLabel(dateStr) {
+  // dateStr: "YYYY-MM-DD" en calendario de Lima; se ancla al mediodía UTC
+  // para que ninguna conversión de zona horaria lo empuje al día anterior.
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const label = DATE_LABEL_FORMATTER.format(new Date(Date.UTC(y, m - 1, d, 12)));
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function limaTodayIso() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -50,11 +72,12 @@ function normalize(text) {
  * ofrece agendar una llamada en el calendario real del asesor.
  */
 export class WhatsappBotService {
-  constructor({ ollamaService, emailService, leadService, whatsappMessageService, settingsService, googleCalendarService }) {
+  constructor({ ollamaService, emailService, leadService, whatsappMessageService, settingsService, googleCalendarService, scheduledMeetingService }) {
     this.ollamaService = ollamaService;
     this.emailService = emailService;
     this.leadService = leadService;
     this.whatsappMessageService = whatsappMessageService;
+    this.scheduledMeetingService = scheduledMeetingService;
     this.settingsService = settingsService || new WhatsappBotSettingsService();
     this.googleCalendarService = googleCalendarService;
     // wa_id -> { messages: string[], timer: NodeJS.Timeout }, buffer temporal
@@ -178,13 +201,33 @@ export class WhatsappBotService {
       return;
     }
 
-    if (session.status === 'scheduling') {
-      await this.handleSchedulingReply(waId, session, text);
+    if (session.status === 'scheduling_date') {
+      await this.clearNudge(waId);
+      await this.handleSchedulingDateReply(waId, session, text);
+      return;
+    }
+
+    if (session.status === 'scheduling_time') {
+      await this.clearNudge(waId);
+      await this.handleSchedulingTimeReply(waId, session, text);
       return;
     }
 
     // status === 'active': se agrupa antes de procesar el turno.
+    await this.clearNudge(waId);
     this.bufferMessage(waId, text);
+  }
+
+  /**
+   * Borra el recordatorio de inactividad pendiente (si lo hay) apenas el
+   * contacto vuelve a escribir, para que el barrido de checkStaleConversations()
+   * no lo congele por una inactividad que ya terminó.
+   */
+  async clearNudge(waId) {
+    const session = await this.getSession(waId);
+    if (session?.nudge_sent_at) {
+      await db('whatsapp_bot_sessions').where({ wa_id: waId }).update({ nudge_sent_at: null });
+    }
   }
 
   /**
@@ -279,18 +322,21 @@ export class WhatsappBotService {
     await this.updateSession(waId, { answers: JSON.stringify(answers) });
     await this.send(waId, result.reply);
 
-    const hasMinimum = !!(answers.problem && answers.email);
-    if (result.ready && hasMinimum) {
+    // El correo ya no es obligatorio: basta con conocer el tema para pasar
+    // a la llamada con el asesor (el correo, si lo dejó, solo se usa para
+    // la invitación del Meet y el reporte de respaldo, ambos en silencio).
+    if (result.ready && answers.problem) {
       await this.finalize(waId, answers);
     }
   }
 
   /**
-   * Evalúa la viabilidad con IA, envía el reporte por correo (si se recogió
-   * uno) y crea/actualiza el lead correspondiente en el funnel de ventas.
-   * El ámbito, nivel y carrera usan el valor por defecto configurado en
-   * `whatsapp_bot_settings` si el LLM no logró identificarlos en la
-   * conversación, para que el reporte y el lead siempre queden completos.
+   * Ya con el tema de tesis en mano, el objetivo pasa a agendar la llamada
+   * con el asesor: se avisa al lead que lo va a conectar, y por detrás (sin
+   * anunciarlo en el chat) se evalúa la viabilidad con IA y se crea/actualiza
+   * el lead en el funnel de ventas, para que llegue con puntaje al CRM y el
+   * equipo tenga un reporte de respaldo. Un fallo en la evaluación con IA no
+   * debe impedir ofrecer la llamada, que es lo que realmente importa aquí.
    */
   async finalize(waId, answers) {
     const settings = await this.settingsService.get();
@@ -306,10 +352,22 @@ export class WhatsappBotService {
 
     await this.send(
       waId,
-      `🎉 ¡Perfecto! He formulado tu propuesta:\n\n📜 "${synthesizedTopic}"\n\n🎓 Nivel: ${level}\n🏛️ Carrera: ${field}\n` +
-      (email ? `📩 Te enviaré el reporte completo a: ${email}\n\n` : '\n') +
-      '🧠 Estoy evaluando la viabilidad con IA, dame un momento...'
+      '¡Genial! Con lo que me cuentas, quiero conectarte con un asesor de Avantage Group para que lo revisen juntos 🙌 Dame un momento...'
     );
+
+    // El status NO se toca aquí a propósito: el lead se queda en
+    // "calificando" (Setter Funnel) mientras se resuelve el agendamiento.
+    // Solo pasa a "cita_agendada" o "transferido_closer" — y recién ahí
+    // entra al Funnel de Ventas — cuando se sabe el desenlace real (ver
+    // handleSchedulingTimeReply / handOffToAdvisor).
+    const leadPayload = {
+      topic: synthesizedTopic,
+      academicLevel: level,
+      fieldOfStudy: field,
+      email,
+      additionalNotes,
+      source: 'WhatsApp Directo'
+    };
 
     try {
       const reportData = await this.ollamaService.evaluateThesisViability({
@@ -318,6 +376,8 @@ export class WhatsappBotService {
         fieldOfStudy: field,
         additionalNotes
       });
+      leadPayload.overallViabilityScore = reportData.evaluation.overallViabilityScore;
+      leadPayload.viabilityLevel = reportData.evaluation.viabilityLevel;
 
       if (email) {
         const emailStatus = await this.emailService.sendReportEmail(email, reportData);
@@ -325,53 +385,47 @@ export class WhatsappBotService {
           console.warn(`⚠️ [WhatsApp Bot] El correo a ${email} no se pudo confirmar como enviado.`);
         }
       }
+    } catch (error) {
+      // La evaluación con IA es un valor agregado para el CRM, no un
+      // requisito para agendar: si falla, el lead igual se registra (sin
+      // puntaje) y la conversación sigue directo a proponer la llamada.
+      console.error(`❌ [WhatsApp Bot] Error al evaluar la viabilidad para ${waId} (no bloquea el agendamiento):`, error);
+    }
 
-      const evaluation = reportData.evaluation;
-      const leadPayload = {
-        topic: synthesizedTopic,
-        academicLevel: level,
-        fieldOfStudy: field,
-        email,
-        additionalNotes,
-        overallViabilityScore: evaluation.overallViabilityScore,
-        viabilityLevel: evaluation.viabilityLevel,
-        source: 'WhatsApp Directo',
-        // Avan ya terminó de calificarlo y le mandó su reporte; en el Setter
-        // Funnel pasa a "Transferido a Closer" para que un asesor le dé
-        // seguimiento humano.
-        status: 'transferido_closer'
-      };
-
+    try {
       const existingLead = await this.leadService.findByPhone(waId);
       if (existingLead) {
         await this.leadService.updateLead(existingLead.id, leadPayload);
       } else {
         await this.leadService.createLead({ ...leadPayload, phone: waId });
       }
-
-      await this.send(
-        waId,
-        `✅ ¡Listo! Resultado de tu evaluación:\n\n📊 Viabilidad: ${evaluation.overallViabilityScore}% (${evaluation.viabilityLevel})\n\n` +
-        (email
-          ? `📩 Revisa tu correo (${email}) para ver el reporte completo con normativas SUNEDU/CONCYTEC.\n\n`
-          : '')
-      );
-
-      await this.offerScheduling(waId, { topic: synthesizedTopic, email });
     } catch (error) {
-      console.error('❌ [WhatsApp Bot] Error al finalizar la evaluación:', error);
-      await this.updateSession(waId, { status: 'completed' });
-      await this.send(waId, '⚠️ Tuvimos un problema técnico al generar tu reporte automático, pero ya registramos tus datos. Un asesor te contactará pronto para continuar. ¡Gracias! 🙌');
+      console.error(`❌ [WhatsApp Bot] Error al registrar el lead de ${waId}:`, error);
     }
+
+    await this.offerScheduling(waId, { topic: synthesizedTopic, email });
   }
 
   /**
-   * Tras finalizar la evaluación, ofrece agendar directamente una llamada en
-   * el Google Calendar real del asesor (`BOOKING_ADVISOR_USER_ID`), mostrando
-   * sus próximos bloques libres reales (cruzando su horario configurado con
-   * lo que ya tiene ocupado en su calendario). Si el asesor no tiene Google
-   * Calendar conectado o no le quedan bloques libres, se cae de vuelta al
-   * cierre manual de siempre sin bloquear la conversación.
+   * Cuando no se puede ofrecer agendar (Calendar no configurado/conectado, o
+   * sin bloques libres), transfiere al lead a seguimiento manual: cierra la
+   * sesión del bot y mueve el lead a "Transferido a Closer" — ahí sí entra
+   * al Funnel de Ventas para que un asesor lo contacte directamente.
+   */
+  async handOffToAdvisor(waId, reason) {
+    this.logActivity({ type: 'scheduling_offer_skipped', waId, reason });
+    await this.updateSession(waId, { status: 'completed' });
+    await this.moveFunnelStage(waId, 'transferido_closer');
+    await this.send(waId, 'Un asesor se pondrá en contacto contigo pronto para coordinar una llamada. ¡Gracias! 🙌');
+  }
+
+  /**
+   * Tras finalizar la evaluación, empieza el agendamiento preguntando qué
+   * día prefiere el lead (en vez de tirarle de una una lista de horarios) —
+   * ese día se interpreta en el siguiente turno vía IA y se cruza con el
+   * calendario real del asesor. Si Calendar no está listo o no hay ningún
+   * bloque libre en los próximos días, se transfiere a seguimiento manual
+   * sin bloquear la conversación.
    */
   async offerScheduling(waId, { topic, email }) {
     try {
@@ -380,32 +434,76 @@ export class WhatsappBotService {
       const connection = await this.googleCalendarService.getConnection(BOOKING_ADVISOR_USER_ID);
       if (!connection) throw new Error('El asesor por defecto no tiene Google Calendar conectado');
 
-      const slots = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID);
-      if (slots.length === 0) throw new Error('Sin bloques libres próximos');
+      const preview = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID, { limit: 1 });
+      if (preview.length === 0) throw new Error('Sin bloques libres próximos');
 
       const session = await this.getSession(waId);
       const answers = typeof session.answers === 'string' ? JSON.parse(session.answers) : (session.answers || {});
-      answers.__scheduling = { slots, topic, email };
-      await this.updateSession(waId, { status: 'scheduling', answers: JSON.stringify(answers) });
+      answers.__scheduling = { topic, email };
+      await this.updateSession(waId, { status: 'scheduling_date', answers: JSON.stringify(answers) });
 
-      const list = numberedList(slots.map((s) => s.label));
-      await this.send(
-        waId,
-        `📅 Para terminar, ¿quieres agendar una llamada gratuita con un asesor? Responde con el número del horario que prefieras, o escribe "no" si prefieres que te contacten después:\n\n${list}`
-      );
+      await this.send(waId, '📅 ¿Qué día te gustaría para la llamada? (ej: "mañana", "el jueves", o una fecha)');
     } catch (error) {
-      this.logActivity({ type: 'scheduling_offer_skipped', waId, reason: error.message });
-      await this.updateSession(waId, { status: 'completed' });
-      await this.send(waId, 'Un asesor se pondrá en contacto contigo pronto para coordinar una llamada. ¡Gracias! 🙌');
+      await this.handOffToAdvisor(waId, error.message);
     }
   }
 
   /**
-   * Procesa la respuesta del lead a los horarios ofrecidos por
-   * offerScheduling(): un número válido crea el evento real en Google
-   * Calendar (con link de Meet); "no" cierra el flujo sin agendar.
+   * Interpreta con IA qué día pidió el lead y muestra los horarios libres
+   * reales de ese día. Si ese día no tiene espacio, ofrece de una vez las
+   * próximas alternativas reales en vez de hacerlo adivinar otra fecha.
    */
-  async handleSchedulingReply(waId, session, text) {
+  async handleSchedulingDateReply(waId, session, text) {
+    const answers = typeof session.answers === 'string' ? JSON.parse(session.answers) : (session.answers || {});
+    const scheduling = answers.__scheduling;
+    if (!scheduling) {
+      await this.updateSession(waId, { status: 'completed' });
+      return;
+    }
+
+    const trimmed = (text || '').trim();
+    if (['no', 'omitir', 'despues', 'después'].includes(normalize(trimmed))) {
+      delete answers.__scheduling;
+      await this.updateSession(waId, { answers: JSON.stringify(answers) });
+      await this.handOffToAdvisor(waId, 'El lead prefirió no agendar.');
+      return;
+    }
+
+    const { date } = await this.ollamaService.parseSchedulingDate(trimmed, limaTodayIso());
+    if (!date) {
+      await this.send(waId, 'No logré identificar el día 🤔 ¿me confirmas una fecha? (ej: "mañana", "el jueves", "28 de agosto")');
+      return;
+    }
+
+    let slots = await this.googleCalendarService.getFreeSlotsForDate(BOOKING_ADVISOR_USER_ID, date);
+    let intro = `📅 Para el *${formatDateLabel(date)}*, tengo estos horarios libres:`;
+
+    if (slots.length === 0) {
+      slots = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID);
+      if (slots.length === 0) {
+        delete answers.__scheduling;
+        await this.updateSession(waId, { answers: JSON.stringify(answers) });
+        await this.handOffToAdvisor(waId, 'Sin bloques libres tras pedirle una fecha al lead.');
+        return;
+      }
+      intro = `Ese día no tengo espacio libre, pero tengo estos horarios cercanos:`;
+    }
+
+    scheduling.slots = slots;
+    await this.updateSession(waId, { status: 'scheduling_time', answers: JSON.stringify(answers) });
+
+    const list = numberedList(slots.map((s) => s.label));
+    await this.send(waId, `${intro}\n\n${list}\n\nResponde con el número que prefieras, o "no" si prefieres que te contacten después.`);
+  }
+
+  /**
+   * Procesa la elección de horario: un número válido crea el evento real en
+   * Google Calendar (con link de Meet), lo registra en `scheduled_meetings`
+   * para la vista de "Próximas reuniones" del panel, y mueve el lead a "Cita
+   * Agendada" (entra recién ahí al Funnel de Ventas). "no" transfiere a
+   * seguimiento manual.
+   */
+  async handleSchedulingTimeReply(waId, session, text) {
     const answers = typeof session.answers === 'string' ? JSON.parse(session.answers) : (session.answers || {});
     const scheduling = answers.__scheduling;
 
@@ -417,8 +515,8 @@ export class WhatsappBotService {
     const trimmed = (text || '').trim();
     if (['no', 'omitir', 'despues', 'después'].includes(normalize(trimmed))) {
       delete answers.__scheduling;
-      await this.updateSession(waId, { status: 'completed', answers: JSON.stringify(answers) });
-      await this.send(waId, 'Sin problema, un asesor se pondrá en contacto contigo pronto. ¡Gracias! 🙌');
+      await this.updateSession(waId, { answers: JSON.stringify(answers) });
+      await this.handOffToAdvisor(waId, 'El lead prefirió no agendar.');
       return;
     }
 
@@ -449,6 +547,24 @@ export class WhatsappBotService {
         const noteAppend = `\nReunión agendada: ${slot.label}${event.meetLink ? ` — ${event.meetLink}` : ''}`;
         await this.leadService.updateLead(lead.id, { additionalNotes: `${lead.additional_notes || ''}${noteAppend}` });
       }
+      await this.moveFunnelStage(waId, 'cita_agendada');
+
+      if (this.scheduledMeetingService) {
+        try {
+          await this.scheduledMeetingService.create({
+            leadId: lead?.id ?? null,
+            waId,
+            advisorUserId: BOOKING_ADVISOR_USER_ID,
+            topic: scheduling.topic,
+            startTime: slot.startTime,
+            endTime: slot.endTime,
+            meetLink: event.meetLink,
+            calendarEventId: event.eventId
+          });
+        } catch (recordError) {
+          console.error(`❌ [WhatsApp Bot] Error al registrar la reunión de ${waId} en scheduled_meetings:`, recordError);
+        }
+      }
 
       await this.send(
         waId,
@@ -459,8 +575,55 @@ export class WhatsappBotService {
     } catch (error) {
       console.error(`❌ [WhatsApp Bot] Error al agendar la reunión para ${waId}:`, error);
       delete answers.__scheduling;
-      await this.updateSession(waId, { status: 'completed', answers: JSON.stringify(answers) });
-      await this.send(waId, '⚠️ Tuvimos un problema técnico al agendar la reunión. Un asesor se pondrá en contacto contigo directamente para coordinar. ¡Gracias! 🙌');
+      await this.updateSession(waId, { answers: JSON.stringify(answers) });
+      await this.handOffToAdvisor(waId, `Error técnico al crear el evento: ${error.message}`);
+    }
+  }
+
+  /**
+   * Barrido periódico (llamado desde server.js con un setInterval, igual que
+   * el sondeo de seguidores de Meta) para el seguimiento por inactividad: a
+   * la hora de silencio manda un recordatorio único, y si sigue una hora más
+   * sin responder, congela el lead en el Setter Funnel y apaga el bot para
+   * ese contacto (no vuelve a insistir solo).
+   */
+  async checkStaleConversations() {
+    const now = Date.now();
+
+    const awaitingReply = await db('whatsapp_bot_sessions')
+      .whereIn('status', ['active', 'scheduling_date', 'scheduling_time'])
+      .where('bot_enabled', true)
+      .whereNull('nudge_sent_at');
+
+    for (const session of awaitingReply) {
+      const silentMs = now - new Date(session.updated_at).getTime();
+      if (silentMs < INACTIVITY_NUDGE_MS) continue;
+
+      try {
+        await this.send(session.wa_id, '¿Estás ahí? Seguimos esperando tu respuesta 👀');
+        await db('whatsapp_bot_sessions').where({ id: session.id }).update({ nudge_sent_at: db.fn.now() });
+        this.logActivity({ type: 'inactivity_nudge', waId: session.wa_id });
+      } catch (error) {
+        console.error(`❌ [WhatsApp Bot] Error al mandar el recordatorio de inactividad a ${session.wa_id}:`, error);
+      }
+    }
+
+    const awaitingFreeze = await db('whatsapp_bot_sessions')
+      .whereIn('status', ['active', 'scheduling_date', 'scheduling_time'])
+      .where('bot_enabled', true)
+      .whereNotNull('nudge_sent_at');
+
+    for (const session of awaitingFreeze) {
+      const silentSinceNudgeMs = now - new Date(session.nudge_sent_at).getTime();
+      if (silentSinceNudgeMs < INACTIVITY_FREEZE_MS) continue;
+
+      try {
+        await db('whatsapp_bot_sessions').where({ id: session.id }).update({ status: 'completed' });
+        await this.moveFunnelStage(session.wa_id, 'congelado');
+        this.logActivity({ type: 'inactivity_frozen', waId: session.wa_id });
+      } catch (error) {
+        console.error(`❌ [WhatsApp Bot] Error al congelar la conversación de ${session.wa_id}:`, error);
+      }
     }
   }
 }
