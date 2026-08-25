@@ -196,9 +196,15 @@ export class WhatsappMessageService {
 
   /**
    * Hilo completo (entrantes + salientes) de un contacto, en orden cronológico.
+   * `since` acota a mensajes desde esa fecha en adelante (p. ej. desde que
+   * arrancó la sesión actual del bot), sin borrar ni tocar el historial real
+   * — solo para no arrastrarle al LLM el contexto de una conversación previa
+   * ya reiniciada desde el panel.
    */
-  async getThread(waId, { limit = 200 } = {}) {
-    return db('whatsapp_messages').where({ wa_id: waId }).orderBy('received_at', 'asc').limit(limit);
+  async getThread(waId, { limit = 200, since = null } = {}) {
+    let query = db('whatsapp_messages').where({ wa_id: waId });
+    if (since) query = query.where('received_at', '>=', since);
+    return query.orderBy('received_at', 'asc').limit(limit);
   }
 
   async getStats() {

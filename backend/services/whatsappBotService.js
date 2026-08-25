@@ -237,7 +237,11 @@ export class WhatsappBotService {
 
     const answers = typeof session.answers === 'string' ? JSON.parse(session.answers) : (session.answers || {});
     const settings = await this.settingsService.get();
-    const thread = await this.whatsappMessageService.getThread(waId, { limit: 40 });
+    // Acotado a mensajes desde que arrancó ESTA sesión: si el contacto ya
+    // había hablado con Avan antes y alguien reinició la conversación desde
+    // el panel, esa sesión (y su fecha de inicio) es nueva, así que el LLM
+    // no arrastra el hilo de la conversación anterior aunque siga guardado.
+    const thread = await this.whatsappMessageService.getThread(waId, { limit: 40, since: session.created_at });
     const history = thread
       .filter((m) => m.body && m.body.trim())
       .map((m) => ({ direction: m.direction, text: m.body }));
