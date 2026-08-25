@@ -48,60 +48,28 @@
     </section>
 
     <section v-else class="console-body">
-      <!-- Roster: lista de agentes -->
-      <aside class="agents-roster custom-scrollbar">
-        <div class="roster-header">
-          <span>Pipeline conversacional</span>
-          <span class="roster-count">{{ activeCount }}/{{ steps.length }} activos</span>
-        </div>
-
-        <button
-          type="button"
-          class="roster-item roster-item-ai"
-          :class="{ 'is-selected': selectedKey === 'welcome' }"
-          @click="selectedKey = 'welcome'"
+      <!-- Canvas: flujo visual del pipeline (arrastra un nodo para reordenar) -->
+      <div class="flow-canvas-wrapper">
+        <VueFlow
+          v-model:nodes="nodes"
+          v-model:edges="edges"
+          :default-viewport="{ zoom: 1 }"
+          :min-zoom="0.4"
+          :max-zoom="1.5"
+          :nodes-connectable="false"
+          :elements-selectable="false"
+          fit-view-on-init
+          @node-click="onNodeClick"
+          @node-drag-stop="onNodeDragStop"
         >
-          <span class="roster-order ai-order">✨</span>
-          <span class="roster-avatar avatar-ai">🧠</span>
-          <span class="roster-meta">
-            <span class="roster-name">Agente de Bienvenida <span class="ai-tag">IA</span></span>
-            <span class="roster-sub">Ollama Cloud LLM · siempre activo</span>
-          </span>
-          <span class="roster-status-dot on" title="Siempre activo"></span>
-        </button>
-
-        <div class="roster-connector" aria-hidden="true"></div>
-
-        <div class="roster-list">
-          <button
-            v-for="(step, index) in steps"
-            :key="step.stepKey"
-            type="button"
-            class="roster-item"
-            :class="{
-              'is-selected': selectedKey === step.stepKey,
-              'is-inactive': !step.active,
-              dragging: draggedIndex === index,
-              'drag-over': hoverIndex === index
-            }"
-            draggable="true"
-            @click="selectedKey = step.stepKey"
-            @dragstart="onDragStart(index)"
-            @dragover.prevent="onDragOver(index)"
-            @drop="onDrop(index)"
-            @dragend="onDragEnd"
-          >
-            <span class="roster-drag" title="Arrastra para reordenar">⠿</span>
-            <span class="roster-order">{{ index + 1 }}</span>
-            <span class="roster-avatar">{{ STEP_META[step.stepKey]?.icon || '❓' }}</span>
-            <span class="roster-meta">
-              <span class="roster-name">{{ STEP_META[step.stepKey]?.name || step.stepKey }}</span>
-              <span class="roster-sub">{{ step.inputType === 'choice' ? 'Selección múltiple' : 'Texto libre' }}</span>
-            </span>
-            <span class="roster-status-dot" :class="{ on: step.active }"></span>
-          </button>
-        </div>
-      </aside>
+          <template #node-stepNode="nodeProps">
+            <BotFlowNode :data="nodeProps.data" :selected="nodeProps.id === selectedKey" />
+          </template>
+          <Background :gap="18" pattern-color="var(--border-color)" />
+          <Controls :show-interactive="false" />
+        </VueFlow>
+        <p class="flow-canvas-hint">Haz clic en un nodo para editarlo · arrástralo a los lados para cambiar el orden</p>
+      </div>
 
       <!-- Detail: configuración del agente seleccionado -->
       <section class="agent-detail">
@@ -214,7 +182,17 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue';
+import { VueFlow, MarkerType } from '@vue-flow/core';
+import { Background } from '@vue-flow/background';
+import { Controls } from '@vue-flow/controls';
+import '@vue-flow/core/dist/style.css';
+import '@vue-flow/controls/dist/style.css';
+import BotFlowNode from '../components/BotFlowNode.vue';
 import { apiFetch } from '../apiClient.js';
+
+const NODE_WIDTH = 220;
+const NODE_GAP = 90;
+const NODE_Y = 90;
 
 const STEP_META = {
   problem: { icon: '🧩', name: 'Tema / Problema', desc: 'Extrae el tema o problema de tesis que quiere trabajar el contacto.' },
@@ -230,9 +208,9 @@ const isLoading = ref(false);
 const isSaving = ref(false);
 const errorMessage = ref('');
 const savedMessage = ref('');
-const draggedIndex = ref(null);
-const hoverIndex = ref(null);
 const selectedKey = ref('welcome');
+const nodes = ref([]);
+const edges = ref([]);
 
 const activeCount = computed(() => steps.value.filter((s) => s.active).length);
 const selectedIndex = computed(() => steps.value.findIndex((s) => s.stepKey === selectedKey.value));
@@ -259,6 +237,66 @@ function snapshotOf(list) {
 
 const isDirty = computed(() => snapshotOf(steps.value) !== savedSnapshot.value);
 
+function buildNodes(currentSteps) {
+  const list = [
+    {
+      id: 'welcome',
+      type: 'stepNode',
+      position: { x: 20, y: NODE_Y },
+      draggable: false,
+      data: { isWelcome: true }
+    }
+  ];
+  currentSteps.forEach((step, index) => {
+    list.push({
+      id: step.stepKey,
+      type: 'stepNode',
+      position: { x: 20 + (index + 1) * (NODE_WIDTH + NODE_GAP), y: NODE_Y },
+      draggable: true,
+      data: { step, meta: STEP_META[step.stepKey] }
+    });
+  });
+  return list;
+}
+
+function buildEdges(currentSteps) {
+  const ids = ['welcome', ...currentSteps.map((s) => s.stepKey)];
+  const list = [];
+  for (let i = 0; i < ids.length - 1; i++) {
+    list.push({
+      id: `e-${ids[i]}-${ids[i + 1]}`,
+      source: ids[i],
+      target: ids[i + 1],
+      type: 'smoothstep',
+      markerEnd: MarkerType.ArrowClosed,
+      style: { stroke: 'var(--border-color)', strokeWidth: 2 }
+    });
+  }
+  return list;
+}
+
+function syncFlow() {
+  nodes.value = buildNodes(steps.value);
+  edges.value = buildEdges(steps.value);
+}
+
+function onNodeClick({ node }) {
+  if (!node) return;
+  selectedKey.value = node.id;
+}
+
+function onNodeDragStop({ node }) {
+  if (!node || node.id === 'welcome') {
+    syncFlow();
+    return;
+  }
+  const stepNodes = nodes.value.filter((n) => n.id !== 'welcome');
+  const sortedKeys = [...stepNodes].sort((a, b) => a.position.x - b.position.x).map((n) => n.id);
+  const byKey = new Map(steps.value.map((s) => [s.stepKey, s]));
+  steps.value = sortedKeys.map((key) => byKey.get(key));
+  syncFlow();
+}
+
 async function fetchSteps() {
   isLoading.value = true;
   errorMessage.value = '';
@@ -271,6 +309,7 @@ async function fetchSteps() {
     if (!steps.value.some((s) => s.stepKey === selectedKey.value)) {
       selectedKey.value = 'welcome';
     }
+    syncFlow();
   } catch (error) {
     errorMessage.value = error.message;
   } finally {
@@ -292,6 +331,7 @@ async function save() {
     if (!response.ok) throw new Error(data.error || 'No se pudo guardar el guion del bot.');
     steps.value = (data.steps || []).map(toClientStep);
     savedSnapshot.value = snapshotOf(steps.value);
+    syncFlow();
     savedMessage.value = 'El guion se guardó correctamente.';
     setTimeout(() => { savedMessage.value = ''; }, 3000);
   } catch (error) {
@@ -319,29 +359,6 @@ function previewText(step, index) {
     text += '\n\n' + step.options.map((opt, i) => `${i + 1}. ${opt}`).join('\n');
   }
   return text;
-}
-
-function onDragStart(index) {
-  draggedIndex.value = index;
-}
-
-function onDragOver(index) {
-  hoverIndex.value = index;
-}
-
-function onDrop(index) {
-  if (draggedIndex.value === null || draggedIndex.value === index) return;
-  const list = [...steps.value];
-  const [moved] = list.splice(draggedIndex.value, 1);
-  list.splice(index, 0, moved);
-  steps.value = list;
-  draggedIndex.value = null;
-  hoverIndex.value = null;
-}
-
-function onDragEnd() {
-  draggedIndex.value = null;
-  hoverIndex.value = null;
 }
 
 onMounted(fetchSteps);
@@ -493,204 +510,61 @@ onMounted(fetchSteps);
   }
 }
 
-/* Console body: roster + detail */
+/* Console body: canvas + detail */
 .console-body {
-  display: grid;
-  grid-template-columns: 340px 1fr;
+  display: flex;
+  flex-direction: column;
   gap: 1.25rem;
-  align-items: start;
 }
 
-@media (max-width: 960px) {
-  .console-body {
-    grid-template-columns: 1fr;
-  }
-}
-
-.agents-roster {
-  background: var(--bg-card);
+.flow-canvas-wrapper {
+  position: relative;
+  height: 420px;
   border: 1px solid var(--border-color);
   border-radius: 16px;
-  padding: 0.9rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  max-height: calc(100vh - 260px);
-  overflow-y: auto;
-  position: sticky;
-  top: 1rem;
+  overflow: hidden;
+  background: var(--bg-card);
 }
 
-.roster-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 0.72rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-sub);
-  padding: 0.2rem 0.4rem 0.5rem;
+.flow-canvas-wrapper :deep(.vue-flow) {
+  background: transparent;
 }
 
-.roster-count {
-  color: var(--accent-emerald);
-  font-weight: 700;
+.flow-canvas-wrapper :deep(.vue-flow__edge-path) {
+  stroke-width: 2;
 }
 
-.roster-connector {
-  width: 2px;
-  height: 14px;
-  background: linear-gradient(var(--border-color), var(--border-color));
-  margin: 0 auto;
-  opacity: 0.6;
+.flow-canvas-wrapper :deep(.vue-flow__controls) {
+  background: var(--bg-card-solid);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
 }
 
-.roster-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
+.flow-canvas-wrapper :deep(.vue-flow__controls-button) {
+  background: var(--bg-card-solid);
+  border-bottom: 1px solid var(--border-color);
+  fill: var(--text-main);
 }
 
-.roster-item {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  width: 100%;
-  background: var(--surface-1);
-  border: 1px solid transparent;
-  border-radius: 12px;
-  padding: 0.55rem 0.6rem;
-  cursor: pointer;
-  text-align: left;
-  transition: all 0.15s ease;
-  color: var(--text-main);
-  font-family: var(--font-body);
-}
-
-.roster-item:hover {
+.flow-canvas-wrapper :deep(.vue-flow__controls-button:hover) {
   background: var(--surface-2);
 }
 
-.roster-item.is-selected {
-  background: rgba(16, 94, 255, 0.14);
-  border-color: rgba(16, 94, 255, 0.4);
-}
-
-.roster-item.is-inactive {
-  opacity: 0.55;
-}
-
-.roster-item.dragging {
-  opacity: 0.4;
-}
-
-.roster-item.drag-over {
-  border-color: var(--primary);
-}
-
-.roster-item-ai {
-  background: linear-gradient(135deg, rgba(139, 92, 246, 0.16), rgba(76, 134, 255, 0.08));
-  border: 1px solid rgba(139, 92, 246, 0.35);
-  margin-bottom: 0.2rem;
-}
-
-.roster-item-ai.is-selected {
-  border-color: rgba(139, 92, 246, 0.7);
-}
-
-.roster-drag {
-  color: var(--text-sub);
-  font-size: 1rem;
-  flex-shrink: 0;
-  cursor: grab;
-}
-
-.roster-order {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: rgba(76, 134, 255, 0.15);
-  color: var(--accent-cyan);
+.flow-canvas-hint {
+  position: absolute;
+  bottom: 0.6rem;
+  left: 50%;
+  transform: translateX(-50%);
   font-size: 0.72rem;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.roster-order.ai-order {
-  background: rgba(139, 92, 246, 0.2);
-  color: #c4b5fd;
-}
-
-.roster-avatar {
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
-  background: var(--surface-2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.95rem;
-  flex-shrink: 0;
-}
-
-.roster-avatar.avatar-ai {
-  background: linear-gradient(135deg, #8b5cf6, #4c86ff);
-}
-
-.roster-meta {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  flex: 1;
-  gap: 0.05rem;
-}
-
-.roster-name {
-  font-size: 0.82rem;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-
-.ai-tag {
-  font-size: 0.6rem;
-  font-weight: 800;
-  color: #c4b5fd;
-  background: rgba(139, 92, 246, 0.2);
-  border: 1px solid rgba(139, 92, 246, 0.4);
-  border-radius: 5px;
-  padding: 0.05rem 0.35rem;
-  letter-spacing: 0.04em;
-}
-
-.roster-sub {
-  font-size: 0.7rem;
   color: var(--text-sub);
+  background: var(--bg-card-solid);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  padding: 0.3rem 0.85rem;
+  pointer-events: none;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.roster-status-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--accent-rose);
-  flex-shrink: 0;
-  box-shadow: 0 0 6px rgba(244, 63, 94, 0.5);
-}
-
-.roster-status-dot.on {
-  background: var(--accent-emerald);
-  box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
 }
 
 /* Detail panel */
