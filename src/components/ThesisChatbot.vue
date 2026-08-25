@@ -1,18 +1,14 @@
 <template>
-  <div class="glass-panel" style="padding: 1.5rem; display: flex; flex-direction: column; height: 620px;">
+  <div class="glass-panel chat-panel">
     <!-- Chat Header -->
-    <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1rem;">
-      <div style="display: flex; align-items: center; gap: 0.75rem;">
-        <div style="width: 42px; height: 42px; border-radius: 12px; background: linear-gradient(135deg, var(--primary), var(--accent-cyan)); display: flex; align-items: center; justify-content: center; font-size: 1.4rem;">
-          🤖
-        </div>
+    <div class="chat-header">
+      <div class="chat-header-identity">
+        <div class="chat-avatar">🤖</div>
         <div>
-          <h3 style="font-family: var(--font-heading); font-size: 1.15rem; color: var(--text-main); margin: 0;">
-            Avan · Avantage Group
-          </h3>
-          <p style="font-size: 0.75rem; color: var(--accent-emerald); margin: 0; display: flex; align-items: center; gap: 0.3rem;">
-            <span style="width: 6px; height: 6px; border-radius: 50%; background: var(--accent-emerald); display: inline-block;"></span>
-            Asistente Interactivo para Temas de Tesis
+          <h3 class="chat-title">Avan · Avantage Group</h3>
+          <p class="chat-status">
+            <span class="chat-status-dot"></span>
+            Asistente interactivo para temas de tesis
           </p>
         </div>
       </div>
@@ -20,8 +16,7 @@
       <button
         v-if="chatMessages.length > 2"
         type="button"
-        class="btn-secondary"
-        style="font-size: 0.75rem; padding: 0.3rem 0.7rem;"
+        class="btn-secondary chat-reset-btn"
         @click="resetChat"
       >
         🔄 Reiniciar
@@ -29,38 +24,21 @@
     </div>
 
     <!-- Messages Container -->
-    <div ref="chatContainer" style="flex: 1; overflow-y: auto; padding-right: 0.5rem; display: flex; flex-direction: column; gap: 1rem;">
+    <div ref="chatContainer" class="chat-messages custom-scrollbar">
       <div
         v-for="(msg, index) in chatMessages"
         :key="index"
-        :style="{
-          display: 'flex',
-          justifyContent: msg.sender === 'user' ? 'flex-end' : 'flex-start'
-        }"
+        class="chat-row"
+        :class="msg.sender === 'user' ? 'is-user' : 'is-bot'"
       >
-        <div
-          :style="{
-            maxWidth: '85%',
-            padding: '0.85rem 1.1rem',
-            borderRadius: msg.sender === 'user' ? '18px 18px 2px 18px' : '18px 18px 18px 2px',
-            background: msg.sender === 'user' ? 'linear-gradient(135deg, var(--primary), var(--primary-hover))' : 'rgba(15, 23, 42, 0.85)',
-            border: msg.sender === 'user' ? 'none' : '1px solid var(--border-glow)',
-            color: '#FFFFFF',
-            fontSize: '0.9rem',
-            lineHeight: '1.5',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
-          }"
-        >
-          <!-- Contenido formateado del mensaje -->
-          <div style="white-space: pre-line;">{{ msg.text }}</div>
+        <div class="chat-bubble" :class="msg.sender === 'user' ? 'is-user' : 'is-bot'">
+          <div class="chat-bubble-text">{{ msg.text }}</div>
 
           <!-- Componente especial para Selección de Nivel y Carrera (Paso 3) -->
-          <div v-if="msg.step === 3 && currentStep === 3" style="margin-top: 1rem; display: flex; flex-direction: column; gap: 0.75rem;">
+          <div v-if="msg.step === 3 && currentStep === 3" class="chat-step3">
             <div>
-              <label style="font-size: 0.8rem; color: var(--accent-cyan); display: block; margin-bottom: 0.3rem;">
-                Nivel Académico:
-              </label>
-              <select v-model="step3Data.level" class="form-select" style="font-size: 0.85rem; padding: 0.4rem 0.8rem;">
+              <label class="chat-step3-label">Nivel académico</label>
+              <select v-model="step3Data.level" class="form-select chat-step3-select">
                 <option value="Pregrado (Bachiller/Título)">Pregrado (Bachiller / Título)</option>
                 <option value="Posgrado (Maestría)">Posgrado (Maestría)</option>
                 <option value="Posgrado (Doctorado)">Posgrado (Doctorado)</option>
@@ -68,10 +46,8 @@
             </div>
 
             <div>
-              <label style="font-size: 0.8rem; color: var(--accent-cyan); display: block; margin-bottom: 0.3rem;">
-                Carrera / Campo de Estudio:
-              </label>
-              <select v-model="step3Data.field" class="form-select" style="font-size: 0.85rem; padding: 0.4rem 0.8rem;">
+              <label class="chat-step3-label">Carrera / campo de estudio</label>
+              <select v-model="step3Data.field" class="form-select chat-step3-select">
                 <option value="Ingeniería de Sistemas y Computación">Ingeniería de Sistemas y Computación</option>
                 <option value="Ingeniería Agrónoma y Agroindustrial">Ingeniería Agrónoma y Agroindustrial</option>
                 <option value="Ciencias de la Salud y Medicina">Ciencias de la Salud y Medicina</option>
@@ -83,29 +59,28 @@
               </select>
             </div>
 
-            <button class="btn-primary" style="font-size: 0.85rem; padding: 0.5rem 1rem; margin-top: 0.4rem;" @click="confirmStep3">
-              Confirmar Nivel y Carrera ➔
+            <button class="btn-primary chat-step3-confirm" @click="confirmStep3">
+              Confirmar nivel y carrera ➔
             </button>
           </div>
         </div>
       </div>
 
       <!-- Indicador de escribiendo / cargando -->
-      <div v-if="isLoading" style="display: flex; gap: 0.5rem; align-items: center; color: var(--accent-cyan); font-size: 0.85rem; padding: 0.5rem;">
-        <div class="spinner" style="width: 16px; height: 16px;"></div>
+      <div v-if="isLoading" class="chat-typing">
+        <div class="spinner chat-typing-spinner"></div>
         <span>Evaluando tema en Ollama Cloud y enviando correo...</span>
       </div>
     </div>
 
     <!-- Suggested Quick Buttons (para sugerir respuestas al usuario) -->
-    <div v-if="currentStep === 1 && !isLoading" style="margin-top: 0.75rem; display: flex; flex-wrap: wrap; gap: 0.4rem;">
-      <span style="font-size: 0.75rem; color: var(--text-muted); width: 100%;">Sugerencias de inicio:</span>
+    <div v-if="currentStep === 1 && !isLoading" class="chat-suggestions">
+      <span class="chat-suggestions-label">Sugerencias de inicio:</span>
       <button
         v-for="(sug, idx) in step1Suggestions"
         :key="idx"
         type="button"
-        class="btn-secondary"
-        style="font-size: 0.75rem; padding: 0.25rem 0.6rem; border-radius: 8px;"
+        class="btn-secondary chat-suggestion-btn"
         @click="userInput = sug.text"
       >
         {{ sug.label }}
@@ -113,19 +88,17 @@
     </div>
 
     <!-- Input Bar -->
-    <form style="margin-top: 1rem; display: flex; gap: 0.5rem;" @submit.prevent="handleSendInput">
+    <form class="chat-input-bar" @submit.prevent="handleSendInput">
       <input
         v-model="userInput"
         type="text"
-        class="form-input"
+        class="form-input chat-input"
         :placeholder="getInputPlaceholder"
         :disabled="isLoading || currentStep === 3 || isFinished"
-        style="border-radius: 12px; font-size: 0.9rem;"
       />
       <button
         type="submit"
-        class="btn-primary"
-        style="width: auto; padding: 0 1.25rem; border-radius: 12px;"
+        class="btn-primary chat-send-btn"
         :disabled="isLoading || !userInput.trim() || currentStep === 3 || isFinished"
       >
         Enviar ➔
@@ -158,7 +131,7 @@ const answers = reactive({
   location: '',
   level: 'Pregrado (Bachiller/Título)',
   field: 'Ingeniería de Sistemas y Computación',
-  email: 'riuyagami@gmail.com',
+  email: '',
   phone: ''
 });
 
@@ -318,3 +291,192 @@ onMounted(() => {
   initChat();
 });
 </script>
+
+<style scoped>
+.chat-panel {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  height: 620px;
+}
+
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
+  gap: 0.75rem;
+}
+
+.chat-header-identity {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.chat-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--primary), var(--accent-cyan));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.3rem;
+  flex-shrink: 0;
+}
+
+.chat-title {
+  font-family: var(--font-heading);
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin: 0;
+}
+
+.chat-status {
+  font-size: 0.75rem;
+  color: var(--accent-emerald);
+  margin: 0.15rem 0 0 0;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.chat-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-emerald);
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.chat-reset-btn {
+  font-size: 0.75rem;
+  padding: 0.35rem 0.75rem;
+  flex-shrink: 0;
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.chat-row {
+  display: flex;
+}
+
+.chat-row.is-user { justify-content: flex-end; }
+.chat-row.is-bot { justify-content: flex-start; }
+
+.chat-bubble {
+  max-width: 85%;
+  padding: 0.85rem 1.1rem;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.chat-bubble.is-user {
+  border-radius: 16px 16px 3px 16px;
+  background: linear-gradient(135deg, var(--primary), var(--primary-hover));
+  color: #FFFFFF;
+  box-shadow: 0 4px 14px rgba(76, 63, 145, 0.28);
+}
+
+.chat-bubble.is-bot {
+  border-radius: 16px 16px 16px 3px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+}
+
+.chat-bubble-text {
+  white-space: pre-line;
+}
+
+.chat-step3 {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.chat-step3-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  opacity: 0.85;
+  display: block;
+  margin-bottom: 0.3rem;
+}
+
+.chat-step3-select {
+  font-size: 0.85rem;
+  padding: 0.5rem 0.8rem;
+  background: var(--bg-card-solid);
+  color: var(--text-main);
+}
+
+.chat-step3-confirm {
+  font-size: 0.85rem;
+  padding: 0.55rem 1rem;
+  margin-top: 0.15rem;
+}
+
+.chat-typing {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  color: var(--accent-cyan);
+  font-size: 0.85rem;
+  padding: 0.5rem;
+}
+
+.chat-typing-spinner {
+  width: 16px;
+  height: 16px;
+}
+
+.chat-suggestions {
+  margin-top: 0.85rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.chat-suggestions-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  width: 100%;
+}
+
+.chat-suggestion-btn {
+  font-size: 0.75rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--radius-sm);
+}
+
+.chat-input-bar {
+  margin-top: 1rem;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.chat-input {
+  border-radius: var(--radius-md);
+  font-size: 0.9rem;
+}
+
+.chat-send-btn {
+  width: auto;
+  padding: 0 1.35rem;
+  border-radius: var(--radius-md);
+}
+</style>

@@ -1,54 +1,65 @@
 :root {
-  /* ---- Light theme (default) — professional CRM palette ---- */
-  --bg-dark: #F5F6FA;
-  --bg-page-alt: #EEF1F7;
+  /* ---- Light theme (default) — "expediente" palette: bond paper + sello
+     de tinta violeta, evocando el sello húmedo de un trámite universitario
+     peruano en vez del azul corporativo genérico. ---- */
+  --bg-dark: #F4F4EF;
+  --bg-page-alt: #ECECE5;
   --bg-card: #FFFFFF;
   --bg-card-solid: #FFFFFF;
-  --bg-card-hover: #FBFCFE;
+  --bg-card-hover: #FAFAF7;
   --bg-sidebar: #FFFFFF;
-  --border-color: #E4E7EC;
-  --border-strong: #D0D5DD;
-  --border-glow: rgba(16, 94, 255, 0.35);
+  --border-color: #E2E2DA;
+  --border-strong: #CBCBC0;
+  --border-glow: rgba(76, 63, 145, 0.35);
 
-  --primary: #105EFF;
-  --primary-hover: #0B47C7;
-  --accent-cyan: #2563EB;
-  --accent-silver: #94A3B8;
-  --accent-emerald: #10B981;
-  --accent-amber: #F59E0B;
-  --accent-rose: #F43F5E;
-  --accent-pink: #DB2777;
+  --primary: #4C3F91;
+  --primary-hover: #362C6B;
+  --accent-cyan: #2F6FB0;
+  --accent-silver: #8D9199;
+  --accent-emerald: #2F7D5A;
+  --accent-amber: #C97B2E;
+  --accent-rose: #B23A45;
+  --accent-pink: #9C4F7C;
 
-  --text-main: #0F172A;
-  --text-muted: #94A3B8;
-  --text-sub: #475569;
+  --text-main: #1B2233;
+  --text-muted: #8B8E96;
+  --text-sub: #4A4F5C;
 
   /* Neutral "surface" tint ramp: subtle fills for chips, inputs, hover
      states. Values flip meaning (dark-tinted vs. white-tinted) per theme so
      component CSS never has to branch on the theme itself. */
-  --surface-1: rgba(15, 23, 42, 0.03);
-  --surface-2: rgba(15, 23, 42, 0.05);
-  --surface-3: rgba(15, 23, 42, 0.08);
-  --surface-4: rgba(15, 23, 42, 0.12);
-  --surface-5: rgba(15, 23, 42, 0.18);
+  --surface-1: rgba(27, 34, 51, 0.03);
+  --surface-2: rgba(27, 34, 51, 0.05);
+  --surface-3: rgba(27, 34, 51, 0.08);
+  --surface-4: rgba(27, 34, 51, 0.12);
+  --surface-5: rgba(27, 34, 51, 0.18);
 
-  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
-  --shadow-md: 0 8px 24px -8px rgba(16, 24, 40, 0.12);
-  --shadow-lg: 0 24px 48px -16px rgba(16, 24, 40, 0.2);
+  --shadow-sm: 0 1px 2px rgba(27, 34, 51, 0.06);
+  --shadow-md: 0 10px 26px -10px rgba(27, 34, 51, 0.16);
+  --shadow-lg: 0 26px 50px -18px rgba(27, 34, 51, 0.22);
 
-  /* Corner-radius scale — generous rounding, bento-card look. */
-  --radius-sm: 10px;
-  --radius-md: 14px;
-  --radius-lg: 20px;
-  --radius-xl: 28px;
+  /* Corner-radius scale — más cuadrada que un bento genérico: se siente a
+     documento/expediente, no a app de consumo. */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
 
-  --scrollbar-track: rgba(15, 23, 42, 0.04);
-  --scrollbar-thumb: rgba(15, 23, 42, 0.16);
-  --scrollbar-thumb-hover: rgba(15, 23, 42, 0.28);
+  --scrollbar-track: rgba(27, 34, 51, 0.04);
+  --scrollbar-thumb: rgba(27, 34, 51, 0.16);
+  --scrollbar-thumb-hover: rgba(27, 34, 51, 0.28);
 
-  --font-heading: 'Outfit', 'Plus Jakarta Sans', sans-serif;
-  --font-subheading: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-body: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  /* Plex Sans lleva toda la interfaz (nav, botones, tablas, formularios) —
+     carácter técnico/institucional, coherente con el lado "software" de
+     Avantage y el lenguaje regulatorio (SUNEDU/CONCYTEC) del producto.
+     Source Serif 4 se reserva para los momentos de "documento": el titular
+     del reporte de viabilidad y el hero público. Plex Mono marca los datos
+     (fechas, teléfonos, puntajes) como si fueran campos de un expediente. */
+  --font-heading: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-subheading: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-body: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-serif: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+  --font-mono: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
 
   /* Brand colors for social platform badges/icons (same in both themes). */
   --brand-whatsapp: #25D366;
@@ -58,32 +69,37 @@
   --brand-facebook: #1877F2;
   --brand-email: #6B7280;
 
-  /* Text readable on top of a rgba(16,94,255,0.1-0.15) "primary tint" chip
+  /* Text readable on top of a rgba(76,63,145,0.1-0.15) "primary tint" chip
      or panel — e.g. status badges, highlighted info boxes. */
-  --on-tint-strong: #1D4ED8;
-  --on-tint-body: #1E3A8A;
-  --on-tint-muted: #3B5BDB;
+  --on-tint-strong: #362C6B;
+  --on-tint-body: #241D4D;
+  --on-tint-muted: #5B4FA0;
 }
 
-/* ---- Dark theme — opt-in via the navbar toggle, preference remembered ---- */
+/* ---- Dark theme — opt-in via the navbar toggle, preference remembered.
+   No es un gris genérico: sigue siendo "papel", pero leído de noche —
+   tinta color hueso sobre fondo tinta-noche, con el mismo violeta de sello
+   aclarado para contraste. ---- */
 :root[data-theme="dark"] {
-  --bg-dark: #121214;
-  --bg-page-alt: #16161A;
-  --bg-card: rgba(27, 27, 30, 0.75);
-  --bg-card-solid: #1B1B1F;
-  --bg-card-hover: rgba(38, 38, 42, 0.85);
-  --bg-sidebar: #121318;
+  --bg-dark: #15151D;
+  --bg-page-alt: #1A1A23;
+  --bg-card: rgba(30, 28, 42, 0.75);
+  --bg-card-solid: #1E1C2A;
+  --bg-card-hover: rgba(40, 37, 54, 0.85);
+  --bg-sidebar: #131219;
   --border-color: rgba(255, 255, 255, 0.09);
   --border-strong: rgba(255, 255, 255, 0.18);
-  --border-glow: rgba(16, 94, 255, 0.35);
+  --border-glow: rgba(139, 127, 224, 0.35);
 
-  --accent-cyan: #4C86FF;
-  --accent-silver: #BFC2C7;
-  --accent-pink: #F472B6;
+  --primary: #8B7FE0;
+  --primary-hover: #A79AFF;
+  --accent-cyan: #6FA3D8;
+  --accent-silver: #A7ABB5;
+  --accent-pink: #C77FA8;
 
-  --text-main: #FFFFFF;
-  --text-muted: #9A9DA3;
-  --text-sub: #D3D5D8;
+  --text-main: #F3F1EA;
+  --text-muted: #9B9CA6;
+  --text-sub: #D6D3E0;
 
   --surface-1: rgba(255, 255, 255, 0.02);
   --surface-2: rgba(255, 255, 255, 0.05);
@@ -95,9 +111,9 @@
   --shadow-md: 0 8px 20px -6px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 20px 40px -15px rgba(0, 0, 0, 0.55);
 
-  --on-tint-strong: #6E9BFF;
-  --on-tint-body: #EFF6FF;
-  --on-tint-muted: #A9C1FF;
+  --on-tint-strong: #A79AFF;
+  --on-tint-body: #EDEBFA;
+  --on-tint-muted: #C7BFF5;
 
   --scrollbar-track: rgba(0, 0, 0, 0.2);
   --scrollbar-thumb: rgba(255, 255, 255, 0.16);
@@ -115,8 +131,8 @@ body {
   background-color: var(--bg-dark);
   color: var(--text-main);
   background-image:
-    radial-gradient(at 0% 0%, rgba(16, 94, 255, 0.07) 0px, transparent 50%),
-    radial-gradient(at 100% 100%, rgba(37, 99, 235, 0.05) 0px, transparent 50%);
+    radial-gradient(at 0% 0%, rgba(76, 63, 145, 0.06) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(47, 111, 176, 0.05) 0px, transparent 50%);
   background-attachment: fixed;
   min-height: 100vh;
   line-height: 1.6;
@@ -125,9 +141,9 @@ body {
 
 :root[data-theme="dark"] body {
   background-image:
-    radial-gradient(at 0% 0%, rgba(16, 94, 255, 0.16) 0px, transparent 50%),
-    radial-gradient(at 100% 100%, rgba(191, 194, 199, 0.08) 0px, transparent 50%),
-    radial-gradient(at 50% 50%, rgba(16, 94, 255, 0.05) 0px, transparent 50%);
+    radial-gradient(at 0% 0%, rgba(139, 127, 224, 0.16) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(167, 171, 181, 0.07) 0px, transparent 50%),
+    radial-gradient(at 50% 50%, rgba(139, 127, 224, 0.05) 0px, transparent 50%);
 }
 
 #app {
@@ -198,7 +214,7 @@ body {
   font-weight: 800;
   letter-spacing: -0.03em;
   color: #FFFFFF;
-  box-shadow: 0 4px 15px rgba(16, 94, 255, 0.4);
+  box-shadow: 0 4px 15px rgba(76, 63, 145, 0.4);
 }
 
 .logo-text h1 {
@@ -225,8 +241,8 @@ body {
   gap: 0.5rem;
   padding: 0.4rem 0.9rem;
   border-radius: 9999px;
-  background: rgba(16, 185, 129, 0.1);
-  border: 1px solid rgba(16, 185, 129, 0.3);
+  background: rgba(47, 125, 90, 0.1);
+  border: 1px solid rgba(47, 125, 90, 0.3);
   color: var(--accent-emerald);
   font-size: 0.825rem;
   font-weight: 500;
@@ -353,7 +369,7 @@ p.section-subheading {
 .form-input:focus, .form-select:focus, .form-textarea:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(16, 94, 255, 0.18);
+  box-shadow: 0 0 0 3px rgba(76, 63, 145, 0.18);
   background: var(--bg-card-solid);
 }
 
@@ -378,13 +394,13 @@ p.section-subheading {
   align-items: center;
   justify-content: center;
   gap: 0.6rem;
-  box-shadow: 0 8px 20px -4px rgba(16, 94, 255, 0.5);
+  box-shadow: 0 8px 20px -4px rgba(76, 63, 145, 0.5);
   transition: all 0.25s ease;
 }
 
 .btn-primary:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 12px 25px -4px rgba(16, 94, 255, 0.65);
+  box-shadow: 0 12px 25px -4px rgba(76, 63, 145, 0.65);
 }
 
 .btn-primary:disabled {
@@ -419,48 +435,6 @@ p.section-subheading {
   margin-bottom: 1.5rem;
 }
 
-.gauge-wrapper {
-  position: relative;
-  width: 140px;
-  height: 140px;
-  margin: 0 auto 1rem auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.gauge-svg {
-  transform: rotate(-90deg);
-  width: 100%;
-  height: 100%;
-}
-
-.gauge-bg {
-  fill: none;
-  stroke: var(--surface-3);
-  stroke-width: 10;
-}
-
-.gauge-progress {
-  fill: none;
-  stroke-width: 10;
-  stroke-linecap: round;
-  transition: stroke-dashoffset 1s ease-in-out;
-}
-
-.gauge-number {
-  position: absolute;
-  font-family: var(--font-heading);
-  font-size: 2.25rem;
-  font-weight: 800;
-  color: var(--text-main);
-}
-
-.gauge-percent {
-  font-size: 1.1rem;
-  color: var(--text-muted);
-}
-
 .viability-level-badge {
   display: inline-block;
   padding: 0.35rem 1.1rem;
@@ -472,33 +446,33 @@ p.section-subheading {
 }
 
 .level-alta {
-  background: rgba(16, 185, 129, 0.14);
-  color: #059669;
-  border: 1px solid rgba(16, 185, 129, 0.4);
+  background: rgba(47, 125, 90, 0.14);
+  color: #1F5A3F;
+  border: 1px solid rgba(47, 125, 90, 0.4);
 }
 
 .level-media-alta {
-  background: rgba(16, 94, 255, 0.12);
-  color: #1D4ED8;
-  border: 1px solid rgba(16, 94, 255, 0.4);
+  background: rgba(76, 63, 145, 0.12);
+  color: #362C6B;
+  border: 1px solid rgba(76, 63, 145, 0.4);
 }
 
 .level-media {
-  background: rgba(245, 158, 11, 0.14);
-  color: #B45309;
-  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: rgba(201, 123, 46, 0.14);
+  color: #8C5A1E;
+  border: 1px solid rgba(201, 123, 46, 0.4);
 }
 
 .level-baja {
-  background: rgba(244, 63, 94, 0.12);
-  color: #BE123C;
-  border: 1px solid rgba(244, 63, 94, 0.4);
+  background: rgba(178, 58, 69, 0.12);
+  color: #8C2530;
+  border: 1px solid rgba(178, 58, 69, 0.4);
 }
 
-:root[data-theme="dark"] .level-alta { color: #34D399; }
-:root[data-theme="dark"] .level-media-alta { color: #6E9BFF; }
-:root[data-theme="dark"] .level-media { color: #FBBF24; }
-:root[data-theme="dark"] .level-baja { color: #FB7185; }
+:root[data-theme="dark"] .level-alta { color: #4FAE82; }
+:root[data-theme="dark"] .level-media-alta { color: #A79AFF; }
+:root[data-theme="dark"] .level-media { color: #E0A362; }
+:root[data-theme="dark"] .level-baja { color: #E0717C; }
 
 /* Metric Progress Bar */
 .metric-item {
@@ -571,8 +545,8 @@ p.section-subheading {
 
 /* Email Banner Notification */
 .email-banner {
-  background: linear-gradient(135deg, rgba(16, 94, 255, 0.1), rgba(37, 99, 235, 0.05));
-  border: 1px solid rgba(16, 94, 255, 0.3);
+  background: linear-gradient(135deg, rgba(76, 63, 145, 0.1), rgba(47, 111, 176, 0.05));
+  border: 1px solid rgba(76, 63, 145, 0.3);
   border-radius: 14px;
   padding: 1rem 1.25rem;
   display: flex;
@@ -711,3 +685,179 @@ p.section-subheading {
 }
 .brand-icon.facebook { background: var(--brand-facebook); color: #fff; }
 .brand-icon.email { background: var(--brand-email); color: #fff; }
+
+/* ==========================================================================
+   Patrones compartidos del panel admin — mismo vocabulario visual en todas
+   las vistas (Leads, Proyectos, WhatsApp, Roles, etc.) para que dejen de
+   verse como pantallas construidas por separado.
+   ========================================================================== */
+
+/* Encabezado de página: eyebrow (mono, tracked) + título + subtítulo +
+   acciones a la derecha. Reemplaza los headers ad-hoc con estilos inline. */
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 2rem;
+}
+
+.page-header-titles { min-width: 0; }
+
+.page-eyebrow {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--primary);
+  margin-bottom: 0.45rem;
+}
+
+.page-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+/* Titular "de documento" — se usa con cuentagotas: hero público y el
+   resultado del reporte de viabilidad. En el resto de la app, el sans
+   (.section-heading / .page-header) sigue mandando. */
+.doc-heading {
+  font-family: var(--font-serif);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* Datos "de campo de expediente": teléfonos, fechas, puntajes, IDs. */
+.data-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Pills de estado — un solo sistema para leads, proyectos, cotizaciones,
+   conexiones (WhatsApp/Instagram/Google), etc. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+.pill-neutral { background: var(--surface-2); color: var(--text-sub); border: 1px solid var(--border-color); }
+.pill-primary { background: rgba(76, 63, 145, 0.1); color: var(--on-tint-strong); border: 1px solid rgba(76, 63, 145, 0.3); }
+.pill-success { background: rgba(47, 125, 90, 0.12); color: #1F5A3F; border: 1px solid rgba(47, 125, 90, 0.35); }
+.pill-warning { background: rgba(201, 123, 46, 0.12); color: #8C5A1E; border: 1px solid rgba(201, 123, 46, 0.35); }
+.pill-danger { background: rgba(178, 58, 69, 0.12); color: #8C2530; border: 1px solid rgba(178, 58, 69, 0.35); }
+.pill-info { background: rgba(47, 111, 176, 0.12); color: #1F4E77; border: 1px solid rgba(47, 111, 176, 0.35); }
+
+:root[data-theme="dark"] .pill-primary { color: var(--on-tint-strong); }
+:root[data-theme="dark"] .pill-success { color: #4FAE82; }
+:root[data-theme="dark"] .pill-warning { color: #E0A362; }
+:root[data-theme="dark"] .pill-danger { color: #E0717C; }
+:root[data-theme="dark"] .pill-info { color: #7FB2E0; }
+
+/* Tabla de datos — cabecera mono en mayúsculas (registro/expediente), filas
+   con hover suave. Un solo look para todas las tablas del panel. */
+.data-table-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.data-table th {
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--surface-1);
+  white-space: nowrap;
+}
+
+.data-table td {
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-sub);
+  vertical-align: middle;
+}
+
+.data-table tbody tr:last-child td { border-bottom: none; }
+.data-table tbody tr:hover { background: var(--surface-1); }
+
+/* Estado vacío — misma composición en todo el panel: ícono, título, texto
+   de una línea que invita a actuar (nunca solo "No hay datos"). */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 3.5rem 1.5rem;
+  color: var(--text-muted);
+  gap: 0.4rem;
+}
+
+.empty-state-icon {
+  font-size: 2.1rem;
+  margin-bottom: 0.4rem;
+  opacity: 0.7;
+}
+
+.empty-state-title {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  color: var(--text-main);
+  font-size: 1.02rem;
+}
+
+.empty-state-text {
+  font-size: 0.85rem;
+  max-width: 380px;
+}
+
+/* Tabs — para vistas con sub-secciones (Interacciones, Disponibilidad, etc.) */
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.tab-item {
+  padding: 0.7rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  cursor: pointer;
+  transition: color 0.2s ease, border-color 0.2s ease;
+  font-family: var(--font-body);
+}
+
+.tab-item:hover { color: var(--text-main); }
+.tab-item.is-active { color: var(--primary); border-bottom-color: var(--primary); }

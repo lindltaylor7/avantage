@@ -257,7 +257,7 @@ onUnmounted(() => {
 }
 
 .red-badge {
-  background-color: #ef4444;
+  background-color: var(--accent-rose);
   color: #ffffff;
   border: 1px solid var(--bg-card-solid);
 }
@@ -306,7 +306,7 @@ onUnmounted(() => {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+  background: linear-gradient(135deg, var(--accent-cyan), var(--primary));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -334,7 +334,7 @@ onUnmounted(() => {
   right: 0;
   width: 10px;
   height: 10px;
-  background-color: #10b981;
+  background-color: var(--accent-emerald);
   border: 2px solid var(--bg-card-solid);
   border-radius: 50%;
 }
@@ -374,11 +374,11 @@ onUnmounted(() => {
   font-size: 0.65rem;
   font-weight: 700;
   text-transform: uppercase;
-  background: rgba(59, 130, 246, 0.2);
-  color: #60a5fa;
+  background: rgba(76, 63, 145, 0.14);
+  color: var(--on-tint-strong);
   padding: 0.15rem 0.5rem;
   border-radius: 4px;
-  border: 1px solid rgba(59, 130, 246, 0.4);
+  border: 1px solid rgba(76, 63, 145, 0.35);
 }
 
 .dropdown-divider {
@@ -410,11 +410,11 @@ onUnmounted(() => {
 }
 
 .logout-item {
-  color: #f87171;
+  color: var(--accent-rose);
 }
 
 .logout-item:hover {
-  background-color: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
+  background-color: rgba(178, 58, 69, 0.14);
+  color: var(--accent-rose);
 }
 </style>

@@ -15,6 +15,11 @@ const BOT_DELAY_MAX_MS = Number(process.env.WHATSAPP_BOT_DELAY_MAX_MS) || 3500;
 // (creada antes de que el guion fuera configurable).
 const LEGACY_STEP_ORDER = ['problem', 'location', 'level', 'field', 'email'];
 
+// Asesor cuyo Google Calendar usa el bot para agendar las llamadas que
+// ofrece al terminar el guion (por ahora uno solo, fijo, en vez de resolver
+// dinámicamente a partir de "assigned_to" del lead).
+const BOOKING_ADVISOR_USER_ID = Number(process.env.GOOGLE_BOOKING_ADVISOR_USER_ID) || 1;
+
 // Cuando un contacto nuevo escribe, suele hacerlo en varias burbujas seguidas
 // (p. ej. "Hola" y luego, unos segundos después, el tema real). En vez de
 // responder a la primera burbuja al instante, se espera este tiempo de
@@ -69,12 +74,13 @@ function formatQuestion(step, number, total) {
  * el lead en el funnel de ventas.
  */
 export class WhatsappBotService {
-  constructor({ ollamaService, emailService, leadService, whatsappMessageService, stepService }) {
+  constructor({ ollamaService, emailService, leadService, whatsappMessageService, stepService, googleCalendarService }) {
     this.ollamaService = ollamaService;
     this.emailService = emailService;
     this.leadService = leadService;
     this.whatsappMessageService = whatsappMessageService;
     this.stepService = stepService || new WhatsappBotStepService();
+    this.googleCalendarService = googleCalendarService;
     // wa_id -> { messages: string[], timer: NodeJS.Timeout }, buffer temporal
     // de los primeros mensajes de un contacto nuevo mientras se espera el
     // silencio de FIRST_MESSAGE_DEBOUNCE_MS antes de iniciar la sesión.
@@ -192,6 +198,11 @@ export class WhatsappBotService {
           ? 'La conversación ya está marcada como "completed" (terminó el flujo antes); el bot no vuelve a responder automáticamente. Usa "🔄 Reiniciar conversación" en el panel para probarla de nuevo.'
           : 'El bot está pausado para este contacto (alguien respondió manualmente). Actívalo con "▶️ Activar bot" en el panel.'
       });
+      return;
+    }
+
+    if (session.status === 'scheduling') {
+      await this.handleSchedulingReply(waId, session, text);
       return;
     }
 
@@ -381,20 +392,118 @@ export class WhatsappBotService {
         await this.leadService.createLead({ ...leadPayload, phone: waId });
       }
 
-      await this.updateSession(waId, { status: 'completed' });
-
       await this.send(
         waId,
         `✅ ¡Listo! Resultado de tu evaluación:\n\n📊 Viabilidad: ${evaluation.overallViabilityScore}% (${evaluation.viabilityLevel})\n\n` +
         (email
           ? `📩 Revisa tu correo (${email}) para ver el reporte completo con normativas SUNEDU/CONCYTEC.\n\n`
-          : '') +
-        'Un asesor se pondrá en contacto contigo pronto. ¡Gracias! 🙌'
+          : '')
       );
+
+      await this.offerScheduling(waId, { topic: synthesizedTopic, email });
     } catch (error) {
       console.error('❌ [WhatsApp Bot] Error al finalizar la evaluación:', error);
       await this.updateSession(waId, { status: 'completed' });
       await this.send(waId, '⚠️ Tuvimos un problema técnico al generar tu reporte automático, pero ya registramos tus datos. Un asesor te contactará pronto para continuar. ¡Gracias! 🙌');
+    }
+  }
+
+  /**
+   * Tras finalizar la evaluación, ofrece agendar directamente una llamada en
+   * el Google Calendar real del asesor (`BOOKING_ADVISOR_USER_ID`), mostrando
+   * sus próximos bloques libres reales (cruzando su horario configurado con
+   * lo que ya tiene ocupado en su calendario). Si el asesor no tiene Google
+   * Calendar conectado o no le quedan bloques libres, se cae de vuelta al
+   * cierre manual de siempre sin bloquear la conversación.
+   */
+  async offerScheduling(waId, { topic, email }) {
+    try {
+      if (!this.googleCalendarService?.isConfigured()) throw new Error('Google Calendar no configurado en el servidor');
+
+      const connection = await this.googleCalendarService.getConnection(BOOKING_ADVISOR_USER_ID);
+      if (!connection) throw new Error('El asesor por defecto no tiene Google Calendar conectado');
+
+      const slots = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID);
+      if (slots.length === 0) throw new Error('Sin bloques libres próximos');
+
+      const session = await this.getSession(waId);
+      const answers = typeof session.answers === 'string' ? JSON.parse(session.answers) : (session.answers || {});
+      answers.__scheduling = { slots, topic, email };
+      await this.updateSession(waId, { status: 'scheduling', answers: JSON.stringify(answers) });
+
+      const list = numberedList(slots.map((s) => s.label));
+      await this.send(
+        waId,
+        `📅 Para terminar, ¿quieres agendar una llamada gratuita con un asesor? Responde con el número del horario que prefieras, o escribe "no" si prefieres que te contacten después:\n\n${list}`
+      );
+    } catch (error) {
+      this.logActivity({ type: 'scheduling_offer_skipped', waId, reason: error.message });
+      await this.updateSession(waId, { status: 'completed' });
+      await this.send(waId, 'Un asesor se pondrá en contacto contigo pronto para coordinar una llamada. ¡Gracias! 🙌');
+    }
+  }
+
+  /**
+   * Procesa la respuesta del lead a los horarios ofrecidos por
+   * offerScheduling(): un número válido crea el evento real en Google
+   * Calendar (con link de Meet); "no" cierra el flujo sin agendar.
+   */
+  async handleSchedulingReply(waId, session, text) {
+    const answers = typeof session.answers === 'string' ? JSON.parse(session.answers) : (session.answers || {});
+    const scheduling = answers.__scheduling;
+
+    if (!scheduling) {
+      await this.updateSession(waId, { status: 'completed' });
+      return;
+    }
+
+    const trimmed = (text || '').trim();
+    if (['no', 'omitir', 'despues', 'después'].includes(normalize(trimmed))) {
+      delete answers.__scheduling;
+      await this.updateSession(waId, { status: 'completed', answers: JSON.stringify(answers) });
+      await this.send(waId, 'Sin problema, un asesor se pondrá en contacto contigo pronto. ¡Gracias! 🙌');
+      return;
+    }
+
+    const index = parseInt(trimmed, 10);
+    const slot = Number.isInteger(index) ? scheduling.slots[index - 1] : null;
+    if (!slot) {
+      await this.send(
+        waId,
+        `⚠️ No reconocí esa opción. Responde con el número del horario, o "no" si prefieres que te contacten después:\n\n${numberedList(scheduling.slots.map((s) => s.label))}`
+      );
+      return;
+    }
+
+    try {
+      const event = await this.googleCalendarService.createMeetEvent(BOOKING_ADVISOR_USER_ID, {
+        summary: `Asesoría de tesis - ${scheduling.topic}`,
+        description: `Llamada agendada automáticamente por Avan (WhatsApp) con el contacto ${waId}.`,
+        startTime: slot.startTime,
+        endTime: slot.endTime,
+        attendeeEmail: scheduling.email || undefined
+      });
+
+      delete answers.__scheduling;
+      await this.updateSession(waId, { status: 'completed', answers: JSON.stringify(answers) });
+
+      const lead = await this.leadService.findByPhone(waId);
+      if (lead) {
+        const noteAppend = `\nReunión agendada: ${slot.label}${event.meetLink ? ` — ${event.meetLink}` : ''}`;
+        await this.leadService.updateLead(lead.id, { additionalNotes: `${lead.additional_notes || ''}${noteAppend}` });
+      }
+
+      await this.send(
+        waId,
+        `✅ ¡Listo! Tu llamada quedó agendada para *${slot.label}*.` +
+        (event.meetLink ? `\n\n🔗 Link de Google Meet: ${event.meetLink}` : '') +
+        '\n\nTe esperamos. ¡Gracias! 🙌'
+      );
+    } catch (error) {
+      console.error(`❌ [WhatsApp Bot] Error al agendar la reunión para ${waId}:`, error);
+      delete answers.__scheduling;
+      await this.updateSession(waId, { status: 'completed', answers: JSON.stringify(answers) });
+      await this.send(waId, '⚠️ Tuvimos un problema técnico al agendar la reunión. Un asesor se pondrá en contacto contigo directamente para coordinar. ¡Gracias! 🙌');
     }
   }
 }

@@ -187,13 +187,13 @@ onMounted(() => {
   padding: 0.6rem 1.2rem;
   border-radius: 9999px;
   text-decoration: none;
-  box-shadow: 0 8px 20px -6px rgba(16, 94, 255, 0.5);
+  box-shadow: 0 8px 20px -6px rgba(76, 63, 145, 0.5);
   transition: all 0.2s ease;
 }
 
 .welcome-cta:hover {
   transform: translateY(-1px);
-  box-shadow: 0 10px 24px -6px rgba(16, 94, 255, 0.6);
+  box-shadow: 0 10px 24px -6px rgba(76, 63, 145, 0.6);
 }
 
 .welcome-illustration-wrapper {
@@ -234,9 +234,9 @@ onMounted(() => {
 }
 
 .count-pill {
-  background: rgba(16, 94, 255, 0.12);
+  background: rgba(76, 63, 145, 0.12);
   color: var(--on-tint-strong);
-  border: 1px solid rgba(16, 94, 255, 0.3);
+  border: 1px solid rgba(76, 63, 145, 0.3);
   font-size: 0.75rem;
   font-weight: 700;
   padding: 0.15rem 0.55rem;
@@ -370,11 +370,11 @@ onMounted(() => {
   border: 1px solid transparent;
 }
 
-.module-icon-bg.tint-amber { background: rgba(245, 158, 11, 0.12); border-color: rgba(245, 158, 11, 0.25); }
-.module-icon-bg.tint-pink { background: rgba(219, 39, 119, 0.12); border-color: rgba(219, 39, 119, 0.25); }
-.module-icon-bg.tint-purple { background: rgba(139, 92, 246, 0.12); border-color: rgba(139, 92, 246, 0.25); }
-.module-icon-bg.tint-rose { background: rgba(244, 63, 94, 0.12); border-color: rgba(244, 63, 94, 0.25); }
-.module-icon-bg.tint-blue { background: rgba(16, 94, 255, 0.12); border-color: rgba(16, 94, 255, 0.25); }
+.module-icon-bg.tint-amber { background: rgba(201, 123, 46, 0.12); border-color: rgba(201, 123, 46, 0.25); }
+.module-icon-bg.tint-pink { background: rgba(156, 79, 124, 0.12); border-color: rgba(156, 79, 124, 0.25); }
+.module-icon-bg.tint-purple { background: rgba(76, 63, 145, 0.12); border-color: rgba(76, 63, 145, 0.25); }
+.module-icon-bg.tint-rose { background: rgba(178, 58, 69, 0.12); border-color: rgba(178, 58, 69, 0.25); }
+.module-icon-bg.tint-blue { background: rgba(47, 111, 176, 0.12); border-color: rgba(47, 111, 176, 0.25); }
 
 .module-content {
   flex: 1;

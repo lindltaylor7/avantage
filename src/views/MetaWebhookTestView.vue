@@ -237,7 +237,7 @@ onUnmounted(() => {
 
 .alert-box {
   border-color: rgba(239, 68, 68, 0.4);
-  color: #fca5a5;
+  color: #E0717C;
 }
 
 .empty-state {
@@ -317,12 +317,12 @@ onUnmounted(() => {
 
 .badge-ok {
   background: rgba(34, 197, 94, 0.15);
-  color: #4ade80;
+  color: #4FAE82;
 }
 
 .badge-error {
   background: rgba(239, 68, 68, 0.15);
-  color: #f87171;
+  color: #E0717C;
 }
 
 .event-payload {

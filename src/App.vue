@@ -17,16 +17,16 @@
             </div>
           </router-link>
 
-          <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+          <div class="header-actions">
             <template v-if="authState.token">
-              <router-link to="/dashboard" class="btn-primary" style="text-decoration: none; font-size: 0.85rem; padding: 0.5rem 1.1rem; width: auto;">
+              <router-link to="/dashboard" class="btn-primary header-cta">
                 🧭 Dashboard Admin
               </router-link>
-              <button type="button" class="btn-secondary" style="font-size: 0.85rem;" @click="handleLogout">
+              <button type="button" class="btn-secondary header-cta" @click="handleLogout">
                 Salir
               </button>
             </template>
-            <router-link v-else to="/login" class="btn-secondary" style="text-decoration: none; font-size: 0.85rem;">
+            <router-link v-else to="/login" class="btn-secondary header-cta">
               🔐 Acceso Admin
             </router-link>
 
@@ -45,7 +45,7 @@
       <footer class="site-footer">
         <div class="container">
           <p><strong>AVANTAGE GROUP</strong> — Evaluador de Viabilidad de Tesis a Nivel de Pregrado y Posgrado en Perú.</p>
-          <p style="margin-top: 0.3rem; opacity: 0.7; letter-spacing: 0.08em; text-transform: uppercase; font-size: 0.75rem;">
+          <p class="site-footer-tagline">
             Research · Technology · Innovation · Growth
           </p>
         </div>
@@ -72,3 +72,28 @@ function handleLogout() {
   router.push('/login');
 }
 </script>
+
+<style scoped>
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.header-cta {
+  text-decoration: none;
+  font-size: 0.85rem;
+  padding: 0.55rem 1.1rem;
+  width: auto;
+}
+
+.site-footer-tagline {
+  margin-top: 0.3rem;
+  opacity: 0.7;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+}
+</style>

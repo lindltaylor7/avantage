@@ -189,7 +189,7 @@
             'is-final-column': col.final,
             'is-drag-over': hoveredColumn === col.key
           }"
-          :style="{ '--col-accent': col.color || '#105EFF' }"
+          :style="{ '--col-accent': col.color || '#2F6FB0' }"
           @dragover.prevent="hoveredColumn = col.key"
           @dragleave="onColumnDragLeave(col.key)"
           @drop="onDrop(col.key)"
@@ -207,7 +207,7 @@
               </div>
               <span
                 class="col-count-badge"
-                :style="{ background: (col.color || '#105EFF') + '22', color: col.color || '#105EFF', borderColor: (col.color || '#105EFF') + '55' }"
+                :style="{ background: (col.color || '#2F6FB0') + '22', color: col.color || '#2F6FB0', borderColor: (col.color || '#2F6FB0') + '55' }"
               >
                 {{ (filteredLeadsByColumn[col.key] || []).length }}
               </span>
@@ -766,7 +766,7 @@ const DEFAULT_SETTER_COLUMNS = [
     key: 'conversacion_abierta',
     label: 'Conversación Abierta',
     icon: '💬',
-    color: '#06B6D4',
+    color: '#2C8C99',
     final: false,
     position: 0
   },
@@ -774,7 +774,7 @@ const DEFAULT_SETTER_COLUMNS = [
     key: 'calificando',
     label: 'En Calificación',
     icon: '🎯',
-    color: '#8B5CF6',
+    color: '#4C3F91',
     final: false,
     position: 1
   },
@@ -782,7 +782,7 @@ const DEFAULT_SETTER_COLUMNS = [
     key: 'cita_agendada',
     label: 'Cita Agendada',
     icon: '📅',
-    color: '#F59E0B',
+    color: '#C9922E',
     final: false,
     position: 2
   },
@@ -790,7 +790,7 @@ const DEFAULT_SETTER_COLUMNS = [
     key: 'transferido_closer',
     label: 'Transferido a Closer',
     icon: '🤝',
-    color: '#105EFF',
+    color: '#2F6FB0',
     final: false,
     position: 3
   },
@@ -798,7 +798,7 @@ const DEFAULT_SETTER_COLUMNS = [
     key: 'ganado',
     label: 'Ganado / Cerrado',
     icon: '🏆',
-    color: '#10B981',
+    color: '#2F7D5A',
     final: true,
     position: 4
   },
@@ -806,7 +806,7 @@ const DEFAULT_SETTER_COLUMNS = [
     key: 'descartado',
     label: 'No Califica / Sin Resp.',
     icon: '🚫',
-    color: '#F43F5E',
+    color: '#B23A45',
     final: false,
     position: 5
   }
@@ -815,14 +815,14 @@ const DEFAULT_SETTER_COLUMNS = [
 const PRESET_EMOJIS = ['💬', '🎯', '📅', '🤝', '🏆', '🚫', '💚', '📘', '📸', '📞', '🆕', '📋', '⏳', '⭐', '⚡', '💰'];
 
 const PRESET_COLORS = [
-  { name: 'Cian', hex: '#06B6D4' },
-  { name: 'Violeta', hex: '#8B5CF6' },
-  { name: 'Ámbar', hex: '#F59E0B' },
-  { name: 'Azul', hex: '#105EFF' },
-  { name: 'Esmeralda', hex: '#10B981' },
-  { name: 'Rosa', hex: '#F43F5E' },
-  { name: 'Índigo', hex: '#6366F1' },
-  { name: 'Naranja', hex: '#F97316' }
+  { name: 'Cian', hex: '#2C8C99' },
+  { name: 'Violeta', hex: '#4C3F91' },
+  { name: 'Ámbar', hex: '#C9922E' },
+  { name: 'Azul', hex: '#2F6FB0' },
+  { name: 'Esmeralda', hex: '#2F7D5A' },
+  { name: 'Rosa', hex: '#B23A45' },
+  { name: 'Índigo', hex: '#5560B0' },
+  { name: 'Naranja', hex: '#BF5A2A' }
 ];
 
 const VIABILITY_FILTERS = [
@@ -914,7 +914,7 @@ const showCreateColModal = ref(false);
 const newColumnForm = reactive({
   label: '',
   icon: '🎯',
-  color: '#06B6D4',
+  color: '#2C8C99',
   final: false
 });
 
@@ -1233,7 +1233,7 @@ async function updateLeadStatusFromSelect(leadId, newStatus) {
 function openCreateColumnModal() {
   newColumnForm.label = '';
   newColumnForm.icon = '🎯';
-  newColumnForm.color = '#06B6D4';
+  newColumnForm.color = '#2C8C99';
   newColumnForm.final = false;
   showCreateColModal.value = true;
 }
@@ -1245,7 +1245,7 @@ function saveNewColumn() {
     key,
     label: newColumnForm.label.trim(),
     icon: newColumnForm.icon || '📌',
-    color: newColumnForm.color || '#06B6D4',
+    color: newColumnForm.color || '#2C8C99',
     final: Boolean(newColumnForm.final),
     position: columns.value.length
   });
@@ -1257,7 +1257,7 @@ function openEditColumnModal(col) {
   editingColumn.value = col;
   editColumnForm.label = col.label;
   editColumnForm.icon = col.icon || '📌';
-  editColumnForm.color = col.color || '#06B6D4';
+  editColumnForm.color = col.color || '#2C8C99';
   editColumnForm.final = Boolean(col.final);
   showEditColModal.value = true;
 }
@@ -1457,7 +1457,7 @@ onMounted(() => {
 
 /* Botones */
 .btn-action-primary {
-  background: linear-gradient(135deg, #06B6D4 0%, #105EFF 100%);
+  background: linear-gradient(135deg, #2C8C99 0%, #2F6FB0 100%);
   color: #FFFFFF;
   border: none;
   padding: 0.65rem 1.25rem;
@@ -1469,12 +1469,12 @@ onMounted(() => {
   align-items: center;
   gap: 0.5rem;
   transition: all 0.25s ease;
-  box-shadow: 0 4px 14px rgba(6, 182, 212, 0.35);
+  box-shadow: 0 4px 14px rgba(44, 140, 153, 0.35);
 }
 
 .btn-action-primary:hover {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(6, 182, 212, 0.45);
+  box-shadow: 0 6px 20px rgba(44, 140, 153, 0.45);
 }
 
 .btn-action-secondary {
@@ -1571,11 +1571,11 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
-.stat-icon-wrapper.blue { background: rgba(16, 94, 255, 0.15); color: #4C86FF; }
-.stat-icon-wrapper.green { background: rgba(16, 185, 129, 0.15); color: #10B981; }
-.stat-icon-wrapper.purple { background: rgba(139, 92, 246, 0.15); color: #8B5CF6; }
-.stat-icon-wrapper.amber { background: rgba(245, 158, 11, 0.15); color: #F59E0B; }
-.stat-icon-wrapper.cyan { background: rgba(6, 182, 212, 0.15); color: #06B6D4; }
+.stat-icon-wrapper.blue { background: rgba(76, 63, 145, 0.15); color: #2F6FB0; }
+.stat-icon-wrapper.green { background: rgba(47, 125, 90, 0.15); color: #2F7D5A; }
+.stat-icon-wrapper.purple { background: rgba(76, 63, 145, 0.15); color: #4C3F91; }
+.stat-icon-wrapper.amber { background: rgba(201, 146, 46, 0.15); color: #C9922E; }
+.stat-icon-wrapper.cyan { background: rgba(44, 140, 153, 0.15); color: #2C8C99; }
 
 .stat-info {
   display: flex;
@@ -1666,26 +1666,26 @@ onMounted(() => {
 }
 
 .channel-pill.active {
-  background: rgba(6, 182, 212, 0.2);
-  border-color: #06B6D4;
-  color: #22D3EE;
+  background: rgba(44, 140, 153, 0.2);
+  border-color: #2C8C99;
+  color: #5AAEB8;
 }
 
 .channel-pill.whatsapp-pill.active {
-  background: rgba(16, 185, 129, 0.22);
-  border-color: #10B981;
+  background: rgba(47, 125, 90, 0.22);
+  border-color: #2F7D5A;
   color: var(--accent-emerald);
 }
 
 .channel-pill.fb-pill.active {
-  background: rgba(16, 94, 255, 0.22);
-  border-color: #3B82F6;
+  background: rgba(76, 63, 145, 0.22);
+  border-color: #2F6FB0;
   color: var(--accent-cyan);
 }
 
 .channel-pill.ig-pill.active {
-  background: rgba(217, 70, 239, 0.22);
-  border-color: #D946EF;
+  background: rgba(156, 79, 124, 0.22);
+  border-color: #9C4F7C;
   color: var(--accent-pink);
 }
 
@@ -1764,8 +1764,8 @@ onMounted(() => {
 
 /* Toast de Proyecto Creado */
 .project-created-banner {
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(6, 182, 212, 0.2) 100%);
-  border: 1px solid #10B981;
+  background: linear-gradient(135deg, rgba(47, 125, 90, 0.2) 0%, rgba(44, 140, 153, 0.2) 100%);
+  border: 1px solid #2F7D5A;
   border-radius: 14px;
   padding: 0.9rem 1.25rem;
   margin-bottom: 1.5rem;
@@ -1773,7 +1773,7 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  box-shadow: 0 10px 30px -10px rgba(16, 185, 129, 0.4);
+  box-shadow: 0 10px 30px -10px rgba(47, 125, 90, 0.4);
 }
 
 .banner-content {
@@ -1799,7 +1799,7 @@ onMounted(() => {
 }
 
 .banner-btn.primary {
-  background: #10B981;
+  background: #2F7D5A;
   color: #fff;
   padding: 0.45rem 0.9rem;
   border-radius: 8px;
@@ -1848,14 +1848,14 @@ onMounted(() => {
 }
 
 .kanban-column.is-first-setter-col {
-  border-color: rgba(6, 182, 212, 0.4);
-  background: linear-gradient(180deg, rgba(6, 182, 212, 0.06) 0%, var(--bg-card) 20%);
+  border-color: rgba(44, 140, 153, 0.4);
+  background: linear-gradient(180deg, rgba(44, 140, 153, 0.06) 0%, var(--bg-card) 20%);
 }
 
 .kanban-column.is-drag-over {
   border-color: var(--col-accent);
   transform: scale(1.01);
-  box-shadow: 0 0 25px rgba(6, 182, 212, 0.35);
+  box-shadow: 0 0 25px rgba(44, 140, 153, 0.35);
 }
 
 .column-top-accent {
@@ -1903,7 +1903,7 @@ onMounted(() => {
 
 .col-setter-badge {
   font-size: 0.68rem;
-  color: #22D3EE;
+  color: #5AAEB8;
   font-weight: 600;
   margin-top: 1px;
 }
@@ -1950,7 +1950,7 @@ onMounted(() => {
 
 .col-menu-btn.delete-btn:hover {
   color: var(--accent-rose);
-  background: rgba(244, 63, 94, 0.15);
+  background: rgba(178, 58, 69, 0.15);
 }
 
 /* Cuerpo de la Columna y Tarjetas */
@@ -1984,15 +1984,15 @@ onMounted(() => {
 }
 
 .kanban-lead-card.channel-whatsapp-border {
-  border-left: 3px solid #10B981;
+  border-left: 3px solid #2F7D5A;
 }
 
 .kanban-lead-card.channel-fb-border {
-  border-left: 3px solid #3B82F6;
+  border-left: 3px solid #2F6FB0;
 }
 
 .kanban-lead-card.channel-ig-border {
-  border-left: 3px solid #D946EF;
+  border-left: 3px solid #9C4F7C;
 }
 
 .kanban-lead-card.is-being-dragged {
@@ -2029,21 +2029,21 @@ onMounted(() => {
 }
 
 .channel-tag-badge.channel-whatsapp {
-  background: rgba(16, 185, 129, 0.16);
+  background: rgba(47, 125, 90, 0.16);
   color: var(--accent-emerald);
-  border: 1px solid rgba(16, 185, 129, 0.35);
+  border: 1px solid rgba(47, 125, 90, 0.35);
 }
 
 .channel-tag-badge.channel-facebook {
-  background: rgba(59, 130, 246, 0.16);
+  background: rgba(47, 111, 176, 0.16);
   color: var(--accent-cyan);
-  border: 1px solid rgba(59, 130, 246, 0.35);
+  border: 1px solid rgba(47, 111, 176, 0.35);
 }
 
 .channel-tag-badge.channel-instagram {
-  background: rgba(217, 70, 239, 0.16);
+  background: rgba(156, 79, 124, 0.16);
   color: var(--accent-pink);
-  border: 1px solid rgba(217, 70, 239, 0.35);
+  border: 1px solid rgba(156, 79, 124, 0.35);
 }
 
 .channel-tag-badge.channel-direct {
@@ -2059,9 +2059,9 @@ onMounted(() => {
   border-radius: 8px;
 }
 
-.viability-high { background: rgba(16, 185, 129, 0.18); color: var(--accent-emerald); }
-.viability-medium { background: rgba(245, 158, 11, 0.18); color: var(--accent-amber); }
-.viability-low { background: rgba(244, 63, 94, 0.18); color: var(--accent-rose); }
+.viability-high { background: rgba(47, 125, 90, 0.18); color: var(--accent-emerald); }
+.viability-medium { background: rgba(201, 146, 46, 0.18); color: var(--accent-amber); }
+.viability-low { background: rgba(178, 58, 69, 0.18); color: var(--accent-rose); }
 .viability-unknown { background: var(--surface-2); color: var(--text-muted); }
 
 .card-lead-name-box {
@@ -2134,8 +2134,8 @@ onMounted(() => {
 }
 
 .setter-assigned-pill {
-  background: rgba(6, 182, 212, 0.12);
-  color: #22D3EE;
+  background: rgba(44, 140, 153, 0.12);
+  color: #5AAEB8;
   padding: 0.1rem 0.4rem;
   border-radius: 6px;
   font-weight: 600;
@@ -2164,14 +2164,14 @@ onMounted(() => {
 }
 
 .quick-icon-btn.whatsapp:hover {
-  background: #10B981;
-  border-color: #10B981;
+  background: #2F7D5A;
+  border-color: #2F7D5A;
   color: #fff;
 }
 
 .quick-icon-btn.email:hover {
-  background: #105EFF;
-  border-color: #105EFF;
+  background: #2F6FB0;
+  border-color: #2F6FB0;
   color: #fff;
 }
 
@@ -2181,8 +2181,8 @@ onMounted(() => {
 
 /* Silueta Drop Preview */
 .kanban-drop-silhouette {
-  border: 2px dashed #06B6D4;
-  background: rgba(6, 182, 212, 0.08);
+  border: 2px dashed #2C8C99;
+  background: rgba(44, 140, 153, 0.08);
   border-radius: 14px;
   padding: 0.85rem;
   display: flex;
@@ -2198,7 +2198,7 @@ onMounted(() => {
 
 .silhouette-badge {
   font-size: 0.75rem;
-  color: #22D3EE;
+  color: #5AAEB8;
   font-weight: 700;
 }
 
@@ -2237,7 +2237,7 @@ onMounted(() => {
 .clear-search-link {
   background: transparent;
   border: none;
-  color: #06B6D4;
+  color: #2C8C99;
   font-size: 0.8rem;
   margin-top: 0.5rem;
   cursor: pointer;
@@ -2293,7 +2293,7 @@ onMounted(() => {
 }
 
 .page-pill.active {
-  background: #06B6D4;
+  background: #2C8C99;
   color: #fff;
 }
 
@@ -2317,13 +2317,13 @@ onMounted(() => {
 .footer-start-btn {
   background: transparent;
   border: none;
-  color: #06B6D4;
+  color: #2C8C99;
   cursor: pointer;
   font-size: 0.72rem;
 }
 
 .final-tag {
-  background: rgba(16, 185, 129, 0.15);
+  background: rgba(47, 125, 90, 0.15);
   color: var(--accent-emerald);
   padding: 0.1rem 0.4rem;
   border-radius: 6px;
@@ -2346,8 +2346,8 @@ onMounted(() => {
 }
 
 .add-column-ghost-card:hover {
-  border-color: #06B6D4;
-  background: rgba(6, 182, 212, 0.05);
+  border-color: #2C8C99;
+  background: rgba(44, 140, 153, 0.05);
 }
 
 .ghost-content {
@@ -2478,7 +2478,7 @@ onMounted(() => {
 }
 
 .custom-input:focus, .custom-select:focus {
-  border-color: #06B6D4;
+  border-color: #2C8C99;
 }
 
 .emoji-picker-grid {
@@ -2497,8 +2497,8 @@ onMounted(() => {
 }
 
 .emoji-option-btn.active {
-  background: rgba(6, 182, 212, 0.2);
-  border-color: #06B6D4;
+  background: rgba(44, 140, 153, 0.2);
+  border-color: #2C8C99;
 }
 
 .color-picker-grid {
@@ -2549,8 +2549,8 @@ onMounted(() => {
 .lead-modal-id {
   font-size: 1.1rem;
   font-weight: 800;
-  color: #06B6D4;
-  background: rgba(6, 182, 212, 0.15);
+  color: #2C8C99;
+  background: rgba(44, 140, 153, 0.15);
   padding: 0.2rem 0.6rem;
   border-radius: 8px;
 }
@@ -2597,21 +2597,21 @@ onMounted(() => {
 }
 
 .setter-btn.whatsapp-solid {
-  background: #10B981;
+  background: #2F7D5A;
   color: #fff;
 }
 
 .setter-btn.whatsapp-solid:hover {
-  background: #059669;
+  background: #1F5A3F;
 }
 
 .setter-btn.email-solid {
-  background: #105EFF;
+  background: #2F6FB0;
   color: #fff;
 }
 
 .setter-btn.email-solid:hover {
-  background: #0B47C7;
+  background: #1F4E77;
 }
 
 .stage-selector-box {
@@ -2660,7 +2660,7 @@ onMounted(() => {
 }
 
 .highlight-topic {
-  color: #22D3EE;
+  color: #5AAEB8;
   font-weight: 600;
 }
 
@@ -2675,8 +2675,8 @@ onMounted(() => {
 }
 
 .viability-section-card {
-  background: rgba(16, 94, 255, 0.06);
-  border: 1px solid rgba(16, 94, 255, 0.25);
+  background: rgba(76, 63, 145, 0.06);
+  border: 1px solid rgba(76, 63, 145, 0.25);
   border-radius: 12px;
   padding: 1rem;
 }
@@ -2684,7 +2684,7 @@ onMounted(() => {
 .section-subtitle {
   font-size: 0.95rem;
   font-weight: 700;
-  color: #4C86FF;
+  color: #2F6FB0;
   margin: 0 0 0.6rem;
 }
 

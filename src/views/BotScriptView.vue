@@ -453,12 +453,12 @@ onMounted(fetchSteps);
 
 .alert-box {
   border-color: rgba(239, 68, 68, 0.4);
-  color: #fca5a5;
+  color: #E0717C;
 }
 
 .success-box {
   border-color: rgba(34, 197, 94, 0.4);
-  color: #4ade80;
+  color: #4FAE82;
 }
 
 .empty-state {
@@ -608,7 +608,7 @@ onMounted(fetchSteps);
 }
 
 .agent-avatar-lg.avatar-ai {
-  background: linear-gradient(135deg, #8b5cf6, #4c86ff);
+  background: linear-gradient(135deg, #4C3F91, #2F6FB0);
 }
 
 .agent-identity h3 {
@@ -633,15 +633,15 @@ onMounted(fetchSteps);
 }
 
 .status-on {
-  background: rgba(16, 185, 129, 0.15);
+  background: rgba(47, 125, 90, 0.15);
   color: var(--accent-emerald);
-  border: 1px solid rgba(16, 185, 129, 0.35);
+  border: 1px solid rgba(47, 125, 90, 0.35);
 }
 
 .status-off {
-  background: rgba(244, 63, 94, 0.12);
+  background: rgba(178, 58, 69, 0.12);
   color: var(--accent-rose);
-  border: 1px solid rgba(244, 63, 94, 0.3);
+  border: 1px solid rgba(178, 58, 69, 0.3);
 }
 
 .agent-role-desc {
@@ -664,8 +664,8 @@ onMounted(fetchSteps);
   width: 44px;
   height: 24px;
   border-radius: 9999px;
-  background: rgba(244, 63, 94, 0.25);
-  border: 1px solid rgba(244, 63, 94, 0.4);
+  background: rgba(178, 58, 69, 0.25);
+  border: 1px solid rgba(178, 58, 69, 0.4);
   position: relative;
   display: inline-block;
   transition: all 0.2s ease;
@@ -684,8 +684,8 @@ onMounted(fetchSteps);
 }
 
 .agent-toggle-switch input:checked + .toggle-track {
-  background: rgba(16, 185, 129, 0.3);
-  border-color: rgba(16, 185, 129, 0.5);
+  background: rgba(47, 125, 90, 0.3);
+  border-color: rgba(47, 125, 90, 0.5);
 }
 
 .agent-toggle-switch input:checked + .toggle-track .toggle-thumb {
@@ -748,7 +748,7 @@ onMounted(fetchSteps);
 
 .option-remove {
   background: rgba(239, 68, 68, 0.12);
-  color: #f87171;
+  color: #E0717C;
   border: 1px solid rgba(239, 68, 68, 0.3);
   border-radius: 6px;
   width: 26px;
@@ -800,8 +800,8 @@ onMounted(fetchSteps);
 }
 
 .chat-bubble.outgoing {
-  background: rgba(16, 94, 255, 0.18);
-  border: 1px solid rgba(16, 94, 255, 0.3);
+  background: rgba(76, 63, 145, 0.18);
+  border: 1px solid rgba(76, 63, 145, 0.3);
   align-self: flex-start;
 }
 
@@ -840,7 +840,7 @@ onMounted(fetchSteps);
 }
 
 .ai-header {
-  border-bottom-color: rgba(139, 92, 246, 0.25);
+  border-bottom-color: rgba(76, 63, 145, 0.25);
 }
 
 @media (max-width: 768px) {

@@ -58,7 +58,7 @@ const sub = computed(() => {
 
 .flow-step-node.is-selected {
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(16, 94, 255, 0.18);
+  box-shadow: 0 0 0 3px rgba(76, 63, 145, 0.18);
 }
 
 .flow-step-node.is-inactive {
@@ -66,14 +66,14 @@ const sub = computed(() => {
 }
 
 .flow-step-node.is-ai {
-  background: linear-gradient(135deg, rgba(139, 92, 246, 0.16), rgba(76, 134, 255, 0.08));
-  border-color: rgba(139, 92, 246, 0.35);
+  background: linear-gradient(135deg, rgba(76, 63, 145, 0.16), rgba(76, 134, 255, 0.08));
+  border-color: rgba(76, 63, 145, 0.35);
   cursor: default;
 }
 
 .flow-step-node.is-ai.is-selected {
-  border-color: rgba(139, 92, 246, 0.7);
-  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.18);
+  border-color: rgba(76, 63, 145, 0.7);
+  box-shadow: 0 0 0 3px rgba(76, 63, 145, 0.18);
 }
 
 .flow-node-icon {
@@ -89,7 +89,7 @@ const sub = computed(() => {
 }
 
 .is-ai .flow-node-icon {
-  background: linear-gradient(135deg, #8b5cf6, #4c86ff);
+  background: linear-gradient(135deg, #4C3F91, #2F6FB0);
 }
 
 .flow-node-meta {
@@ -115,9 +115,9 @@ const sub = computed(() => {
 .flow-ai-tag {
   font-size: 0.58rem;
   font-weight: 800;
-  color: #c4b5fd;
-  background: rgba(139, 92, 246, 0.2);
-  border: 1px solid rgba(139, 92, 246, 0.4);
+  color: #A79AFF;
+  background: rgba(76, 63, 145, 0.2);
+  border: 1px solid rgba(76, 63, 145, 0.4);
   border-radius: 5px;
   padding: 0.05rem 0.32rem;
   letter-spacing: 0.03em;
@@ -138,12 +138,12 @@ const sub = computed(() => {
   border-radius: 50%;
   background: var(--accent-rose);
   flex-shrink: 0;
-  box-shadow: 0 0 6px rgba(244, 63, 94, 0.5);
+  box-shadow: 0 0 6px rgba(178, 58, 69, 0.5);
 }
 
 .flow-node-status.on {
   background: var(--accent-emerald);
-  box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+  box-shadow: 0 0 6px rgba(47, 125, 90, 0.6);
 }
 
 .flow-handle {

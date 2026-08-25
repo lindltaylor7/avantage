@@ -114,7 +114,7 @@
           :class="{ 'is-active': $route.path === '/admin/bot-script' }"
           @click="closeMobile"
         >
-          <svg class="nav-icon" style="color: #8B5CF6;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg class="nav-icon" style="color: var(--accent-pink);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <rect x="3" y="3" width="18" height="18" rx="3"/>
             <path d="M8 9h8M8 13h5"/>
             <circle cx="17" cy="16" r="1.2" fill="currentColor" stroke="none"/>

@@ -5,6 +5,26 @@ import { db } from '../db/connection.js';
 // asesor. No pedimos acceso a leer todo su calendario ni otros datos.
 const SCOPES = ['https://www.googleapis.com/auth/calendar.events', 'https://www.googleapis.com/auth/userinfo.email'];
 
+// Perú no aplica horario de verano, así que su offset respecto a UTC es
+// siempre fijo; esto evita depender de una librería de timezones para
+// calcular los bloques de disponibilidad.
+const LIMA_UTC_OFFSET_MS = 5 * 60 * 60 * 1000;
+
+const SLOT_LABEL_FORMATTER = new Intl.DateTimeFormat('es-PE', {
+  timeZone: 'America/Lima',
+  weekday: 'short',
+  day: 'numeric',
+  month: 'short',
+  hour: 'numeric',
+  minute: '2-digit',
+  hour12: true
+});
+
+function formatSlotLabel(date) {
+  const label = SLOT_LABEL_FORMATTER.format(date).replace(/\./g, '').replace(/\s([ap])\s?m\b/, ' $1.m.');
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
 /**
  * Conexión OAuth de cada asesor con su propio Google Calendar, usada para
  * crear reuniones con Google Meet directamente en su calendario real.
@@ -163,5 +183,77 @@ export class GoogleCalendarService {
       start: data.start,
       end: data.end
     };
+  }
+
+  /**
+   * Calcula los próximos bloques libres del asesor cruzando su horario
+   * semanal recurrente (`advisor_availability`) con los eventos ya
+   * existentes en su Google Calendar real (vía freebusy), para ofrecerlos
+   * como opciones concretas de agendamiento (ej. desde el bot de WhatsApp).
+   */
+  async getUpcomingFreeSlots(userId, { days = 14, limit = 6, slotMinutes = 30, minLeadTimeMinutes = 120 } = {}) {
+    const availabilityRows = await db('advisor_availability').where({ user_id: userId }).select('day_of_week', 'start_time');
+    if (availabilityRows.length === 0) return [];
+
+    const startsByDay = new Map();
+    for (const row of availabilityRows) {
+      if (!startsByDay.has(row.day_of_week)) startsByDay.set(row.day_of_week, []);
+      startsByDay.get(row.day_of_week).push(row.start_time);
+    }
+
+    const now = new Date();
+    const minStart = new Date(now.getTime() + minLeadTimeMinutes * 60000);
+
+    const limaTodayStr = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit'
+    }).format(now);
+    const [limaY, limaM, limaD] = limaTodayStr.split('-').map(Number);
+    const limaMidnightUTC = Date.UTC(limaY, limaM - 1, limaD) + LIMA_UTC_OFFSET_MS;
+
+    const candidates = [];
+    for (let dayOffset = 0; dayOffset < days; dayOffset++) {
+      const dayStartUTC = limaMidnightUTC + dayOffset * 86400000;
+      const jsWeekday = new Date(dayStartUTC).getUTCDay(); // 0=Dom..6=Sáb
+      const dayOfWeek = (jsWeekday + 6) % 7; // 0=Lun..6=Dom, igual que advisor_availability
+      const starts = startsByDay.get(dayOfWeek);
+      if (!starts) continue;
+
+      for (const hhmm of starts) {
+        const [h, m] = hhmm.split(':').map(Number);
+        const startUTC = dayStartUTC + (h * 3600 + m * 60) * 1000;
+        const start = new Date(startUTC);
+        if (start < minStart) continue;
+        candidates.push({ start, end: new Date(startUTC + slotMinutes * 60000) });
+      }
+    }
+
+    if (candidates.length === 0) return [];
+    candidates.sort((a, b) => a.start - b.start);
+
+    // Nota: se usa events.list (no freebusy.query) porque el scope pedido al
+    // asesor es "calendar.events" (solo eventos), y freebusy.query exige el
+    // scope más amplio "calendar"/"calendar.readonly" que no solicitamos.
+    const client = await this.getAuthorizedClient(userId);
+    const calendar = google.calendar({ version: 'v3', auth: client });
+    const { data } = await calendar.events.list({
+      calendarId: 'primary',
+      timeMin: candidates[0].start.toISOString(),
+      timeMax: candidates[candidates.length - 1].end.toISOString(),
+      singleEvents: true,
+      orderBy: 'startTime'
+    });
+    const busyPeriods = (data.items || [])
+      .filter((event) => event.status !== 'cancelled' && event.start?.dateTime && event.end?.dateTime)
+      .map((event) => ({ start: new Date(event.start.dateTime).getTime(), end: new Date(event.end.dateTime).getTime() }));
+
+    const freeSlots = candidates.filter((slot) => !busyPeriods.some((busy) => (
+      slot.start.getTime() < busy.end && slot.end.getTime() > busy.start
+    )));
+
+    return freeSlots.slice(0, limit).map((slot) => ({
+      startTime: slot.start.toISOString(),
+      endTime: slot.end.toISOString(),
+      label: formatSlotLabel(slot.start)
+    }));
   }
 }

@@ -7,7 +7,7 @@
       </p>
     </div>
 
-    <div v-if="loadError" class="info-box" style="border-color: rgba(244, 63, 94, 0.4); margin-bottom: 1.5rem;">
+    <div v-if="loadError" class="info-box" style="border-color: rgba(178, 58, 69, 0.4); margin-bottom: 1.5rem;">
       <h4 style="color: var(--accent-rose);">⚠️ No se pudo cargar la información</h4>
       <p>{{ loadError }}</p>
     </div>

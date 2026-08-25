@@ -737,7 +737,7 @@ onUnmounted(() => {
 
 .alert-box {
   border-color: rgba(239, 68, 68, 0.4);
-  color: #fca5a5;
+  color: #E0717C;
 }
 
 .subsection-title {
@@ -857,7 +857,7 @@ onUnmounted(() => {
 
 .contact-item.is-active {
   border-color: var(--primary);
-  background: rgba(16, 94, 255, 0.12);
+  background: rgba(76, 63, 145, 0.12);
 }
 
 .contact-avatar {
@@ -917,7 +917,7 @@ onUnmounted(() => {
 
 .channel-fb {
   background: rgba(24, 119, 242, 0.15);
-  color: #5b9dff;
+  color: #6FA3D8;
 }
 
 .channel-ig {
@@ -931,12 +931,12 @@ onUnmounted(() => {
 }
 
 .channel-ad {
-  background: rgba(245, 158, 11, 0.15);
-  color: #fbbf24;
+  background: rgba(201, 146, 46, 0.15);
+  color: #E0A362;
 }
 
 .origin-banner {
-  background: rgba(245, 158, 11, 0.1);
+  background: rgba(201, 146, 46, 0.1);
   border-bottom: 1px solid var(--border-color);
   color: var(--text-sub);
   font-size: 0.78rem;
@@ -994,12 +994,12 @@ onUnmounted(() => {
 }
 
 .btn-bot-reset {
-  border-color: rgba(139, 92, 246, 0.4);
-  color: #c4b5fd;
+  border-color: rgba(76, 63, 145, 0.4);
+  color: #A79AFF;
 }
 
 .btn-bot-reset:hover {
-  background: rgba(139, 92, 246, 0.12);
+  background: rgba(76, 63, 145, 0.12);
 }
 
 .thread-phone {
@@ -1052,7 +1052,7 @@ onUnmounted(() => {
 
 .bubble-error {
   font-size: 0.72rem;
-  color: #fde68a;
+  color: #E0A362;
   background: rgba(0, 0, 0, 0.15);
   border-radius: 6px;
   padding: 0.3rem 0.5rem;
@@ -1159,12 +1159,12 @@ onUnmounted(() => {
 
 .badge-ok {
   background: rgba(34, 197, 94, 0.15);
-  color: #4ade80;
+  color: #4FAE82;
 }
 
 .badge-error {
   background: rgba(239, 68, 68, 0.15);
-  color: #f87171;
+  color: #E0717C;
 }
 
 .event-payload {
@@ -1181,8 +1181,8 @@ onUnmounted(() => {
 
 /* Config status banner */
 .config-status-banner {
-  background: rgba(244, 63, 94, 0.08);
-  border: 1px solid rgba(244, 63, 94, 0.3);
+  background: rgba(178, 58, 69, 0.08);
+  border: 1px solid rgba(178, 58, 69, 0.3);
   border-radius: 14px;
   padding: 1rem 1.1rem;
 }
@@ -1211,7 +1211,7 @@ onUnmounted(() => {
 }
 
 .config-status-list li.missing {
-  color: #fca5a5;
+  color: #E0717C;
 }
 
 .config-status-hint {
@@ -1327,7 +1327,7 @@ onUnmounted(() => {
 }
 
 .activity-card.activity-llm {
-  border-left-color: #8b5cf6;
+  border-left-color: #4C3F91;
 }
 
 .activity-card.activity-ok {
@@ -1376,7 +1376,7 @@ onUnmounted(() => {
 }
 
 .activity-error {
-  color: #fca5a5;
+  color: #E0717C;
 }
 
 @media (max-width: 900px) {

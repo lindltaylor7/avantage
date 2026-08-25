@@ -1,14 +1,11 @@
 <template>
-  <main class="container" style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 3rem 1.5rem;">
-    <div class="glass-panel" style="width: 100%; max-width: 400px; padding: 2.25rem;">
-      <div style="text-align: center; margin-bottom: 1.75rem;">
-        <div class="logo-icon" style="margin: 0 auto 1rem auto;">AG</div>
-        <h2 style="font-family: var(--font-heading); font-size: 1.4rem; color: var(--text-main); margin-bottom: 0.35rem; text-transform: uppercase; letter-spacing: 0.04em;">
-          Acceso Interno
-        </h2>
-        <p style="font-family: var(--font-subheading); font-size: 0.85rem; color: var(--text-muted);">
-          Avantage Group — Panel de Leads, Proyectos y administración
-        </p>
+  <main class="container login-shell">
+    <div class="glass-panel login-panel">
+      <span class="login-eyebrow">Acceso restringido</span>
+      <div class="login-head">
+        <div class="logo-icon login-mark">AG</div>
+        <h2 class="login-title">Acceso Interno</h2>
+        <p class="login-subtitle">Avantage Group — Panel de Leads, Proyectos y administración</p>
       </div>
 
       <form @submit.prevent="handleLogin">
@@ -21,8 +18,8 @@
           <input v-model="password" type="password" class="form-input" placeholder="••••••••" required />
         </div>
 
-        <div v-if="errorMessage" class="info-box" style="border-color: rgba(244, 63, 94, 0.4); margin-bottom: 1rem;">
-          <p style="color: var(--accent-rose); margin: 0; font-size: 0.85rem;">{{ errorMessage }}</p>
+        <div v-if="errorMessage" class="info-box login-error">
+          <p class="login-error-text">{{ errorMessage }}</p>
         </div>
 
         <button type="submit" class="btn-primary" :disabled="isSubmitting">
@@ -67,3 +64,71 @@ async function handleLogin() {
   }
 }
 </script>
+
+<style scoped>
+.login-shell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1.5rem;
+}
+
+.login-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 0.85rem;
+}
+
+.login-panel {
+  width: 100%;
+  max-width: 400px;
+  padding: 2.25rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.login-head {
+  text-align: center;
+  margin-bottom: 1.75rem;
+}
+
+.login-mark {
+  margin: 0 auto 1.1rem auto;
+}
+
+.login-title {
+  font-family: var(--font-heading);
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: 0.4rem;
+}
+
+.login-subtitle {
+  font-family: var(--font-subheading);
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.login-panel form {
+  width: 100%;
+}
+
+.login-error {
+  border-color: rgba(178, 58, 69, 0.4);
+  margin-bottom: 1rem;
+}
+
+.login-error-text {
+  color: var(--accent-rose);
+  margin: 0;
+  font-size: 0.85rem;
+}
+</style>

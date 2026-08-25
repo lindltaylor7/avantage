@@ -86,12 +86,12 @@ const pageMessageService = new PageMessageService();
 const pageFollowerService = new PageFollowerService();
 const whatsappMessageService = new WhatsappMessageService();
 const whatsappBotStepService = new WhatsappBotStepService();
-const whatsappBotService = new WhatsappBotService({ ollamaService, emailService, leadService, whatsappMessageService, stepService: whatsappBotStepService });
+const googleCalendarService = new GoogleCalendarService();
+const whatsappBotService = new WhatsappBotService({ ollamaService, emailService, leadService, whatsappMessageService, stepService: whatsappBotStepService, googleCalendarService });
 const whatsappWebhookService = new WhatsappWebhookService({ botService: whatsappBotService });
 const advisorAvailabilityService = new AdvisorAvailabilityService();
 const instagramService = new InstagramService();
 const instagramWebhookService = new InstagramWebhookService();
-const googleCalendarService = new GoogleCalendarService();
 
 // Historial en memoria de evaluaciones recientes
 

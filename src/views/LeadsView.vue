@@ -154,7 +154,7 @@
             'is-final-column': col.final,
             'is-drag-over': hoveredColumn === col.key
           }"
-          :style="{ '--col-accent': col.color || '#105EFF' }"
+          :style="{ '--col-accent': col.color || '#2F6FB0' }"
           @dragover.prevent="hoveredColumn = col.key"
           @dragleave="onColumnDragLeave(col.key)"
           @drop="onDrop(col.key)"
@@ -167,7 +167,7 @@
             <div class="col-title-group">
               <span class="col-icon">{{ col.icon || '📌' }}</span>
               <span class="col-label" :title="col.label">{{ col.label }}</span>
-              <span class="col-count-badge" :style="{ background: (col.color || '#105EFF') + '22', color: col.color || '#105EFF', borderColor: (col.color || '#105EFF') + '55' }">
+              <span class="col-count-badge" :style="{ background: (col.color || '#2F6FB0') + '22', color: col.color || '#2F6FB0', borderColor: (col.color || '#2F6FB0') + '55' }">
                 {{ (filteredLeadsByColumn[col.key] || []).length }}
               </span>
             </div>
@@ -600,7 +600,7 @@
             ¿Estás seguro de eliminar la etapa <strong>"{{ deletingColumn.icon }} {{ deletingColumn.label }}"</strong>?
           </p>
 
-          <div v-if="getLeadsCountInColumn(deletingColumn.key) > 0" class="info-box" style="border-color: rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.08); margin-bottom: 1.25rem;">
+          <div v-if="getLeadsCountInColumn(deletingColumn.key) > 0" class="info-box" style="border-color: rgba(201, 146, 46, 0.4); background: rgba(201, 146, 46, 0.08); margin-bottom: 1.25rem;">
             <p style="color: var(--accent-amber); font-size: 0.85rem; margin: 0 0 0.5rem 0;">
               ⚠️ Esta columna contiene <strong>{{ getLeadsCountInColumn(deletingColumn.key) }} lead(s)</strong>.
             </p>
@@ -781,7 +781,7 @@
             </form>
           </transition>
 
-          <div v-if="quoteSuccess" class="info-box" style="margin-top: 1rem; border-color: rgba(16, 185, 129, 0.4); background: rgba(16, 185, 129, 0.08);">
+          <div v-if="quoteSuccess" class="info-box" style="margin-top: 1rem; border-color: rgba(47, 125, 90, 0.4); background: rgba(47, 125, 90, 0.08);">
             <p style="color: var(--accent-emerald); margin: 0; font-size: 0.88rem;">
               ✅ Cotización de <strong>{{ formatCurrency(quoteSuccess.amount, quoteSuccess.currency) }}</strong> enviada con éxito a <strong>{{ selectedLead.email }}</strong>.
             </p>
@@ -798,25 +798,25 @@ import { apiFetch } from '../apiClient.js';
 
 // Columnas predeterminadas del sistema (usadas solo para "Restablecer columnas")
 const DEFAULT_COLUMNS = [
-  { key: 'nuevo', label: 'Nuevo', icon: '🆕', color: '#105EFF', final: false },
-  { key: 'contactado', label: 'Contactado', icon: '📞', color: '#8B5CF6', final: false },
-  { key: 'en_negociacion', label: 'En Negociación', icon: '🤝', color: '#F59E0B', final: false },
-  { key: 'ganado', label: 'Ganado', icon: '🏆', color: '#10B981', final: true },
-  { key: 'perdido', label: 'Perdido', icon: '❌', color: '#F43F5E', final: false }
+  { key: 'nuevo', label: 'Nuevo', icon: '🆕', color: '#2F6FB0', final: false },
+  { key: 'contactado', label: 'Contactado', icon: '📞', color: '#4C3F91', final: false },
+  { key: 'en_negociacion', label: 'En Negociación', icon: '🤝', color: '#C9922E', final: false },
+  { key: 'ganado', label: 'Ganado', icon: '🏆', color: '#2F7D5A', final: true },
+  { key: 'perdido', label: 'Perdido', icon: '❌', color: '#B23A45', final: false }
 ];
 
 // Presets para selector de colores y emojis
 const PRESET_EMOJIS = ['🆕', '📞', '🤝', '🏆', '❌', '🎯', '🚀', '💬', '📋', '⏳', '💡', '💰', '📊', '🔍', '⭐', '⚡'];
 
 const PRESET_COLORS = [
-  { name: 'Azul', hex: '#105EFF' },
-  { name: 'Violeta', hex: '#8B5CF6' },
-  { name: 'Ámbar', hex: '#F59E0B' },
-  { name: 'Esmeralda', hex: '#10B981' },
-  { name: 'Rosa', hex: '#F43F5E' },
-  { name: 'Cian', hex: '#06B6D4' },
-  { name: 'Índigo', hex: '#6366F1' },
-  { name: 'Naranja', hex: '#F97316' }
+  { name: 'Azul', hex: '#2F6FB0' },
+  { name: 'Violeta', hex: '#4C3F91' },
+  { name: 'Ámbar', hex: '#C9922E' },
+  { name: 'Esmeralda', hex: '#2F7D5A' },
+  { name: 'Rosa', hex: '#B23A45' },
+  { name: 'Cian', hex: '#2C8C99' },
+  { name: 'Índigo', hex: '#5560B0' },
+  { name: 'Naranja', hex: '#BF5A2A' }
 ];
 
 const VIABILITY_FILTERS = [
@@ -909,7 +909,7 @@ const showCreateColModal = ref(false);
 const newColumnForm = reactive({
   label: '',
   icon: '🎯',
-  color: '#105EFF',
+  color: '#2F6FB0',
   final: false
 });
 
@@ -1111,7 +1111,7 @@ async function saveNewColumn() {
       body: JSON.stringify({
         label: trimmed,
         icon: newColumnForm.icon || '📌',
-        color: newColumnForm.color || '#105EFF',
+        color: newColumnForm.color || '#2F6FB0',
         final: Boolean(newColumnForm.final)
       })
     });
@@ -1140,7 +1140,7 @@ function openEditColumnModal(col, index) {
   editingColumn.value = col;
   editColumnForm.label = col.label;
   editColumnForm.icon = col.icon || '📌';
-  editColumnForm.color = col.color || '#105EFF';
+  editColumnForm.color = col.color || '#2F6FB0';
   editColumnForm.final = Boolean(col.final);
   showEditColModal.value = true;
 }
@@ -1155,7 +1155,7 @@ async function saveEditedColumn() {
       body: JSON.stringify({
         label: editColumnForm.label.trim(),
         icon: editColumnForm.icon || '📌',
-        color: editColumnForm.color || '#105EFF',
+        color: editColumnForm.color || '#2F6FB0',
         final: Boolean(editColumnForm.final)
       })
     });
@@ -1429,13 +1429,13 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  box-shadow: 0 4px 14px rgba(16, 94, 255, 0.35);
+  box-shadow: 0 4px 14px rgba(76, 63, 145, 0.35);
   transition: all 0.2s ease;
 }
 
 .btn-action-primary:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(16, 94, 255, 0.5);
+  box-shadow: 0 6px 20px rgba(76, 63, 145, 0.5);
   filter: brightness(1.1);
 }
 
@@ -1479,7 +1479,7 @@ onMounted(() => {
 }
 
 .btn-action-danger {
-  background: linear-gradient(135deg, #F43F5E, #BE123C);
+  background: linear-gradient(135deg, #B23A45, #8C2530);
   color: #fff;
   border: none;
   border-radius: 10px;
@@ -1534,10 +1534,10 @@ onMounted(() => {
   font-size: 1.3rem;
 }
 
-.stat-icon-wrapper.blue { background: rgba(16, 94, 255, 0.15); border: 1px solid rgba(16, 94, 255, 0.3); }
-.stat-icon-wrapper.green { background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); }
-.stat-icon-wrapper.amber { background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.3); }
-.stat-icon-wrapper.purple { background: rgba(139, 92, 246, 0.15); border: 1px solid rgba(139, 92, 246, 0.3); }
+.stat-icon-wrapper.blue { background: rgba(76, 63, 145, 0.15); border: 1px solid rgba(76, 63, 145, 0.3); }
+.stat-icon-wrapper.green { background: rgba(47, 125, 90, 0.15); border: 1px solid rgba(47, 125, 90, 0.3); }
+.stat-icon-wrapper.amber { background: rgba(201, 146, 46, 0.15); border: 1px solid rgba(201, 146, 46, 0.3); }
+.stat-icon-wrapper.purple { background: rgba(76, 63, 145, 0.15); border: 1px solid rgba(76, 63, 145, 0.3); }
 
 .stat-info {
   display: flex;
@@ -1604,7 +1604,7 @@ onMounted(() => {
 
 .search-input:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgba(16, 94, 255, 0.25);
+  box-shadow: 0 0 0 2px rgba(76, 63, 145, 0.25);
 }
 
 .clear-search-btn {
@@ -1627,8 +1627,8 @@ onMounted(() => {
 .search-result-badge {
   font-size: 0.78rem;
   font-family: var(--font-body);
-  background: rgba(16, 94, 255, 0.15);
-  border: 1px solid rgba(16, 94, 255, 0.35);
+  background: rgba(76, 63, 145, 0.15);
+  border: 1px solid rgba(76, 63, 145, 0.35);
   color: var(--accent-cyan);
   padding: 0.3rem 0.75rem;
   border-radius: 9999px;
@@ -1662,7 +1662,7 @@ onMounted(() => {
 }
 
 .filter-pill.active {
-  background: rgba(16, 94, 255, 0.2);
+  background: rgba(76, 63, 145, 0.2);
   border-color: var(--primary);
   color: #ffffff;
   font-weight: 600;
@@ -1770,12 +1770,12 @@ onMounted(() => {
 }
 
 .kanban-column.is-final-column {
-  border-color: rgba(16, 185, 129, 0.35);
+  border-color: rgba(47, 125, 90, 0.35);
 }
 
 .kanban-column.is-drag-over {
   border-color: var(--col-accent);
-  background: rgba(16, 94, 255, 0.08);
+  background: rgba(76, 63, 145, 0.08);
   box-shadow: 0 0 20px var(--col-accent) 44;
   transform: translateY(-2px);
 }
@@ -1883,7 +1883,7 @@ onMounted(() => {
 }
 
 .col-menu-btn.delete-btn:hover {
-  background: rgba(244, 63, 94, 0.2);
+  background: rgba(178, 58, 69, 0.2);
   color: var(--accent-rose);
 }
 
@@ -1931,7 +1931,7 @@ onMounted(() => {
 
 /* Silueta de Destino al Arrastrar (Drop Silhouette Preview Card) */
 .kanban-drop-silhouette {
-  background: rgba(16, 94, 255, 0.08);
+  background: rgba(76, 63, 145, 0.08);
   border: 2px dashed var(--col-accent);
   border-radius: 12px;
   padding: 0.85rem;
@@ -1945,15 +1945,15 @@ onMounted(() => {
 @keyframes pulseSilhouette {
   0% {
     box-shadow: 0 0 8px var(--col-accent) 22;
-    background: rgba(16, 94, 255, 0.06);
+    background: rgba(76, 63, 145, 0.06);
   }
   50% {
     box-shadow: 0 0 20px var(--col-accent) 55;
-    background: rgba(16, 94, 255, 0.14);
+    background: rgba(76, 63, 145, 0.14);
   }
   100% {
     box-shadow: 0 0 8px var(--col-accent) 22;
-    background: rgba(16, 94, 255, 0.06);
+    background: rgba(76, 63, 145, 0.06);
   }
 }
 
@@ -2029,8 +2029,8 @@ onMounted(() => {
 }
 
 .level-alta {
-  background: rgba(16, 185, 129, 0.15);
-  border-color: rgba(16, 185, 129, 0.4);
+  background: rgba(47, 125, 90, 0.15);
+  border-color: rgba(47, 125, 90, 0.4);
   color: var(--accent-emerald);
 }
 
@@ -2041,8 +2041,8 @@ onMounted(() => {
 }
 
 .level-media {
-  background: rgba(245, 158, 11, 0.15);
-  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(201, 146, 46, 0.15);
+  border-color: rgba(201, 146, 46, 0.4);
   color: var(--accent-amber);
 }
 
@@ -2056,8 +2056,8 @@ onMounted(() => {
   font-size: 0.68rem;
   font-weight: 600;
   color: var(--accent-cyan);
-  background: rgba(6, 182, 212, 0.12);
-  border: 1px solid rgba(6, 182, 212, 0.3);
+  background: rgba(44, 140, 153, 0.12);
+  border: 1px solid rgba(44, 140, 153, 0.3);
   padding: 0.1rem 0.4rem;
   border-radius: 4px;
   max-width: 110px;
@@ -2189,7 +2189,7 @@ onMounted(() => {
 }
 
 .quick-icon-btn.email:hover {
-  background: rgba(16, 94, 255, 0.2);
+  background: rgba(76, 63, 145, 0.2);
   border-color: var(--primary);
 }
 
@@ -2319,7 +2319,7 @@ onMounted(() => {
 
 .page-pill.ellipsis-pill:hover {
   color: var(--primary);
-  background: rgba(16, 94, 255, 0.15);
+  background: rgba(76, 63, 145, 0.15);
 }
 
 /* Pie de Columna */
@@ -2390,7 +2390,7 @@ onMounted(() => {
 
 .add-column-ghost-card:hover {
   border-color: var(--primary);
-  background: rgba(16, 94, 255, 0.06);
+  background: rgba(76, 63, 145, 0.06);
   transform: translateY(-2px);
 }
 
@@ -2489,9 +2489,9 @@ onMounted(() => {
 }
 
 .emoji-choice-btn.selected {
-  background: rgba(16, 94, 255, 0.25);
+  background: rgba(76, 63, 145, 0.25);
   border-color: var(--primary);
-  box-shadow: 0 0 8px rgba(16, 94, 255, 0.5);
+  box-shadow: 0 0 8px rgba(76, 63, 145, 0.5);
 }
 
 .color-picker-grid {
@@ -2631,8 +2631,8 @@ onMounted(() => {
 }
 
 .lead-project-badge-box {
-  background: rgba(16, 185, 129, 0.1);
-  border: 1px solid rgba(16, 185, 129, 0.35);
+  background: rgba(47, 125, 90, 0.1);
+  border: 1px solid rgba(47, 125, 90, 0.35);
   border-radius: 12px;
   padding: 0.85rem 1rem;
   display: flex;
@@ -2666,8 +2666,8 @@ onMounted(() => {
 
 /* Banner de Proyecto Creado Toast */
 .project-created-banner {
-  background: rgba(16, 185, 129, 0.15);
-  border: 1px solid rgba(16, 185, 129, 0.45);
+  background: rgba(47, 125, 90, 0.15);
+  border: 1px solid rgba(47, 125, 90, 0.45);
   border-radius: 12px;
   padding: 0.85rem 1.25rem;
   display: flex;

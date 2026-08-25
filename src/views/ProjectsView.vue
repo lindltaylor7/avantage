@@ -18,7 +18,7 @@
       </div>
     </div>
 
-    <div v-if="loadError" class="info-box" style="border-color: rgba(244, 63, 94, 0.4); margin-bottom: 1.5rem;">
+    <div v-if="loadError" class="info-box" style="border-color: rgba(178, 58, 69, 0.4); margin-bottom: 1.5rem;">
       <h4 style="color: var(--accent-rose);">⚠️ No se pudo cargar los proyectos</h4>
       <p>{{ loadError }}</p>
     </div>
@@ -229,9 +229,9 @@ function statusClass(status) {
 }
 
 function progressColor(percentage) {
-  if (percentage >= 100) return '#10B981';
-  if (percentage >= 50) return '#105EFF';
-  if (percentage > 0) return '#F59E0B';
+  if (percentage >= 100) return '#2F7D5A';
+  if (percentage >= 50) return '#2F6FB0';
+  if (percentage > 0) return '#C9922E';
   return 'var(--surface-4)';
 }
 
@@ -337,9 +337,9 @@ onMounted(() => {
   font-weight: 600;
 }
 
-.status-creado { background: rgba(16, 185, 129, 0.15); color: #6EE7B7; border: 1px solid rgba(16, 185, 129, 0.35); }
-.status-iniciado { background: rgba(245, 158, 11, 0.15); color: var(--accent-amber); border: 1px solid rgba(245, 158, 11, 0.35); }
-.status-en-desarrollo { background: rgba(16, 94, 255, 0.15); color: var(--on-tint-strong); border: 1px solid rgba(16, 94, 255, 0.35); }
+.status-creado { background: rgba(47, 125, 90, 0.15); color: #4FAE82; border: 1px solid rgba(47, 125, 90, 0.35); }
+.status-iniciado { background: rgba(201, 146, 46, 0.15); color: var(--accent-amber); border: 1px solid rgba(201, 146, 46, 0.35); }
+.status-en-desarrollo { background: rgba(76, 63, 145, 0.15); color: var(--on-tint-strong); border: 1px solid rgba(76, 63, 145, 0.35); }
 .status-entregado { background: rgba(191, 194, 199, 0.15); color: var(--accent-silver); border: 1px solid rgba(191, 194, 199, 0.35); }
-.status-cancelado { background: rgba(244, 63, 94, 0.15); color: var(--accent-rose); border: 1px solid rgba(244, 63, 94, 0.35); }
+.status-cancelado { background: rgba(178, 58, 69, 0.15); color: var(--accent-rose); border: 1px solid rgba(178, 58, 69, 0.35); }
 </style>

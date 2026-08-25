@@ -581,12 +581,12 @@ onMounted(fetchAll);
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #F59E0B;
+  background: #C9922E;
   border: 2px solid var(--bg-card-solid);
 }
 
 .ig-status-dot.connected {
-  background: #10B981;
+  background: #2F7D5A;
 }
 
 .ig-profile-info {
@@ -704,10 +704,10 @@ onMounted(fetchAll);
   flex-shrink: 0;
 }
 
-.ig-stat-pink { background: rgba(217, 70, 239, 0.15); color: #D946EF; }
-.ig-stat-orange { background: rgba(249, 115, 22, 0.15); color: #F97316; }
-.ig-stat-purple { background: rgba(168, 85, 247, 0.15); color: #A855F7; }
-.ig-stat-blue { background: rgba(59, 130, 246, 0.15); color: #3B82F6; }
+.ig-stat-pink { background: rgba(156, 79, 124, 0.15); color: #9C4F7C; }
+.ig-stat-orange { background: rgba(191, 90, 42, 0.15); color: #BF5A2A; }
+.ig-stat-purple { background: rgba(103, 83, 160, 0.15); color: #6753A0; }
+.ig-stat-blue { background: rgba(47, 111, 176, 0.15); color: #2F6FB0; }
 
 .stat-info {
   display: flex;
@@ -732,8 +732,8 @@ onMounted(fetchAll);
 
 /* Tarjeta de conexión (desconectado) */
 .ig-connect-card {
-  background: rgba(245, 158, 11, 0.06);
-  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: rgba(201, 146, 46, 0.06);
+  border: 1px solid rgba(201, 146, 46, 0.35);
   border-radius: 16px;
   padding: 1.1rem 1.25rem;
   margin-bottom: 1.5rem;
@@ -773,8 +773,8 @@ onMounted(fetchAll);
   font-size: 0.82rem;
 }
 
-.ig-connect-checklist li.ok { color: var(--accent-emerald, #10B981); }
-.ig-connect-checklist li.missing { color: #fca5a5; }
+.ig-connect-checklist li.ok { color: var(--accent-emerald, #2F7D5A); }
+.ig-connect-checklist li.missing { color: #E0717C; }
 .ig-connect-checklist li.optional { color: var(--text-muted); }
 
 .ig-connect-hint {
@@ -794,8 +794,8 @@ onMounted(fetchAll);
 
 /* Barra de conectado */
 .ig-connected-bar {
-  background: rgba(16, 185, 129, 0.1);
-  border: 1px solid rgba(16, 185, 129, 0.3);
+  background: rgba(47, 125, 90, 0.1);
+  border: 1px solid rgba(47, 125, 90, 0.3);
   color: var(--accent-emerald);
   border-radius: 12px;
   padding: 0.65rem 1rem;
@@ -845,7 +845,7 @@ onMounted(fetchAll);
 
 .filter-pill.active {
   background: linear-gradient(45deg, rgba(240, 148, 51, 0.2), rgba(188, 24, 136, 0.25));
-  border-color: #EC4899;
+  border-color: #9C4F7C;
   color: var(--accent-pink);
 }
 
@@ -896,7 +896,7 @@ onMounted(fetchAll);
 
 .ig-interaction-card:hover {
   transform: translateY(-2px);
-  border-color: rgba(236, 72, 153, 0.4);
+  border-color: rgba(156, 79, 124, 0.4);
   box-shadow: 0 10px 25px -10px rgba(0, 0, 0, 0.5);
 }
 
@@ -950,10 +950,10 @@ onMounted(fetchAll);
   border-radius: 8px;
 }
 
-.badge-comment { background: rgba(249, 115, 22, 0.18); color: #FB923C; }
-.badge-mention { background: rgba(168, 85, 247, 0.18); color: #C084FC; }
-.badge-direct_message, .badge-message { background: rgba(59, 130, 246, 0.18); color: var(--accent-cyan); }
-.badge-story_reply { background: rgba(236, 72, 153, 0.18); color: var(--accent-pink); }
+.badge-comment { background: rgba(191, 90, 42, 0.18); color: #D08858; }
+.badge-mention { background: rgba(103, 83, 160, 0.18); color: #A79AFF; }
+.badge-direct_message, .badge-message { background: rgba(47, 111, 176, 0.18); color: var(--accent-cyan); }
+.badge-story_reply { background: rgba(156, 79, 124, 0.18); color: var(--accent-pink); }
 
 .interaction-time {
   font-size: 0.75rem;
@@ -1027,13 +1027,13 @@ onMounted(fetchAll);
 }
 
 .ig-quick-btn.setter {
-  background: rgba(6, 182, 212, 0.15);
-  color: #22D3EE;
-  border: 1px solid rgba(6, 182, 212, 0.3);
+  background: rgba(44, 140, 153, 0.15);
+  color: #5AAEB8;
+  border: 1px solid rgba(44, 140, 153, 0.3);
 }
 
 .ig-quick-btn.setter:hover {
-  background: rgba(6, 182, 212, 0.25);
+  background: rgba(44, 140, 153, 0.25);
 }
 
 .ig-quick-btn.external {
@@ -1069,7 +1069,7 @@ onMounted(fetchAll);
 
 .ig-media-card:hover {
   transform: translateY(-2px);
-  border-color: rgba(236, 72, 153, 0.4);
+  border-color: rgba(156, 79, 124, 0.4);
 }
 
 .ig-media-header {
@@ -1079,7 +1079,7 @@ onMounted(fetchAll);
 }
 
 .ig-media-type-tag {
-  background: rgba(236, 72, 153, 0.15);
+  background: rgba(156, 79, 124, 0.15);
   color: var(--accent-pink);
   padding: 0.2rem 0.55rem;
   border-radius: 8px;
@@ -1211,12 +1211,12 @@ onMounted(fetchAll);
 
 .badge-ok {
   background: rgba(34, 197, 94, 0.15);
-  color: #4ade80;
+  color: #4FAE82;
 }
 
 .badge-error {
   background: rgba(239, 68, 68, 0.15);
-  color: #f87171;
+  color: #E0717C;
 }
 
 .event-payload {
