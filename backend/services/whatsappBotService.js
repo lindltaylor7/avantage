@@ -44,6 +44,15 @@ function limaTodayIso() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 }
 
+// Placeholder que usa findOrCreateFromWhatsApp() cuando WhatsApp no compartió
+// un nombre de perfil real — no debe tratarse como el nombre del contacto.
+const GENERIC_CONTACT_NAME = 'Contacto de WhatsApp';
+
+function firstNameOf(fullName) {
+  if (!fullName || fullName === GENERIC_CONTACT_NAME) return null;
+  return fullName.trim().split(/\s+/)[0] || null;
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -289,6 +298,9 @@ export class WhatsappBotService {
       .filter((m) => m.body && m.body.trim())
       .map((m) => ({ direction: m.direction, text: m.body }));
 
+    const lead = await this.leadService.findByPhone(waId);
+    const contactName = firstNameOf(lead?.full_name);
+
     this.logActivity({
       type: 'llm_request',
       waId,
@@ -302,7 +314,8 @@ export class WhatsappBotService {
       knownAnswers: answers,
       incomingText,
       isFirstTurn,
-      toneInstructions: settings.tone_instructions
+      toneInstructions: settings.tone_instructions,
+      contactName
     });
     this.logActivity({
       type: 'llm_response',
@@ -520,12 +533,13 @@ export class WhatsappBotService {
       return;
     }
 
-    const index = parseInt(trimmed, 10);
-    const slot = Number.isInteger(index) ? scheduling.slots[index - 1] : null;
+    const labels = scheduling.slots.map((s) => s.label);
+    const { index } = await this.ollamaService.parseSchedulingChoice(trimmed, labels);
+    const slot = index !== null ? scheduling.slots[index] : null;
     if (!slot) {
       await this.send(
         waId,
-        `⚠️ No reconocí esa opción. Responde con el número del horario, o "no" si prefieres que te contacten después:\n\n${numberedList(scheduling.slots.map((s) => s.label))}`
+        `⚠️ No reconocí esa opción. Responde con el número del horario, o "no" si prefieres que te contacten después:\n\n${numberedList(labels)}`
       );
       return;
     }
@@ -566,9 +580,10 @@ export class WhatsappBotService {
         }
       }
 
+      const name = firstNameOf(lead?.full_name);
       await this.send(
         waId,
-        `✅ ¡Listo! Tu llamada quedó agendada para *${slot.label}*.` +
+        `✅ ¡Listo${name ? `, ${name}` : ''}! Tu llamada quedó agendada para *${slot.label}*.` +
         (event.meetLink ? `\n\n🔗 Link de Google Meet: ${event.meetLink}` : '') +
         '\n\nTe esperamos. ¡Gracias! 🙌'
       );

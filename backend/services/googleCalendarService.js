@@ -262,7 +262,7 @@ export class GoogleCalendarService {
    * como respaldo cuando un día específico pedido no tiene espacio, para
    * sugerir las próximas opciones reales en vez de un simple "no hay".
    */
-  async getUpcomingFreeSlots(userId, { days = 14, limit = 6, slotMinutes = 30, minLeadTimeMinutes = 120 } = {}) {
+  async getUpcomingFreeSlots(userId, { days = 14, limit = 3, slotMinutes = 30, minLeadTimeMinutes = 120 } = {}) {
     const availabilityRows = await db('advisor_availability').where({ user_id: userId }).select('day_of_week', 'start_time');
     if (availabilityRows.length === 0) return [];
 
@@ -282,7 +282,7 @@ export class GoogleCalendarService {
    * "YYYY-MM-DD", calendario de Lima) — usado cuando el lead ya dijo qué día
    * prefiere, en vez de mostrarle una lista genérica de próximos horarios.
    */
-  async getFreeSlotsForDate(userId, dateStr, { slotMinutes = 30, minLeadTimeMinutes = 120 } = {}) {
+  async getFreeSlotsForDate(userId, dateStr, { slotMinutes = 30, minLeadTimeMinutes = 120, limit = 3 } = {}) {
     const availabilityRows = await db('advisor_availability').where({ user_id: userId }).select('day_of_week', 'start_time');
     if (availabilityRows.length === 0) return [];
 
@@ -308,7 +308,7 @@ export class GoogleCalendarService {
     candidates.sort((a, b) => a.start - b.start);
 
     const freeSlots = await this.filterAgainstCalendar(userId, candidates);
-    return freeSlots.map((slot) => ({
+    return freeSlots.slice(0, limit).map((slot) => ({
       startTime: slot.start.toISOString(),
       endTime: slot.end.toISOString(),
       label: formatSlotLabel(slot.start)

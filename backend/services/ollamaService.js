@@ -250,7 +250,7 @@ Detalles adicionales: ${additionalNotes || 'Ninguno'}`;
    * no hay conexión a Ollama Cloud (sin API key, o la llamada falla), se usa
    * una lógica de respaldo mínima basada en reglas.
    */
-  async converseAsAvan({ history, knownAnswers, incomingText, isFirstTurn, toneInstructions }) {
+  async converseAsAvan({ history, knownAnswers, incomingText, isFirstTurn, toneInstructions, contactName }) {
     const activeApiKey = this.apiKey || process.env.OLLAMA_API_KEY || '';
     let activeHost = this.host || 'https://ollama.com';
     if (activeHost === 'https://api.ollama.com') activeHost = 'https://ollama.com';
@@ -264,27 +264,33 @@ Detalles adicionales: ${additionalNotes || 'Ninguno'}`;
 TU OBJETIVO: a través de una conversación natural, cercana y breve (NUNCA un cuestionario ni un formulario), entender de qué trata el tema o problema de tesis de la persona, y luego dirigir la conversación hacia agendar una llamada breve con un asesor de Avantage Group que pueda profundizar y orientarla — ESE es el cierre que buscas, no generar un reporte ni anunciar un puntaje de viabilidad (eso ya no se le comunica al lead por chat).
 
 LO QUE NECESITAS SABER, EN ESTE ORDEN DE PRIORIDAD:
-1. El tema o problema de tesis que quiere investigar — OBLIGATORIO. Mientras no lo sepas, esta es SIEMPRE tu única pregunta; no avances a nada más.
-2. Correo electrónico — OPCIONAL. Una vez que ya conoces el tema y estás por proponer la llamada, pregúntalo UNA sola vez y de forma liviana (ej. "para mandarte la invitación de la videollamada, ¿tienes un correo a la mano?"). Si no lo da o prefiere no darlo, sigue adelante sin insistir — no es un requisito para agendar.
+1. El tema o problema de tesis que quiere investigar — OBLIGATORIO. Mientras no lo sepas, esta es SIEMPRE tu única pregunta; no avances a nada más. Basta con una idea GENERAL (ej. "tesis de Ingeniería Civil, desde cero, sin tema definido" ya es suficiente) — no hace falta que sea específico ni profundizar más de lo que la persona quiera dar.
+2. Correo electrónico — OPCIONAL. Una vez que ya conoces el tema y estás por proponer la llamada, pregúntalo UNA sola vez y de forma liviana (ej. "para mandarte la invitación de la videollamada, ¿tienes un correo a la mano?"). Si no lo da, no tiene, o prefiere no darlo, sigue adelante sin insistir — no es un requisito para agendar.
 3. Ámbito, nivel académico o carrera — opcionales, hay valores por defecto configurados. Regístralos solo si la persona los menciona espontáneamente; NO se los preguntes activamente, no son parte de tu objetivo con este lead.
 
-REGLA DURA: NUNCA pidas el correo electrónico antes de conocer el tema de tesis, sin importar lo que digan las instrucciones adicionales del equipo. Si "problem" en DATOS YA CONFIRMADOS está vacío o null, tu pregunta tiene que ser sobre el tema de tesis — no sobre el correo, ni sobre nivel/carrera/ámbito.
+REGLA DURA #1: NUNCA pidas el correo electrónico antes de conocer el tema de tesis, sin importar lo que digan las instrucciones adicionales del equipo. Si "problem" en DATOS YA CONFIRMADOS está vacío o null, tu pregunta tiene que ser sobre el tema de tesis — no sobre el correo, ni sobre nivel/carrera/ámbito.
+
+REGLA DURA #2 — INTENCIÓN DE AGENDAR: si en cualquier momento el contacto pide agendar, tener una llamada/reunión, hablar con un asesor, pregunta cuánto cuesta, o pregunta por horarios/fechas, esto SIEMPRE gana sobre seguir indagando el tema. En ese caso: (a) si ya tienes algo de tema (así sea general), confirma que sí se puede coordinar la llamada, pide el correo UNA vez en esa misma respuesta si no lo tienes, y marca "ready": true en ESE MISMO turno (no esperes otro mensaje ni sigas preguntando por el área específica); (b) si todavía no tienes ningún tema, primero pregunta brevemente el tema (una sola vez) antes de poder agendar. Nunca dejes pasar una señal de agendar por seguir profundizando el tema — es la peor experiencia posible para el contacto.
+
+REGLA DURA #3 — NO REPITAS PREGUNTAS: si ya hiciste una pregunta (aunque sea con otras palabras) y el contacto no la respondió directamente sino que dijo otra cosa (p. ej. cambió de tema o pidió agendar), NO vuelvas a hacer esa misma pregunta reformulada en el siguiente turno. Seguí el hilo de lo último que dijo, no tu propia agenda de preguntas.
 
 REGLAS DE TONO Y FORMATO (es WhatsApp, no un formulario):
 - Máximo 2-4 líneas por mensaje. Cercano, empático, natural, nada de tono corporativo o de encuesta. Nunca enumeres preguntas ni digas "Pregunta X de Y". Sin listas ni viñetas. Máximo 1-2 emojis.
 - Haz UNA sola pregunta a la vez: la más relevante según lo que ya sabes (ver "DATOS YA CONFIRMADOS" abajo) y lo que la persona acaba de escribir.
 - No le prometas ni menciones un "reporte de viabilidad", "evaluación con IA" ni ningún puntaje — el valor que le ofreces es la llamada con el asesor, no un análisis automático.
+- Si preguntan por precios/costos, no los inventes ni los evadas en seco: dile que el asesor se los detalla en la llamada, y usa eso para impulsar el agendamiento (regla dura #2).
 - Reconoce en tus propias palabras algo ESPECÍFICO de lo que la persona escribió. No inventes que dijo algo que no dijo. Si el mensaje fue solo un saludo sin contenido (ej. "Hola"), no inventes que ya contó su tema: saluda y pregúntale directamente por su tema de tesis.
 - Si preguntan si eres una IA o un bot, sé transparente. Fuera de esa pregunta directa, compórtate como alguien del equipo, no aclares por tu cuenta que eres un bot.
+${contactName ? `- Su nombre (según su perfil de WhatsApp) es "${contactName}". Puedes usarlo de vez en cuando para sonar más cercano, sin abusar ni repetirlo en cada mensaje.` : ''}
 ${isFirstTurn ? '- Este es el PRIMER mensaje de la conversación: tu "reply" tiene que empezar presentándote brevemente como Avan, del equipo de Avantage Group, antes de cualquier otra cosa.' : ''}
-${toneInstructions ? `\nINSTRUCCIONES ADICIONALES DEL EQUIPO (nunca contradicen la REGLA DURA de arriba):\n${toneInstructions}\n` : ''}
+${toneInstructions ? `\nINSTRUCCIONES ADICIONALES DEL EQUIPO (nunca contradicen las reglas duras de arriba):\n${toneInstructions}\n` : ''}
 
-CUÁNDO TERMINAR: marca "ready": true en cuanto ya conozcas el tema de tesis Y ya hayas intentado (una vez) pedir el correo para la llamada — sin importar si te lo dieron o no. No necesitas más turnos después de eso. Cuando marques ready:true, tu "reply" debe ser BREVE (ej. "Perfecto, dame un momento 👀") — el sistema se encarga de proponer la llamada con el asesor automáticamente después.
+CUÁNDO TERMINAR: marca "ready": true en cuanto ya conozcas el tema de tesis Y ya hayas intentado (una vez) pedir el correo para la llamada — sin importar si te lo dieron o no — O apenas se dé la situación de la REGLA DURA #2. No necesitas más turnos de los estrictamente necesarios. Cuando marques ready:true, tu "reply" debe ser BREVE (ej. "Perfecto, dame un momento 👀") — el sistema se encarga de proponer la llamada con el asesor automáticamente después.
 
 DATOS YA CONFIRMADOS (usa esto para no repetir preguntas ya respondidas):
 ${JSON.stringify(knownAnswers || {})}
 
-LO QUE TE FALTA PREGUNTAR AHORA (en orden, respeta esto): ${describeMissingPriority(knownAnswers)}
+LO QUE TE FALTA PREGUNTAR AHORA (en orden, respeta esto salvo que aplique la regla dura #2): ${describeMissingPriority(knownAnswers)}
 
 Responde ÚNICAMENTE en JSON válido con esta forma exacta (usa null en los campos de "extracted" que no puedas identificar todavía):
 {
@@ -443,6 +449,67 @@ Responde ÚNICAMENTE en JSON válido: {"date": "YYYY-MM-DD" o null}`;
       return { date: tomorrow.toISOString().slice(0, 10), source: 'fallback' };
     }
     return { date: null, source: 'fallback' };
+  }
+
+  /**
+   * Interpreta en lenguaje natural a cuál horario de una lista numerada se
+   * refiere el lead (ej. "si para las 5:30", "la segunda", "el de las 4")
+   * en vez de exigir que responda solo con el número. Devuelve el índice
+   * (0-based) elegido, o null si la respuesta no elige ninguna opción (por
+   * ejemplo, si pregunta algo distinto).
+   */
+  async parseSchedulingChoice(text, optionLabels) {
+    const activeApiKey = this.apiKey || process.env.OLLAMA_API_KEY || '';
+    let activeHost = this.host || 'https://ollama.com';
+    if (activeHost === 'https://api.ollama.com') activeHost = 'https://ollama.com';
+
+    if (!activeApiKey && !activeHost.includes('localhost') && !activeHost.includes('127.0.0.1')) {
+      return this.fallbackParseSchedulingChoice(text, optionLabels);
+    }
+
+    const numbered = optionLabels.map((label, i) => `${i + 1}. ${label}`).join('\n');
+    const prompt = `Le mostraste a alguien esta lista numerada de horarios para una llamada:
+${numbered}
+
+Y respondió esto: """${text}"""
+
+¿A cuál horario de la lista se refiere? Puede responder con el número, con la hora, con una frase tipo "sí, el de las 5:30", "la primera opción", etc. Si su respuesta no elige ninguna opción de la lista (por ejemplo, pregunta otra cosa, dice "no", o no queda claro cuál), responde null.
+
+Responde ÚNICAMENTE en JSON válido: {"index": <número de 1 a ${optionLabels.length}, o null>}`;
+
+    try {
+      const generateUrl = this.getApiUrl(activeHost, '/generate');
+      const response = await fetch(generateUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(activeApiKey ? { 'Authorization': `Bearer ${activeApiKey}` } : {})
+        },
+        body: JSON.stringify({ model: this.chatModel, prompt, stream: false, format: 'json' }),
+        signal: AbortSignal.timeout(15000)
+      });
+
+      if (!response.ok) return this.fallbackParseSchedulingChoice(text, optionLabels);
+
+      const data = await response.json();
+      const cleanResponse = (data.response || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
+      const parsed = JSON.parse(cleanResponse);
+      const index = Number.isInteger(parsed.index) && parsed.index >= 1 && parsed.index <= optionLabels.length ? parsed.index - 1 : null;
+      return { index, source: 'llm' };
+    } catch (err) {
+      console.warn('Ollama Cloud LLM scheduling choice notice:', err.message);
+      return this.fallbackParseSchedulingChoice(text, optionLabels);
+    }
+  }
+
+  /**
+   * Respaldo sin IA: solo reconoce un número explícito (1, 2, 3...).
+   */
+  fallbackParseSchedulingChoice(text, optionLabels) {
+    const trimmed = (text || '').trim();
+    const asNumber = parseInt(trimmed, 10);
+    const index = Number.isInteger(asNumber) && asNumber >= 1 && asNumber <= optionLabels.length ? asNumber - 1 : null;
+    return { index, source: 'fallback' };
   }
 
   /**
