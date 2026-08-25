@@ -38,4 +38,13 @@ export class ScheduledMeetingService {
       .orderBy('scheduled_meetings.start_time', 'asc')
       .limit(limit);
   }
+
+  /**
+   * La reunión más reciente agendada con este contacto — se usa para
+   * responderle con los datos reales (fecha/link) si pregunta por su
+   * reunión después de que ya quedó agendada.
+   */
+  async getLatestForContact(waId) {
+    return db('scheduled_meetings').where({ wa_id: waId }).orderBy('created_at', 'desc').first();
+  }
 }

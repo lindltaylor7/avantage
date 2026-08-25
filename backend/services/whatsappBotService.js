@@ -44,6 +44,15 @@ function limaTodayIso() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 }
 
+const MEETING_DATETIME_FORMATTER = new Intl.DateTimeFormat('es-PE', {
+  timeZone: 'America/Lima', weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true
+});
+
+function formatMeetingDateTimeLabel(isoStr) {
+  const label = MEETING_DATETIME_FORMATTER.format(new Date(isoStr)).replace(/\./g, '').replace(/\s([ap])\s?m\b/, ' $1.m.');
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
 // Placeholder que usa findOrCreateFromWhatsApp() cuando WhatsApp no compartió
 // un nombre de perfil real — no debe tratarse como el nombre del contacto.
 const GENERIC_CONTACT_NAME = 'Contacto de WhatsApp';
@@ -81,12 +90,13 @@ function normalize(text) {
  * ofrece agendar una llamada en el calendario real del asesor.
  */
 export class WhatsappBotService {
-  constructor({ ollamaService, emailService, leadService, whatsappMessageService, settingsService, googleCalendarService, scheduledMeetingService }) {
+  constructor({ ollamaService, emailService, leadService, whatsappMessageService, settingsService, googleCalendarService, scheduledMeetingService, notificationService }) {
     this.ollamaService = ollamaService;
     this.emailService = emailService;
     this.leadService = leadService;
     this.whatsappMessageService = whatsappMessageService;
     this.scheduledMeetingService = scheduledMeetingService;
+    this.notificationService = notificationService;
     this.settingsService = settingsService || new WhatsappBotSettingsService();
     this.googleCalendarService = googleCalendarService;
     // wa_id -> { messages: string[], timer: NodeJS.Timeout }, buffer temporal
@@ -198,14 +208,33 @@ export class WhatsappBotService {
       return;
     }
 
-    if (!session.bot_enabled || session.status === 'completed') {
+    if (!session.bot_enabled) {
       this.logActivity({
         type: 'skipped',
         waId,
         text,
-        reason: session.status === 'completed'
-          ? 'La conversación ya está marcada como "completed" (terminó el flujo antes); el bot no vuelve a responder automáticamente. Usa "🔄 Reiniciar conversación" en el panel para probarla de nuevo.'
-          : 'El bot está pausado para este contacto (alguien respondió manualmente). Actívalo con "▶️ Activar bot" en el panel.'
+        reason: 'El bot está pausado para este contacto (alguien respondió manualmente). Actívalo con "▶️ Activar bot" en el panel.'
+      });
+      return;
+    }
+
+    if (session.status === 'completed') {
+      // Si ya tiene una reunión real agendada, un mensaje nuevo puede ser
+      // algo que sí necesita atención (reagendar, queja, pregunta por el
+      // link) — se clasifica en vez de ignorarlo sin más. Si nunca llegó a
+      // agendar (transferido a asesor sin reunión, descartado, etc.), sigue
+      // igual que antes: el bot ya no vuelve a responder solo.
+      const meeting = this.scheduledMeetingService ? await this.scheduledMeetingService.getLatestForContact(waId) : null;
+      if (meeting) {
+        await this.handlePostBookingMessage(waId, meeting, text);
+        return;
+      }
+
+      this.logActivity({
+        type: 'skipped',
+        waId,
+        text,
+        reason: 'La conversación ya está marcada como "completed" sin una reunión agendada; el bot no vuelve a responder automáticamente. Usa "🔄 Reiniciar conversación" en el panel para probarla de nuevo.'
       });
       return;
     }
@@ -534,9 +563,38 @@ export class WhatsappBotService {
     }
 
     const labels = scheduling.slots.map((s) => s.label);
-    const { index } = await this.ollamaService.parseSchedulingChoice(trimmed, labels);
+    const { index, preferredTime } = await this.ollamaService.parseSchedulingChoice(trimmed, labels);
     const slot = index !== null ? scheduling.slots[index] : null;
+
     if (!slot) {
+      // Evita el bucle de "no reconocí esa opción" repitiendo la misma
+      // lista: si el lead pidió un horario distinto al ofrecido, se busca
+      // lo más cercano a lo que realmente quiere en los próximos días. Si
+      // tras unos intentos igual no converge, se transfiere a un asesor
+      // para que coordine el horario directamente.
+      scheduling.attempts = (scheduling.attempts || 0) + 1;
+
+      if (scheduling.attempts >= 3) {
+        delete answers.__scheduling;
+        await this.updateSession(waId, { answers: JSON.stringify(answers) });
+        await this.handOffToAdvisor(waId, 'No se logró coincidir en un horario tras varios intentos.');
+        return;
+      }
+
+      if (preferredTime) {
+        const nearSlots = await this.googleCalendarService.getFreeSlotsNearTime(BOOKING_ADVISOR_USER_ID, preferredTime);
+        if (nearSlots.length > 0) {
+          scheduling.slots = nearSlots;
+          await this.updateSession(waId, { answers: JSON.stringify(answers) });
+          await this.send(
+            waId,
+            `Ese horario no lo tengo libre, pero tengo estos más cercanos a lo que buscas:\n\n${numberedList(nearSlots.map((s) => s.label))}\n\nResponde con el número que prefieras, o "no" si prefieres que te contacten después.`
+          );
+          return;
+        }
+      }
+
+      await this.updateSession(waId, { answers: JSON.stringify(answers) });
       await this.send(
         waId,
         `⚠️ No reconocí esa opción. Responde con el número del horario, o "no" si prefieres que te contacten después:\n\n${numberedList(labels)}`
@@ -581,6 +639,20 @@ export class WhatsappBotService {
       }
 
       const name = firstNameOf(lead?.full_name);
+
+      if (this.notificationService) {
+        try {
+          await this.notificationService.create({
+            type: 'meeting_booked',
+            title: `Reunión agendada con ${name || waId}`,
+            body: `${slot.label}${scheduling.topic ? ` — ${scheduling.topic}` : ''}`,
+            link: '/admin/availability'
+          });
+        } catch (notifyError) {
+          console.error(`❌ [WhatsApp Bot] Error al crear la notificación de reunión agendada para ${waId}:`, notifyError);
+        }
+      }
+
       await this.send(
         waId,
         `✅ ¡Listo${name ? `, ${name}` : ''}! Tu llamada quedó agendada para *${slot.label}*.` +
@@ -638,6 +710,45 @@ export class WhatsappBotService {
         this.logActivity({ type: 'inactivity_frozen', waId: session.wa_id });
       } catch (error) {
         console.error(`❌ [WhatsApp Bot] Error al congelar la conversación de ${session.wa_id}:`, error);
+      }
+    }
+  }
+
+  /**
+   * Mensaje nuevo de un lead que YA tiene una reunión real agendada. En vez
+   * de ignorarlo (como cualquier otra sesión "completed"), se clasifica con
+   * IA: saludos/agradecimientos cortos no necesitan respuesta; preguntas
+   * sobre la reunión (link/hora) se responden solas con los datos reales;
+   * pedidos de reagendar, quejas o consultas nuevas generan una respuesta
+   * breve y quedan marcados como urgentes en las notificaciones del panel
+   * para que un asesor los revise.
+   */
+  async handlePostBookingMessage(waId, meeting, text) {
+    const lead = await this.leadService.findByPhone(waId);
+    const contactName = firstNameOf(lead?.full_name);
+
+    const result = await this.ollamaService.classifyPostBookingMessage(text, {
+      meetingLabel: formatMeetingDateTimeLabel(meeting.start_time),
+      meetLink: meeting.meet_link,
+      contactName
+    });
+
+    this.logActivity({ type: 'post_booking_classified', waId, text, needsReply: result.needsReply, isUrgent: result.isUrgent, source: result.source });
+
+    if (!result.needsReply) return;
+
+    await this.send(waId, result.replyText || 'Un asesor del equipo te va a escribir directamente para ayudarte con eso. ¡Gracias! 🙌');
+
+    if (result.isUrgent && this.notificationService) {
+      try {
+        await this.notificationService.create({
+          type: 'post_booking_attention',
+          title: `${contactName || waId} necesita seguimiento`,
+          body: `Ya tiene una llamada agendada (${formatMeetingDateTimeLabel(meeting.start_time)}) pero escribió: "${text}"`,
+          link: '/admin/whatsapp'
+        });
+      } catch (error) {
+        console.error(`❌ [WhatsApp Bot] Error al crear la notificación de seguimiento para ${waId}:`, error);
       }
     }
   }

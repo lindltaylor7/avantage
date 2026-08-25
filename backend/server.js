@@ -26,6 +26,7 @@ import { InstagramService } from './services/instagramService.js';
 import { InstagramWebhookService } from './services/instagramWebhookService.js';
 import { GoogleCalendarService } from './services/googleCalendarService.js';
 import { ScheduledMeetingService } from './services/scheduledMeetingService.js';
+import { NotificationService } from './services/notificationService.js';
 import { signToken, requireAuth, requirePermission, signGoogleOAuthState, verifyGoogleOAuthState } from './middleware/auth.js';
 
 import { uploadProjectUpdateAttachment, uploadDir } from './middleware/upload.js';
@@ -94,7 +95,8 @@ const whatsappMessageService = new WhatsappMessageService();
 const whatsappBotSettingsService = new WhatsappBotSettingsService();
 const googleCalendarService = new GoogleCalendarService();
 const scheduledMeetingService = new ScheduledMeetingService();
-const whatsappBotService = new WhatsappBotService({ ollamaService, emailService, leadService, whatsappMessageService, settingsService: whatsappBotSettingsService, googleCalendarService, scheduledMeetingService });
+const notificationService = new NotificationService();
+const whatsappBotService = new WhatsappBotService({ ollamaService, emailService, leadService, whatsappMessageService, settingsService: whatsappBotSettingsService, googleCalendarService, scheduledMeetingService, notificationService });
 const whatsappWebhookService = new WhatsappWebhookService({ botService: whatsappBotService });
 const advisorAvailabilityService = new AdvisorAvailabilityService();
 const instagramService = new InstagramService();
@@ -302,6 +304,51 @@ app.get('/api/meetings/upcoming', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('❌ Error al obtener las próximas reuniones:', error);
     res.status(500).json({ error: 'Error al obtener las próximas reuniones.', details: error.message });
+  }
+});
+
+/**
+ * Notificaciones internas del panel (campana del navbar): reuniones que
+ * Avan agendó, y casos de leads con reunión ya agendada que necesitan que
+ * un asesor intervenga (reagendar, queja, consulta nueva).
+ */
+app.get('/api/notifications', requireAuth, async (req, res) => {
+  try {
+    const notifications = await notificationService.getRecent();
+    res.json({ notifications });
+  } catch (error) {
+    console.error('❌ Error al obtener las notificaciones:', error);
+    res.status(500).json({ error: 'Error al obtener las notificaciones.', details: error.message });
+  }
+});
+
+app.get('/api/notifications/unread-count', requireAuth, async (req, res) => {
+  try {
+    const count = await notificationService.getUnreadCount();
+    res.json({ count });
+  } catch (error) {
+    console.error('❌ Error al obtener el conteo de notificaciones:', error);
+    res.status(500).json({ error: 'Error al obtener el conteo de notificaciones.', details: error.message });
+  }
+});
+
+app.post('/api/notifications/:id/read', requireAuth, async (req, res) => {
+  try {
+    await notificationService.markRead(req.params.id);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error al marcar la notificación como leída:', error);
+    res.status(500).json({ error: 'Error al marcar la notificación como leída.', details: error.message });
+  }
+});
+
+app.post('/api/notifications/read-all', requireAuth, async (req, res) => {
+  try {
+    await notificationService.markAllRead();
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error al marcar las notificaciones como leídas:', error);
+    res.status(500).json({ error: 'Error al marcar las notificaciones como leídas.', details: error.message });
   }
 });
 

@@ -50,14 +50,42 @@
         </div>
 
         <!-- Notification Bell with Red Badge -->
-        <div class="badge-icon-wrapper">
-          <button class="icon-btn" title="Notificaciones">
+        <div class="badge-icon-wrapper" ref="notifMenuRef">
+          <button class="icon-btn" title="Notificaciones" @click="toggleNotifDropdown">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
               <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
             </svg>
           </button>
-          <span class="notification-badge red-badge">0</span>
+          <span v-if="unreadCount > 0" class="notification-badge red-badge">{{ unreadCount > 9 ? '9+' : unreadCount }}</span>
+
+          <div v-if="isNotifDropdownOpen" class="user-dropdown glass-dropdown notif-dropdown">
+            <div class="notif-dropdown-header">
+              <span class="notif-dropdown-title">Notificaciones</span>
+              <button v-if="unreadCount > 0" type="button" class="notif-mark-all" @click="markAllNotificationsRead">
+                Marcar todas leídas
+              </button>
+            </div>
+            <div v-if="notifications.length === 0" class="notif-empty">
+              Sin notificaciones todavía.
+            </div>
+            <div v-else class="notif-list custom-scrollbar">
+              <button
+                v-for="notif in notifications"
+                :key="notif.id"
+                type="button"
+                class="notif-item"
+                :class="{ 'is-unread': !notif.is_read }"
+                @click="openNotification(notif)"
+              >
+                <span class="notif-item-icon">{{ notif.type === 'meeting_booked' ? '📅' : '⚠️' }}</span>
+                <span class="notif-item-body">
+                  <strong class="notif-item-title">{{ notif.title }}</strong>
+                  <span v-if="notif.body" class="notif-item-text">{{ notif.body }}</span>
+                </span>
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- User Avatar + Name -->
@@ -125,6 +153,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { authState, clearSession } from '../auth.js';
 import { getTheme, toggleTheme as toggleStoredTheme } from '../theme.js';
+import { apiFetch } from '../apiClient.js';
 
 const emit = defineEmits(['toggle-sidebar']);
 const route = useRoute();
@@ -133,6 +162,61 @@ const router = useRouter();
 const isLightMode = ref(getTheme() === 'light');
 const isUserMenuOpen = ref(false);
 const userMenuRef = ref(null);
+
+const notifications = ref([]);
+const unreadCount = ref(0);
+const isNotifDropdownOpen = ref(false);
+const notifMenuRef = ref(null);
+let notifPollTimer = null;
+
+async function fetchUnreadCount() {
+  try {
+    const response = await apiFetch('/api/notifications/unread-count');
+    const data = await response.json();
+    if (response.ok) unreadCount.value = data.count || 0;
+  } catch (error) {
+    console.warn('No se pudo obtener el conteo de notificaciones:', error);
+  }
+}
+
+async function fetchNotifications() {
+  try {
+    const response = await apiFetch('/api/notifications');
+    const data = await response.json();
+    if (response.ok) notifications.value = data.notifications || [];
+  } catch (error) {
+    console.warn('No se pudo obtener las notificaciones:', error);
+  }
+}
+
+async function toggleNotifDropdown() {
+  isNotifDropdownOpen.value = !isNotifDropdownOpen.value;
+  if (isNotifDropdownOpen.value) await fetchNotifications();
+}
+
+async function openNotification(notif) {
+  isNotifDropdownOpen.value = false;
+  if (!notif.is_read) {
+    try {
+      await apiFetch(`/api/notifications/${notif.id}/read`, { method: 'POST' });
+      notif.is_read = true;
+      await fetchUnreadCount();
+    } catch (error) {
+      console.warn('No se pudo marcar la notificación como leída:', error);
+    }
+  }
+  if (notif.link) router.push(notif.link);
+}
+
+async function markAllNotificationsRead() {
+  try {
+    await apiFetch('/api/notifications/read-all', { method: 'POST' });
+    notifications.value = notifications.value.map((n) => ({ ...n, is_read: true }));
+    unreadCount.value = 0;
+  } catch (error) {
+    console.warn('No se pudieron marcar las notificaciones como leídas:', error);
+  }
+}
 
 const currentPageTitle = computed(() => {
   if (route.path === '/dashboard') return 'Inicio';
@@ -165,14 +249,22 @@ function handleClickOutside(event) {
   if (userMenuRef.value && !userMenuRef.value.contains(event.target)) {
     isUserMenuOpen.value = false;
   }
+  if (notifMenuRef.value && !notifMenuRef.value.contains(event.target)) {
+    isNotifDropdownOpen.value = false;
+  }
 }
 
 onMounted(() => {
   document.addEventListener('click', handleClickOutside);
+  fetchUnreadCount();
+  // Sondeo simple del conteo de no leídas — suficiente para una campana de
+  // panel admin, sin necesidad de websockets.
+  notifPollTimer = setInterval(fetchUnreadCount, 60000);
 });
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside);
+  if (notifPollTimer) clearInterval(notifPollTimer);
 });
 </script>
 
@@ -416,5 +508,107 @@ onUnmounted(() => {
 .logout-item:hover {
   background-color: rgba(178, 58, 69, 0.14);
   color: var(--accent-rose);
+}
+
+.notif-dropdown {
+  width: 320px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.notif-dropdown-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.75rem 0.9rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.notif-dropdown-title {
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--text-main);
+}
+
+.notif-mark-all {
+  background: none;
+  border: none;
+  color: var(--primary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.notif-mark-all:hover {
+  text-decoration: underline;
+}
+
+.notif-empty {
+  padding: 1.5rem 1rem;
+  text-align: center;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.notif-list {
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.notif-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  width: 100%;
+  padding: 0.7rem 0.9rem;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border-color);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease;
+}
+
+.notif-item:last-child {
+  border-bottom: none;
+}
+
+.notif-item:hover {
+  background: var(--surface-2);
+}
+
+.notif-item.is-unread {
+  background: rgba(76, 63, 145, 0.06);
+}
+
+.notif-item-icon {
+  font-size: 1.1rem;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+
+.notif-item-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.notif-item-title {
+  font-size: 0.82rem;
+  color: var(--text-main);
+}
+
+.notif-item-text {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 </style>

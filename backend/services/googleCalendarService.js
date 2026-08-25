@@ -314,4 +314,43 @@ export class GoogleCalendarService {
       label: formatSlotLabel(slot.start)
     }));
   }
+
+  /**
+   * Los `limit` bloques libres (en los próximos `days` días) cuya hora del
+   * día está más cerca de `preferredTime` ("HH:MM", 24h, hora de Lima) — se
+   * usa cuando el lead pidió un horario que no estaba en la lista ofrecida
+   * (ej. "no tienes más de noche?"), para sugerirle lo más cercano a lo que
+   * realmente quiere en vez de repetirle la misma lista que ya rechazó.
+   */
+  async getFreeSlotsNearTime(userId, preferredTime, { days = 14, limit = 3, slotMinutes = 30, minLeadTimeMinutes = 120 } = {}) {
+    const availabilityRows = await db('advisor_availability').where({ user_id: userId }).select('day_of_week', 'start_time');
+    if (availabilityRows.length === 0) return [];
+
+    const candidates = this.buildCandidateSlots(availabilityRows, { days, slotMinutes, minLeadTimeMinutes });
+    if (candidates.length === 0) return [];
+
+    const freeSlots = await this.filterAgainstCalendar(userId, candidates);
+    if (freeSlots.length === 0) return [];
+
+    const [ph, pm] = preferredTime.split(':').map(Number);
+    const preferredMinutes = ph * 60 + pm;
+    const timeFormatter = new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+
+    function minutesOfDayLima(date) {
+      const parts = timeFormatter.formatToParts(date);
+      const h = Number(parts.find((p) => p.type === 'hour').value);
+      const m = Number(parts.find((p) => p.type === 'minute').value);
+      return h * 60 + m;
+    }
+
+    const ranked = freeSlots
+      .map((slot) => ({ slot, diff: Math.abs(minutesOfDayLima(slot.start) - preferredMinutes) }))
+      .sort((a, b) => a.diff - b.diff || (a.slot.start - b.slot.start));
+
+    return ranked.slice(0, limit).map(({ slot }) => ({
+      startTime: slot.start.toISOString(),
+      endTime: slot.end.toISOString(),
+      label: formatSlotLabel(slot.start)
+    }));
+  }
 }

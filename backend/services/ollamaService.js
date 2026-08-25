@@ -473,9 +473,11 @@ ${numbered}
 
 Y respondió esto: """${text}"""
 
-¿A cuál horario de la lista se refiere? Puede responder con el número, con la hora, con una frase tipo "sí, el de las 5:30", "la primera opción", etc. Si su respuesta no elige ninguna opción de la lista (por ejemplo, pregunta otra cosa, dice "no", o no queda claro cuál), responde null.
+¿A cuál horario de la lista se refiere? Puede responder con el número, con la hora, con una frase tipo "sí, el de las 5:30", "la primera opción", etc. Si su respuesta no elige ninguna opción de la lista, responde index:null.
 
-Responde ÚNICAMENTE en JSON válido: {"index": <número de 1 a ${optionLabels.length}, o null>}`;
+Además, si NO eligió ninguna opción pero sí expresó una preferencia de horario distinta a las ofrecidas (ej. "no tienes más de noche?", "para las 8pm", "algo más tarde", "en la mañana mejor"), extrae esa hora aproximada en formato 24h "HH:MM" en "preferredTime" (usa una hora representativa: "en la mañana" ~ "09:00", "en la tarde" ~ "15:00", "de noche"/"más tarde" ~ "20:00"). Si no expresó ninguna preferencia de horario, deja preferredTime en null.
+
+Responde ÚNICAMENTE en JSON válido: {"index": <número de 1 a ${optionLabels.length}, o null>, "preferredTime": "<HH:MM o null>"}`;
 
     try {
       const generateUrl = this.getApiUrl(activeHost, '/generate');
@@ -495,7 +497,8 @@ Responde ÚNICAMENTE en JSON válido: {"index": <número de 1 a ${optionLabels.l
       const cleanResponse = (data.response || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
       const parsed = JSON.parse(cleanResponse);
       const index = Number.isInteger(parsed.index) && parsed.index >= 1 && parsed.index <= optionLabels.length ? parsed.index - 1 : null;
-      return { index, source: 'llm' };
+      const preferredTime = typeof parsed.preferredTime === 'string' && /^\d{2}:\d{2}$/.test(parsed.preferredTime) ? parsed.preferredTime : null;
+      return { index, preferredTime, source: 'llm' };
     } catch (err) {
       console.warn('Ollama Cloud LLM scheduling choice notice:', err.message);
       return this.fallbackParseSchedulingChoice(text, optionLabels);
@@ -509,7 +512,92 @@ Responde ÚNICAMENTE en JSON válido: {"index": <número de 1 a ${optionLabels.l
     const trimmed = (text || '').trim();
     const asNumber = parseInt(trimmed, 10);
     const index = Number.isInteger(asNumber) && asNumber >= 1 && asNumber <= optionLabels.length ? asNumber - 1 : null;
-    return { index, source: 'fallback' };
+    return { index, preferredTime: null, source: 'fallback' };
+  }
+
+  /**
+   * Clasifica un mensaje que llega DESPUÉS de que el lead ya agendó su
+   * llamada (sesión "completed" con reunión real en `scheduled_meetings`).
+   * Inspirado en la lógica de un workflow n8n existente del equipo: los
+   * simples saludos/agradecimientos/confirmaciones cortas no necesitan
+   * respuesta (el asesor ya tiene la reunión agendada); en cambio, pedidos
+   * de reagendar/cancelar, quejas de que nadie llegó, preguntas sobre la
+   * reunión (link/hora/duración), o consultas nuevas (precio, otro tema) sí
+   * necesitan una respuesta y, salvo la pregunta de datos de la reunión
+   * (que Avan puede responder solo con los datos reales que ya tiene),
+   * deben avisarle a un asesor humano.
+   */
+  async classifyPostBookingMessage(text, { meetingLabel, meetLink, contactName }) {
+    const activeApiKey = this.apiKey || process.env.OLLAMA_API_KEY || '';
+    let activeHost = this.host || 'https://ollama.com';
+    if (activeHost === 'https://api.ollama.com') activeHost = 'https://ollama.com';
+
+    if (!activeApiKey && !activeHost.includes('localhost') && !activeHost.includes('127.0.0.1')) {
+      return this.fallbackClassifyPostBookingMessage(text);
+    }
+
+    const prompt = `Eres Avan, de Avantage Group. Este contacto${contactName ? ` (${contactName})` : ''} YA tiene una llamada agendada para *${meetingLabel}* (link de Meet: ${meetLink || 'no disponible'}) con un asesor. Te acaba de escribir esto, después de que su reunión ya quedó agendada:
+
+"""${text}"""
+
+Clasifícalo:
+- Si es solo un saludo, agradecimiento o confirmación corta sin pedir nada más (ej. "gracias", "ok", "perfecto", "listo", "buenas"), no necesita respuesta.
+- Si pregunta por datos de SU reunión (link, hora, fecha, cuánto dura, dónde es), respóndele tú mismo usando ÚNICAMENTE los datos reales de arriba (la fecha/hora y el link), sin inventar nada más.
+- Si pide reagendar, cancelar, cambiar de horario, se queja de que nadie llegó a la reunión o de un problema con el enlace, o hace una consulta totalmente nueva (precio, otro tema de tesis, otro servicio), respóndele con un mensaje breve y empático confirmando que un asesor del equipo le va a escribir directamente para resolverlo — y márcalo como urgente para que el equipo lo vea.
+
+Responde ÚNICAMENTE en JSON válido:
+{
+  "needsReply": <true o false>,
+  "replyText": "<mensaje de WhatsApp breve, o null si needsReply es false>",
+  "isUrgent": <true si el equipo debe intervenir manualmente (reagendar/queja/consulta nueva), false si ya quedó resuelto solo con la respuesta (ej. le diste el link)>
+}`;
+
+    try {
+      const generateUrl = this.getApiUrl(activeHost, '/generate');
+      const response = await fetch(generateUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(activeApiKey ? { 'Authorization': `Bearer ${activeApiKey}` } : {})
+        },
+        body: JSON.stringify({ model: this.chatModel, prompt, stream: false, format: 'json' }),
+        signal: AbortSignal.timeout(15000)
+      });
+
+      if (!response.ok) return this.fallbackClassifyPostBookingMessage(text);
+
+      const data = await response.json();
+      const cleanResponse = (data.response || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
+      const parsed = JSON.parse(cleanResponse);
+      return {
+        needsReply: !!parsed.needsReply,
+        replyText: parsed.needsReply ? (parsed.replyText || null) : null,
+        isUrgent: !!parsed.isUrgent,
+        source: 'llm'
+      };
+    } catch (err) {
+      console.warn('Ollama Cloud LLM post-booking classification notice:', err.message);
+      return this.fallbackClassifyPostBookingMessage(text);
+    }
+  }
+
+  /**
+   * Respaldo sin IA: solo reconoce agradecimientos/confirmaciones cortas
+   * como "no necesita respuesta"; cualquier otra cosa se trata como urgente
+   * (mejor avisarle de más a un asesor que dejar a alguien sin atender).
+   */
+  fallbackClassifyPostBookingMessage(text) {
+    const normalized = (text || '').trim().toLowerCase();
+    const esConfirmacionCorta = /^(ok|okay|perfecto|listo|excelente|bueno|dale|genial|bien|ya|entendido|de acuerdo|gracias|muchas gracias)[.!]*$/.test(normalized);
+    if (esConfirmacionCorta) {
+      return { needsReply: false, replyText: null, isUrgent: false, source: 'fallback' };
+    }
+    return {
+      needsReply: true,
+      replyText: 'Un asesor del equipo te va a escribir directamente para ayudarte con eso. ¡Gracias! 🙌',
+      isUrgent: true,
+      source: 'fallback'
+    };
   }
 
   /**
