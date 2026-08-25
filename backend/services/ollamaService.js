@@ -228,6 +228,70 @@ Detalles adicionales: ${additionalNotes || 'Ninguno'}`;
   }
 
   /**
+   * Genera un saludo de bienvenida humanizado (texto libre, no JSON) a partir
+   * de los primeros mensajes que escribió un contacto nuevo por WhatsApp,
+   * cerrando con una pregunta que lo dirija a contar su tema de tesis y así
+   * arrancar el guion estructurado del bot. Si no hay conexión a Ollama Cloud
+   * (sin API key, o la llamada falla), se usa un saludo de respaldo fijo.
+   */
+  async generateWelcomeMessage(firstMessageText, { apiKeyOverride, hostOverride } = {}) {
+    const activeApiKey = (apiKeyOverride && String(apiKeyOverride).trim() !== '') ? apiKeyOverride.trim() : (this.apiKey || process.env.OLLAMA_API_KEY || '');
+    let activeHost = (hostOverride && String(hostOverride).trim() !== '') ? hostOverride.trim() : (this.host || 'https://ollama.com');
+    if (activeHost === 'https://api.ollama.com') activeHost = 'https://ollama.com';
+
+    const fallbackText = '¡Hola! 👋 Un gusto saludarte, soy TesiBot Perú. Cuéntame, ¿qué tema o problema te gustaría desarrollar en tu tesis? Así puedo ayudarte a evaluar qué tan viable es. 🎓';
+
+    if (!activeApiKey && !activeHost.includes('localhost') && !activeHost.includes('127.0.0.1')) {
+      return { text: fallbackText, source: 'fallback' };
+    }
+
+    const systemPrompt = `Eres "TesiBot", un asesor humano cálido y experto en tesis universitarias en Perú (regulación SUNEDU/CONCYTEC), atendiendo por WhatsApp a un contacto que recién escribe por primera vez.
+Reglas estrictas:
+- No digas que eres una IA, un bot o un asistente virtual; responde como lo haría un asesor humano real.
+- Máximo 4 líneas de texto, cercano, empático y natural, sin sonar robótico ni usar listas.
+- Primero reconoce brevemente, en tus propias palabras, lo que la persona escribió.
+- Termina SIEMPRE con una sola pregunta clara que la invite a contarte su tema o problema de tesis, para poder ayudarla a evaluar su viabilidad.
+- Responde solo con el texto del mensaje de WhatsApp, sin comillas, sin JSON, sin encabezados. Puedes usar 1-2 emojis como máximo.`;
+
+    const userPrompt = `Esto es lo que escribió el contacto al iniciar la conversación:\n"""${firstMessageText}"""\n\nEscribe el mensaje de bienvenida siguiendo las reglas.`;
+
+    try {
+      const generateUrl = this.getApiUrl(activeHost, '/generate');
+      console.log(`🤖 [Ollama Cloud LLM] Generando saludo de bienvenida en ${generateUrl} (${this.chatModel})...`);
+
+      const response = await fetch(generateUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(activeApiKey ? { 'Authorization': `Bearer ${activeApiKey}` } : {})
+        },
+        body: JSON.stringify({
+          model: this.chatModel,
+          prompt: `${systemPrompt}\n\n${userPrompt}`,
+          stream: false
+        }),
+        signal: AbortSignal.timeout(15000)
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        console.warn(`⚠️ [Ollama Cloud LLM Error] saludo de bienvenida: ${errText.substring(0, 150)}`);
+        return { text: fallbackText, source: 'fallback' };
+      }
+
+      const data = await response.json();
+      const text = (data.response || '').trim().replace(/^["']|["']$/g, '');
+      if (!text) return { text: fallbackText, source: 'fallback' };
+
+      console.log(`✅ [Ollama Cloud LLM] Saludo de bienvenida generado por ${this.chatModel}`);
+      return { text, source: 'llm' };
+    } catch (err) {
+      console.warn('Ollama Cloud LLM welcome message notice:', err.message);
+      return { text: fallbackText, source: 'fallback' };
+    }
+  }
+
+  /**
    * Genera una evaluación estructurada de alta precisión cuando no hay API Key activa
    */
   generateStructuredHeuristicEvaluation(topic, academicLevel, fieldOfStudy, topPriority) {

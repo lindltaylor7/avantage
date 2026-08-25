@@ -12,8 +12,11 @@ const BOT_DELAY_MAX_MS = Number(process.env.WHATSAPP_BOT_DELAY_MAX_MS) || 3500;
 // (creada antes de que el guion fuera configurable).
 const LEGACY_STEP_ORDER = ['problem', 'location', 'level', 'field', 'email'];
 
-const GREETING_INTRO = '¡Hola! 👋 Soy TesiBot Perú, tu asistente académico con inteligencia artificial.\n\n' +
-  'Voy a hacerte algunas preguntas breves para formular y evaluar la viabilidad de tu tema de tesis en Perú.';
+// Cuando un contacto nuevo escribe, suele hacerlo en varias burbujas seguidas
+// (p. ej. "Hola" y luego, unos segundos después, el tema real). En vez de
+// responder a la primera burbuja al instante, se espera este tiempo de
+// silencio para juntar todo en un solo mensaje antes de mandarlo al LLM.
+const FIRST_MESSAGE_DEBOUNCE_MS = Number(process.env.WHATSAPP_BOT_FIRST_MESSAGE_DEBOUNCE_MS) || 5000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -69,6 +72,10 @@ export class WhatsappBotService {
     this.leadService = leadService;
     this.whatsappMessageService = whatsappMessageService;
     this.stepService = stepService || new WhatsappBotStepService();
+    // wa_id -> { messages: string[], timer: NodeJS.Timeout }, buffer temporal
+    // de los primeros mensajes de un contacto nuevo mientras se espera el
+    // silencio de FIRST_MESSAGE_DEBOUNCE_MS antes de iniciar la sesión.
+    this.pendingFirstMessages = new Map();
   }
 
   async getSession(waId) {
@@ -99,26 +106,18 @@ export class WhatsappBotService {
    * activa (según el guion configurado en ese momento).
    */
   async handleIncomingMessage(waId, text) {
+    // Si ya hay un buffer de "primer contacto" en curso para este wa_id, esta
+    // burbuja se suma a las anteriores y se reinicia la espera de silencio,
+    // en vez de arrancar una sesión por cada mensaje suelto.
+    if (this.pendingFirstMessages.has(waId)) {
+      this.bufferFirstMessage(waId, text);
+      return;
+    }
+
     const session = await this.getSession(waId);
 
     if (!session) {
-      const activeSteps = await this.stepService.getActiveOrdered();
-      if (activeSteps.length === 0) {
-        console.warn('⚠️ [WhatsApp Bot] No hay preguntas activas configuradas, no se puede iniciar el flujo.');
-        return;
-      }
-
-      const stepSequence = activeSteps.map((s) => s.step_key);
-      await db('whatsapp_bot_sessions').insert({
-        wa_id: waId,
-        step: 0,
-        status: 'active',
-        bot_enabled: true,
-        answers: JSON.stringify({}),
-        step_sequence: JSON.stringify(stepSequence)
-      });
-
-      await this.send(waId, `${GREETING_INTRO}\n\n${formatQuestion(activeSteps[0], 1, stepSequence.length)}`);
+      this.bufferFirstMessage(waId, text);
       return;
     }
 
@@ -165,6 +164,55 @@ export class WhatsappBotService {
     await this.updateSession(waId, { step: nextIndex, answers: JSON.stringify(answers) });
     const nextStep = await this.stepService.getByKey(stepSequence[nextIndex]);
     await this.send(waId, formatQuestion(nextStep, nextIndex + 1, stepSequence.length));
+  }
+
+  /**
+   * Agrega una burbuja al buffer de "primer contacto" de este wa_id y
+   * reinicia el temporizador de silencio. Cuando el contacto deja de escribir
+   * por FIRST_MESSAGE_DEBOUNCE_MS, se dispara startConversation() con todo lo
+   * acumulado unido en un solo texto.
+   */
+  bufferFirstMessage(waId, text) {
+    const pending = this.pendingFirstMessages.get(waId) || { messages: [], timer: null };
+    if (text && text.trim()) pending.messages.push(text.trim());
+
+    if (pending.timer) clearTimeout(pending.timer);
+    pending.timer = setTimeout(() => {
+      this.pendingFirstMessages.delete(waId);
+      this.startConversation(waId, pending.messages.join('\n')).catch((error) => {
+        console.error(`❌ [WhatsApp Bot] Error al iniciar la conversación con ${waId}:`, error);
+      });
+    }, FIRST_MESSAGE_DEBOUNCE_MS);
+
+    this.pendingFirstMessages.set(waId, pending);
+  }
+
+  /**
+   * Arranca la sesión de un contacto nuevo: genera con el LLM de Ollama Cloud
+   * un saludo humanizado (a partir de todo lo que escribió en sus primeras
+   * burbujas) que cierra con una pregunta que lo dirige al guion, y deja la
+   * sesión lista en el paso 0 para que la siguiente respuesta del contacto se
+   * procese como la respuesta a la primera pregunta activa.
+   */
+  async startConversation(waId, joinedFirstMessage) {
+    const activeSteps = await this.stepService.getActiveOrdered();
+    if (activeSteps.length === 0) {
+      console.warn('⚠️ [WhatsApp Bot] No hay preguntas activas configuradas, no se puede iniciar el flujo.');
+      return;
+    }
+
+    const stepSequence = activeSteps.map((s) => s.step_key);
+    await db('whatsapp_bot_sessions').insert({
+      wa_id: waId,
+      step: 0,
+      status: 'active',
+      bot_enabled: true,
+      answers: JSON.stringify({}),
+      step_sequence: JSON.stringify(stepSequence)
+    });
+
+    const welcome = await this.ollamaService.generateWelcomeMessage(joinedFirstMessage);
+    await this.send(waId, welcome.text);
   }
 
   /**
