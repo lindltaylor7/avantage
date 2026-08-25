@@ -48,6 +48,18 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
+
+
+app.use((req, res, next) => {
+  if (req.path.includes('webhooks/instagram') && req.method === 'POST') {
+    console.log('content-length header:', req.headers['content-length']);
+    console.log('content-type header:', req.headers['content-type']);
+    console.log('transfer-encoding:', req.headers['transfer-encoding']);
+  }
+  next();
+});
+
+
 // Se conserva el body crudo (rawBody) para poder validar la firma
 // X-Hub-Signature-256 de los webhooks de Meta.
 app.use(express.json({
