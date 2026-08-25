@@ -591,6 +591,19 @@ app.get('/api/instagram/stats', requireAuth, requirePermission('leads.view'), as
 });
 
 /**
+ * Estado (sin exponer valores secretos) de las credenciales necesarias para
+ * que el panel de Instagram muestre datos reales de la Graph API.
+ */
+app.get('/api/instagram/config-status', requireAuth, requirePermission('leads.view'), (req, res) => {
+  res.json({
+    hasPageAccessToken: !!process.env.META_PAGE_ACCESS_TOKEN,
+    hasInstagramAccountId: !!process.env.META_INSTAGRAM_ACCOUNT_ID,
+    hasAppSecret: !!process.env.META_APP_SECRET,
+    hasVerifyToken: !!(process.env.META_INSTAGRAM_VERIFY_TOKEN || process.env.META_VERIFY_TOKEN)
+  });
+});
+
+/**
  * Verificación del webhook de Instagram (Graph API / Instagram Messaging / Comments).
  * Meta llama a este endpoint por GET al configurar la suscripción del webhook.
  */

@@ -21,40 +21,63 @@
 
     <p v-if="errorMessage" class="info-box alert-box">⚠️ {{ errorMessage }}</p>
 
-    <!-- Tarjeta de Estado de Conexión si no está configurado el Token -->
-    <div v-if="profile && !profile.connected" class="info-box" style="border-color: rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.08); margin-bottom: 1.5rem;">
-      <div style="display: flex; align-items: flex-start; gap: 0.75rem;">
-        <span style="font-size: 1.4rem;">🔑</span>
+    <!-- Estado de conexión: adaptativo según si hay datos reales o no -->
+    <section v-if="profile && !profile.connected" class="ig-connect-card">
+      <div class="ig-connect-header">
+        <span class="ig-connect-icon">🔑</span>
         <div>
-          <strong style="color: var(--accent-amber);">Instagram Graph API desconectado</strong>
-          <p style="margin: 0.25rem 0 0; color: var(--text-sub); font-size: 0.85rem; line-height: 1.45;">
-            {{ profile.error || 'Configura META_PAGE_ACCESS_TOKEN en tu archivo .env para extraer en vivo los seguidores, publicaciones y comentarios de @grupo.avantage.' }}
-          </p>
+          <strong class="ig-connect-title">Instagram Graph API no conectado</strong>
+          <p class="ig-connect-reason">{{ profile.error || 'Falta configurar las credenciales de Meta.' }}</p>
         </div>
       </div>
-    </div>
 
-    <!-- Tarjeta de Perfil de Instagram Conectado -->
-    <section class="ig-profile-card">
+      <ul class="ig-connect-checklist" v-if="configStatus">
+        <li :class="configStatus.hasPageAccessToken ? 'ok' : 'missing'">
+          {{ configStatus.hasPageAccessToken ? '✅' : '❌' }} <code>META_PAGE_ACCESS_TOKEN</code>
+          <span class="ig-connect-hint">token de la Página, con permisos instagram_basic, instagram_manage_comments, pages_read_engagement y business_management</span>
+        </li>
+        <li :class="configStatus.hasInstagramAccountId ? 'ok' : 'optional'">
+          {{ configStatus.hasInstagramAccountId ? '✅' : '➖' }} <code>META_INSTAGRAM_ACCOUNT_ID</code>
+          <span class="ig-connect-hint">opcional: solo si no se puede resolver automáticamente desde el token</span>
+        </li>
+        <li :class="configStatus.hasAppSecret ? 'ok' : 'missing'">
+          {{ configStatus.hasAppSecret ? '✅' : '❌' }} <code>META_APP_SECRET</code>
+          <span class="ig-connect-hint">valida la firma de los webhooks entrantes de comentarios/mensajes</span>
+        </li>
+      </ul>
+
+      <p class="ig-connect-steps">
+        1) En Meta Business Suite, vincula tu cuenta de Instagram Profesional a tu Página de Facebook.
+        2) Genera un token de Página con los permisos de arriba (Meta Developers → Graph API Explorer, o "Inicio de sesión con Facebook para empresas").
+        3) Pega el token en <code>META_PAGE_ACCESS_TOKEN</code> dentro de tu <code>.env</code> y reinicia el servidor.
+      </p>
+    </section>
+
+    <section v-else-if="profile?.connected" class="ig-connected-bar">
+      ✅ Conectado a la Graph API como <strong>@{{ profile.username }}</strong> — mostrando datos reales.
+    </section>
+
+    <!-- Tarjeta de Perfil de Instagram (solo con datos reales) -->
+    <section v-if="profile?.connected" class="ig-profile-card">
       <div class="ig-profile-main">
         <div class="ig-avatar-wrapper">
           <div class="ig-avatar-gradient-ring">
-            <div class="ig-avatar-inner">
+            <img v-if="profile.profile_picture_url" :src="profile.profile_picture_url" alt="" class="ig-avatar-img" />
+            <div v-else class="ig-avatar-inner">
               <span class="ig-avatar-emoji">📸</span>
             </div>
           </div>
-          <span class="ig-status-dot" :class="{ connected: profile?.connected }" :title="profile?.connected ? 'Conectado a Graph API en vivo' : 'Token no configurado'"></span>
+          <span class="ig-status-dot connected" title="Conectado a Graph API en vivo"></span>
         </div>
 
         <div class="ig-profile-info">
           <div class="ig-username-row">
-            <h3 class="ig-username">@{{ profile?.username || 'grupo.avantage' }}</h3>
-            <span class="ig-badge-verified" title="Cuenta Comercial Verificada">✓</span>
-            <span class="ig-badge-type">{{ profile?.connected ? 'Instagram Business En Vivo' : 'Cuenta Pendiente de Token' }}</span>
+            <h3 class="ig-username">@{{ profile.username }}</h3>
+            <span class="ig-badge-type">Instagram Business En Vivo</span>
           </div>
-          <h4 class="ig-display-name">{{ profile?.name || 'Avantage Group' }}</h4>
-          <p class="ig-bio" v-if="profile?.biography">{{ profile.biography }}</p>
-          <a v-if="profile?.website" :href="profile.website" target="_blank" rel="noopener" class="ig-website-link">
+          <h4 class="ig-display-name">{{ profile.name }}</h4>
+          <p class="ig-bio" v-if="profile.biography">{{ profile.biography }}</p>
+          <a v-if="profile.website" :href="profile.website" target="_blank" rel="noopener" class="ig-website-link">
             🔗 {{ profile.website }}
           </a>
         </div>
@@ -62,15 +85,15 @@
 
       <div class="ig-profile-metrics">
         <div class="metric-box">
-          <span class="metric-num">{{ profile?.followers_count?.toLocaleString() ?? 0 }}</span>
+          <span class="metric-num">{{ profile.followers_count?.toLocaleString() ?? 0 }}</span>
           <span class="metric-label">Seguidores</span>
         </div>
         <div class="metric-box">
-          <span class="metric-num">{{ profile?.follows_count?.toLocaleString() ?? 0 }}</span>
+          <span class="metric-num">{{ profile.follows_count?.toLocaleString() ?? 0 }}</span>
           <span class="metric-label">Seguidos</span>
         </div>
         <div class="metric-box">
-          <span class="metric-num">{{ profile?.media_count ?? 0 }}</span>
+          <span class="metric-num">{{ profile.media_count ?? 0 }}</span>
           <span class="metric-label">Publicaciones</span>
         </div>
       </div>
@@ -106,21 +129,6 @@
           <span class="stat-value">{{ stats.dms || 0 }}</span>
         </div>
       </div>
-    </section>
-
-    <!-- Guía de Configuración Rápida en Meta -->
-    <section class="info-box ig-info-panel">
-      <div class="ig-info-header">
-        <h4>📋 Configuración de Instagram Graph API & Webhook</h4>
-        <button class="toggle-guide-btn" @click="showGuide = !showGuide">
-          {{ showGuide ? 'Ocultar Guía' : 'Ver Guía de Conexión' }}
-        </button>
-      </div>
-      <ul v-if="showGuide" class="ig-guide-list">
-        <li>Vincula tu cuenta de <strong>Instagram Profesional</strong> con tu Página de Facebook en el Meta Business Suite.</li>
-        <li>En la App de Meta Developers, suscribe los campos: <code>instagram_comments</code>, <code>mentions</code> y <code>messages</code>.</li>
-        <li>Los leads generados por <strong>Instagram Ads</strong> o <strong>DMs de Instagram</strong> se dirigen automáticamente a la primera columna de tu <strong><router-link to="/admin/setter-funnel" style="color: #F472B6; font-weight: bold;">Setter Funnel 🎯</router-link></strong>.</li>
-      </ul>
     </section>
 
     <!-- Filtro por Tipo de Interacción -->
@@ -269,13 +277,13 @@ const TYPE_FILTERS = [
 
 const activeTab = ref('interactions');
 const profile = ref(null);
+const configStatus = ref(null);
 const interactions = ref([]);
 const mediaList = ref([]);
 const stats = ref({ total: 0, comments: 0, mentions: 0, dms: 0, reactions: 0 });
 const isLoading = ref(false);
 const errorMessage = ref('');
 const selectedType = ref(null);
-const showGuide = ref(false);
 
 async function fetchProfile() {
   try {
@@ -286,6 +294,16 @@ async function fetchProfile() {
     }
   } catch (err) {
     console.warn('Error al cargar perfil de Instagram:', err);
+  }
+}
+
+async function fetchConfigStatus() {
+  try {
+    const res = await apiFetch('/api/instagram/config-status');
+    const data = await res.json();
+    if (res.ok) configStatus.value = data;
+  } catch (err) {
+    console.warn('Error al cargar el estado de configuración de Instagram:', err);
   }
 }
 
@@ -320,7 +338,7 @@ async function fetchMedia() {
 }
 
 async function fetchAll() {
-  await Promise.all([fetchProfile(), fetchInteractions(), fetchMedia()]);
+  await Promise.all([fetchProfile(), fetchConfigStatus(), fetchInteractions(), fetchMedia()]);
 }
 
 function getUserInitial(name) {
@@ -537,19 +555,6 @@ onMounted(fetchAll);
   margin: 0;
 }
 
-.ig-badge-verified {
-  background: #3897F0;
-  color: #fff;
-  font-size: 0.68rem;
-  font-weight: 900;
-  border-radius: 50%;
-  width: 16px;
-  height: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
 .ig-badge-type {
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid var(--border-color);
@@ -670,40 +675,84 @@ onMounted(fetchAll);
   line-height: 1.2;
 }
 
-/* Panel de Guía */
-.ig-info-panel {
+/* Tarjeta de conexión (desconectado) */
+.ig-connect-card {
+  background: rgba(245, 158, 11, 0.06);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 16px;
+  padding: 1.1rem 1.25rem;
   margin-bottom: 1.5rem;
-  border-color: rgba(220, 39, 67, 0.3);
 }
 
-.ig-info-header {
+.ig-connect-header {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  gap: 0.75rem;
 }
 
-.ig-info-header h4 {
-  margin: 0;
+.ig-connect-icon {
+  font-size: 1.4rem;
+}
+
+.ig-connect-title {
+  color: var(--accent-amber);
   font-size: 0.95rem;
-  color: #F472B6;
 }
 
-.toggle-guide-btn {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid var(--border-color);
+.ig-connect-reason {
+  margin: 0.25rem 0 0;
   color: var(--text-sub);
-  padding: 0.3rem 0.75rem;
-  border-radius: 8px;
-  font-size: 0.78rem;
-  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1.45;
 }
 
-.ig-guide-list {
-  margin: 0.75rem 0 0;
-  padding-left: 1.25rem;
-  font-size: 0.85rem;
+.ig-connect-checklist {
+  list-style: none;
+  margin: 0.9rem 0 0;
+  padding: 0.85rem 1rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+}
+
+.ig-connect-checklist li.ok { color: var(--accent-emerald, #10B981); }
+.ig-connect-checklist li.missing { color: #fca5a5; }
+.ig-connect-checklist li.optional { color: var(--text-muted); }
+
+.ig-connect-hint {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  margin-top: 0.15rem;
+  margin-left: 1.4rem;
+}
+
+.ig-connect-steps {
+  margin: 0.9rem 0 0;
+  font-size: 0.82rem;
   color: var(--text-sub);
   line-height: 1.6;
+}
+
+/* Barra de conectado */
+.ig-connected-bar {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #34D399;
+  border-radius: 12px;
+  padding: 0.65rem 1rem;
+  font-size: 0.85rem;
+  margin-bottom: 1.5rem;
+}
+
+.ig-avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
 }
 
 /* Toolbar & Tabs */
