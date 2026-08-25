@@ -62,6 +62,21 @@
 
         <router-link
           v-if="hasPermission('leads.view')"
+          to="/admin/campaigns"
+          class="nav-item"
+          :class="{ 'is-active': $route.path === '/admin/campaigns' }"
+          @click="closeMobile"
+        >
+          <svg class="nav-icon" style="color: var(--accent-amber);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 11v2a1 1 0 0 0 1 1h3l4 4V6L7 10H4a1 1 0 0 0-1 1z"/>
+            <path d="M17 8a5 5 0 0 1 0 8"/>
+            <path d="M20 5a9 9 0 0 1 0 14"/>
+          </svg>
+          <span class="nav-label" v-if="!isCollapsed">Campañas</span>
+        </router-link>
+
+        <router-link
+          v-if="hasPermission('leads.view')"
           to="/admin/webhooks"
           class="nav-item"
           :class="{ 'is-active': $route.path === '/admin/webhooks' }"

@@ -223,6 +223,7 @@ const currentPageTitle = computed(() => {
   if (route.path === '/admin/database') return 'Base de Datos de Leads';
   if (route.path === '/admin/leads') return 'Funnel de Leads';
   if (route.path === '/admin/setter-funnel') return 'Setter Funnel';
+  if (route.path === '/admin/campaigns') return 'Campañas';
   if (route.path === '/admin/instagram') return 'Interacciones de Instagram';
   if (route.path === '/admin/social') return 'Interacciones de Facebook';
   if (route.path.startsWith('/admin/projects')) return 'Gestión de Proyectos';

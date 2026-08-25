@@ -14,6 +14,7 @@ import AvailabilityView from '../views/AvailabilityView.vue';
 import BotScriptView from '../views/BotScriptView.vue';
 import SetterFunnelView from '../views/SetterFunnelView.vue';
 import InstagramInteractionsView from '../views/InstagramInteractionsView.vue';
+import CampaignsView from '../views/CampaignsView.vue';
 import { isAuthenticated, hasPermission } from '../auth.js';
 
 const router = createRouter({
@@ -31,6 +32,7 @@ const router = createRouter({
     { path: '/admin/webhooks', name: 'webhooks', component: MetaWebhookTestView, meta: { requiresAuth: true, permission: 'leads.view' } },
     { path: '/admin/social', name: 'social', component: SocialInteractionsView, meta: { requiresAuth: true, permission: 'leads.view' } },
     { path: '/admin/instagram', name: 'instagram', component: InstagramInteractionsView, meta: { requiresAuth: true, permission: 'leads.view' } },
+    { path: '/admin/campaigns', name: 'campaigns', component: CampaignsView, meta: { requiresAuth: true, permission: 'leads.view' } },
     { path: '/admin/whatsapp', name: 'whatsapp', component: WhatsAppView, meta: { requiresAuth: true, permission: 'leads.view' } },
     { path: '/admin/availability', name: 'availability', component: AvailabilityView, meta: { requiresAuth: true } },
     { path: '/admin/bot-script', name: 'bot-script', component: BotScriptView, meta: { requiresAuth: true, permission: 'leads.view' } }
