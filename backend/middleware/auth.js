@@ -41,3 +41,18 @@ export function requirePermission(key) {
     next();
   };
 }
+
+/**
+ * Token corto (10 min) que viaja como `state` en el flujo OAuth de Google:
+ * identifica a qué usuario pertenece la conexión cuando Google redirige de
+ * vuelta a /api/google/callback, un request de navegador plano que no lleva
+ * el header Authorization de la sesión.
+ */
+export function signGoogleOAuthState(userId) {
+  return jwt.sign({ userId }, JWT_SECRET, { expiresIn: '10m' });
+}
+
+export function verifyGoogleOAuthState(state) {
+  const payload = jwt.verify(state, JWT_SECRET);
+  return payload.userId;
+}

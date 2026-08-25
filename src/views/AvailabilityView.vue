@@ -24,6 +24,44 @@
     <p v-if="errorMessage" class="info-box alert-box">⚠️ {{ errorMessage }}</p>
     <p v-if="savedMessage" class="info-box success-box">✅ {{ savedMessage }}</p>
 
+    <!-- Conexión con Google Calendar -->
+    <section class="google-card" :class="{ connected: googleStatus.connected }">
+      <div class="google-card-main">
+        <span class="google-icon">📅</span>
+        <div class="google-info">
+          <strong class="google-title">Google Calendar</strong>
+          <span v-if="!googleStatus.configured" class="google-sub">
+            El servidor todavía no tiene configuradas las credenciales de Google (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).
+          </span>
+          <span v-else-if="googleStatus.connected" class="google-sub">
+            Conectado como <strong>{{ googleStatus.email }}</strong>. Las reuniones que se agenden contigo se crearán ahí, con link de Google Meet.
+          </span>
+          <span v-else class="google-sub">
+            Conecta tu cuenta de Google para que las reuniones agendadas contigo generen automáticamente un link de Google Meet en tu propio calendario.
+          </span>
+        </div>
+      </div>
+
+      <div class="google-actions">
+        <template v-if="googleStatus.connected">
+          <button class="btn-action-secondary" @click="testGoogleConnection" :disabled="isTestingGoogle">
+            {{ isTestingGoogle ? 'Probando...' : '🧪 Probar conexión' }}
+          </button>
+          <button class="btn-action-ghost" @click="disconnectGoogle" :disabled="isTestingGoogle">
+            Desconectar
+          </button>
+        </template>
+        <button v-else class="btn-action-primary" @click="connectGoogle" :disabled="!googleStatus.configured || isConnectingGoogle">
+          {{ isConnectingGoogle ? 'Redirigiendo...' : '🔗 Conectar Google Calendar' }}
+        </button>
+      </div>
+    </section>
+
+    <p v-if="googleTestResult" class="info-box success-box">
+      ✅ Evento de prueba creado. Link de Meet:
+      <a :href="googleTestResult.meetLink" target="_blank" rel="noopener">{{ googleTestResult.meetLink }}</a>
+    </p>
+
     <!-- Atajos rápidos -->
     <section class="presets-row">
       <span class="presets-label">Atajos:</span>
@@ -115,6 +153,11 @@ const paintValue = ref(true);
 const isSaving = ref(false);
 const errorMessage = ref('');
 const savedMessage = ref('');
+
+const googleStatus = ref({ configured: false, connected: false, email: null });
+const isConnectingGoogle = ref(false);
+const isTestingGoogle = ref(false);
+const googleTestResult = ref(null);
 
 const gridStyle = computed(() => ({
   gridTemplateColumns: `70px repeat(${DAYS.length}, 1fr)`
@@ -250,8 +293,76 @@ function handleGlobalMouseUp() {
   stopPaint();
 }
 
+async function fetchGoogleStatus() {
+  try {
+    const response = await apiFetch('/api/google/status');
+    const data = await response.json();
+    if (response.ok) googleStatus.value = data;
+  } catch (error) {
+    console.warn('No se pudo obtener el estado de Google Calendar:', error);
+  }
+}
+
+async function connectGoogle() {
+  isConnectingGoogle.value = true;
+  errorMessage.value = '';
+  try {
+    const response = await apiFetch('/api/google/auth-url');
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No se pudo iniciar la conexión con Google.');
+    window.location.href = data.url;
+  } catch (error) {
+    errorMessage.value = error.message;
+    isConnectingGoogle.value = false;
+  }
+}
+
+async function disconnectGoogle() {
+  if (!confirm('¿Desconectar tu Google Calendar? Las reuniones agendadas contigo dejarán de crear eventos en tu calendario hasta que vuelvas a conectarlo.')) return;
+  try {
+    const response = await apiFetch('/api/google/disconnect', { method: 'DELETE' });
+    if (!response.ok) throw new Error('No se pudo desconectar Google Calendar.');
+    googleTestResult.value = null;
+    await fetchGoogleStatus();
+  } catch (error) {
+    errorMessage.value = error.message;
+  }
+}
+
+async function testGoogleConnection() {
+  isTestingGoogle.value = true;
+  errorMessage.value = '';
+  googleTestResult.value = null;
+  try {
+    const response = await apiFetch('/api/google/test-event', { method: 'POST' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No se pudo crear el evento de prueba.');
+    googleTestResult.value = data.event;
+  } catch (error) {
+    errorMessage.value = error.message;
+  } finally {
+    isTestingGoogle.value = false;
+  }
+}
+
+function consumeGoogleRedirectResult() {
+  const params = new URLSearchParams(window.location.search);
+  const result = params.get('google');
+  if (!result) return;
+
+  if (result === 'connected') savedMessage.value = 'Tu Google Calendar quedó conectado correctamente.';
+  else if (result === 'denied') errorMessage.value = 'Cancelaste el permiso en Google, no se conectó tu calendario.';
+  else if (result === 'error') errorMessage.value = 'Ocurrió un error al conectar con Google. Intenta de nuevo.';
+
+  params.delete('google');
+  const newUrl = window.location.pathname + (params.toString() ? `?${params.toString()}` : '');
+  window.history.replaceState({}, '', newUrl);
+}
+
 onMounted(() => {
+  consumeGoogleRedirectResult();
   fetchAvailability();
+  fetchGoogleStatus();
   window.addEventListener('mouseup', handleGlobalMouseUp);
 });
 
@@ -335,6 +446,34 @@ onUnmounted(() => {
   background: var(--surface-3);
 }
 
+.btn-action-secondary:disabled,
+.btn-action-primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn-action-ghost {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-sub);
+  padding: 0.6rem 1rem;
+  border-radius: 10px;
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-action-ghost:hover:not(:disabled) {
+  color: var(--text-main);
+  background: var(--surface-2);
+}
+
+.btn-action-ghost:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .alert-box {
   border-color: rgba(239, 68, 68, 0.4);
   color: #fca5a5;
@@ -343,6 +482,59 @@ onUnmounted(() => {
 .success-box {
   border-color: rgba(34, 197, 94, 0.4);
   color: #4ade80;
+}
+
+.google-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 1rem 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.google-card.connected {
+  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.06);
+}
+
+.google-card-main {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.google-icon {
+  font-size: 1.6rem;
+  flex-shrink: 0;
+}
+
+.google-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.google-title {
+  font-size: 0.92rem;
+  color: var(--text-main);
+}
+
+.google-sub {
+  font-size: 0.82rem;
+  color: var(--text-sub);
+  line-height: 1.4;
+}
+
+.google-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
 }
 
 .presets-row {

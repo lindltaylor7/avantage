@@ -24,7 +24,8 @@ import { WhatsappBotStepService } from './services/whatsappBotStepService.js';
 import { AdvisorAvailabilityService } from './services/advisorAvailabilityService.js';
 import { InstagramService } from './services/instagramService.js';
 import { InstagramWebhookService } from './services/instagramWebhookService.js';
-import { signToken, requireAuth, requirePermission } from './middleware/auth.js';
+import { GoogleCalendarService } from './services/googleCalendarService.js';
+import { signToken, requireAuth, requirePermission, signGoogleOAuthState, verifyGoogleOAuthState } from './middleware/auth.js';
 
 import { uploadProjectUpdateAttachment, uploadDir } from './middleware/upload.js';
 
@@ -90,6 +91,7 @@ const whatsappWebhookService = new WhatsappWebhookService({ botService: whatsapp
 const advisorAvailabilityService = new AdvisorAvailabilityService();
 const instagramService = new InstagramService();
 const instagramWebhookService = new InstagramWebhookService();
+const googleCalendarService = new GoogleCalendarService();
 
 // Historial en memoria de evaluaciones recientes
 
@@ -178,6 +180,106 @@ app.put('/api/availability/me', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('❌ Error al guardar la disponibilidad:', error);
     res.status(500).json({ error: 'Error al guardar la disponibilidad.', details: error.message });
+  }
+});
+
+/**
+ * Estado de la conexión del usuario autenticado con su Google Calendar
+ * (conectado/no conectado, y con qué correo si está conectado).
+ */
+app.get('/api/google/status', requireAuth, async (req, res) => {
+  try {
+    const configured = googleCalendarService.isConfigured();
+    const connection = configured ? await googleCalendarService.getConnection(req.user.id) : null;
+    res.json({
+      configured,
+      connected: !!connection,
+      email: connection?.google_email || null
+    });
+  } catch (error) {
+    console.error('❌ Error al obtener el estado de Google Calendar:', error);
+    res.status(500).json({ error: 'Error al obtener el estado de Google Calendar.', details: error.message });
+  }
+});
+
+/**
+ * URL de consentimiento de Google para que el usuario autenticado conecte su
+ * propio Google Calendar. El frontend navega el navegador completo a esta
+ * URL (no es una llamada fetch), por eso la identidad viaja en `state`.
+ */
+app.get('/api/google/auth-url', requireAuth, (req, res) => {
+  try {
+    if (!googleCalendarService.isConfigured()) {
+      return res.status(400).json({ error: 'Google Calendar no está configurado en el servidor todavía.' });
+    }
+    const state = signGoogleOAuthState(req.user.id);
+    const url = googleCalendarService.getAuthUrl(state);
+    res.json({ url });
+  } catch (error) {
+    console.error('❌ Error al generar la URL de conexión con Google:', error);
+    res.status(500).json({ error: 'Error al generar la URL de conexión con Google.', details: error.message });
+  }
+});
+
+/**
+ * Callback de Google tras el consentimiento. Es una redirección de
+ * navegador plana (sin header Authorization), así que la identidad del
+ * usuario se recupera validando el `state` firmado.
+ */
+app.get('/api/google/callback', async (req, res) => {
+  const frontendBase = process.env.APP_BASE_URL || '';
+  try {
+    const { code, state, error: oauthError } = req.query;
+    if (oauthError) {
+      return res.redirect(`${frontendBase}/admin/availability?google=denied`);
+    }
+    if (!code || !state) {
+      return res.redirect(`${frontendBase}/admin/availability?google=error`);
+    }
+
+    const userId = verifyGoogleOAuthState(state);
+    await googleCalendarService.saveConnectionFromCode(userId, code);
+
+    res.redirect(`${frontendBase}/admin/availability?google=connected`);
+  } catch (error) {
+    console.error('❌ Error en el callback de Google OAuth:', error);
+    res.redirect(`${frontendBase}/admin/availability?google=error`);
+  }
+});
+
+/**
+ * Desconecta el Google Calendar del usuario autenticado (revoca el token en
+ * Google y borra la conexión guardada).
+ */
+app.delete('/api/google/disconnect', requireAuth, async (req, res) => {
+  try {
+    await googleCalendarService.disconnect(req.user.id);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error al desconectar Google Calendar:', error);
+    res.status(500).json({ error: 'Error al desconectar Google Calendar.', details: error.message });
+  }
+});
+
+/**
+ * Crea un evento de prueba (10 min de duración, empieza en 5 min) en el
+ * Google Calendar del usuario autenticado, para confirmar que la conexión
+ * realmente genera un link de Google Meet funcional.
+ */
+app.post('/api/google/test-event', requireAuth, async (req, res) => {
+  try {
+    const start = new Date(Date.now() + 5 * 60 * 1000);
+    const end = new Date(start.getTime() + 10 * 60 * 1000);
+    const event = await googleCalendarService.createMeetEvent(req.user.id, {
+      summary: 'Prueba de conexión — Avantage Group',
+      description: 'Evento de prueba generado desde el panel de Disponibilidad para confirmar la conexión con Google Meet.',
+      startTime: start.toISOString(),
+      endTime: end.toISOString()
+    });
+    res.json({ event });
+  } catch (error) {
+    console.error('❌ Error al crear el evento de prueba en Google Calendar:', error);
+    res.status(500).json({ error: 'No se pudo crear el evento de prueba.', details: error.message });
   }
 });
 
