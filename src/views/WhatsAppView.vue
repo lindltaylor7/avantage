@@ -158,8 +158,11 @@
           "{{ entry.text }}"<br />
           <span class="activity-error">❌ {{ entry.error }}</span>
         </p>
-        <p v-else-if="entry.type === 'conversation_start_failed'" class="activity-text">
+        <p v-else-if="entry.type === 'conversation_turn_failed'" class="activity-text">
           <span class="activity-error">❌ {{ entry.error }}</span>
+        </p>
+        <p v-else-if="entry.type === 'scheduling_offer_skipped'" class="activity-text">
+          <span class="activity-error">🚫 {{ entry.reason }}</span>
         </p>
         <p v-else-if="entry.type === 'skipped'" class="activity-text">
           "{{ entry.text }}"<br />
@@ -323,7 +326,8 @@ const ACTIVITY_META = {
   llm_response: { icon: '💬', label: 'Respuesta del LLM', className: 'activity-llm' },
   send_success: { icon: '✅', label: 'Enviado por WhatsApp', className: 'activity-ok' },
   send_failed: { icon: '❌', label: 'Falló el envío por WhatsApp', className: 'activity-error-card' },
-  conversation_start_failed: { icon: '⚠️', label: 'Error al iniciar la conversación', className: 'activity-error-card' },
+  conversation_turn_failed: { icon: '⚠️', label: 'Error en el turno de conversación', className: 'activity-error-card' },
+  scheduling_offer_skipped: { icon: '📅', label: 'No se ofreció agendar', className: 'activity-error-card' },
   skipped: { icon: '🚫', label: 'El bot ignoró el mensaje', className: 'activity-error-card' },
   reset: { icon: '🔄', label: 'Conversación reiniciada', className: 'activity-ok' }
 };
