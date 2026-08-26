@@ -167,6 +167,20 @@
         </router-link>
 
         <router-link
+          v-if="hasPermission('finance.view')"
+          to="/admin/finance"
+          class="nav-item"
+          :class="{ 'is-active': $route.path === '/admin/finance' }"
+          @click="closeMobile"
+        >
+          <svg class="nav-icon" style="color: var(--accent-emerald);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="1" x2="12" y2="23"/>
+            <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+          </svg>
+          <span class="nav-label" v-if="!isCollapsed">Finanzas</span>
+        </router-link>
+
+        <router-link
           v-if="hasPermission('roles.manage')"
           to="/admin/roles"
           class="nav-item"

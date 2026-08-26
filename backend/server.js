@@ -27,6 +27,7 @@ import { InstagramWebhookService } from './services/instagramWebhookService.js';
 import { GoogleCalendarService } from './services/googleCalendarService.js';
 import { ScheduledMeetingService } from './services/scheduledMeetingService.js';
 import { NotificationService } from './services/notificationService.js';
+import { FinanceService } from './services/financeService.js';
 import { signToken, requireAuth, requirePermission, signGoogleOAuthState, verifyGoogleOAuthState } from './middleware/auth.js';
 
 import { uploadProjectUpdateAttachment, uploadDir } from './middleware/upload.js';
@@ -96,6 +97,7 @@ const whatsappBotSettingsService = new WhatsappBotSettingsService();
 const googleCalendarService = new GoogleCalendarService();
 const scheduledMeetingService = new ScheduledMeetingService();
 const notificationService = new NotificationService();
+const financeService = new FinanceService();
 const whatsappBotService = new WhatsappBotService({ ollamaService, emailService, leadService, whatsappMessageService, settingsService: whatsappBotSettingsService, googleCalendarService, scheduledMeetingService, notificationService });
 const whatsappWebhookService = new WhatsappWebhookService({ botService: whatsappBotService });
 const advisorAvailabilityService = new AdvisorAvailabilityService();
@@ -349,6 +351,66 @@ app.post('/api/notifications/read-all', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('❌ Error al marcar las notificaciones como leídas:', error);
     res.status(500).json({ error: 'Error al marcar las notificaciones como leídas.', details: error.message });
+  }
+});
+
+/**
+ * Finanzas: registro de ingresos y egresos del negocio, con resumen para
+ * los KPIs y gráficos del panel.
+ */
+app.get('/api/finance/transactions', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const { type, category, from, to, limit } = req.query;
+    const transactions = await financeService.list({
+      type,
+      category,
+      from,
+      to,
+      limit: limit ? Number(limit) : undefined
+    });
+    res.json({ transactions });
+  } catch (error) {
+    console.error('❌ Error al obtener las transacciones financieras:', error);
+    res.status(500).json({ error: 'Error al obtener las transacciones financieras.', details: error.message });
+  }
+});
+
+app.post('/api/finance/transactions', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const { type, category, description, amount, transactionDate, projectId } = req.body || {};
+    const transaction = await financeService.create({
+      type,
+      category,
+      description,
+      amount,
+      transactionDate,
+      projectId,
+      createdBy: req.user.id
+    });
+    res.status(201).json({ transaction });
+  } catch (error) {
+    console.error('❌ Error al registrar la transacción financiera:', error);
+    res.status(400).json({ error: error.message || 'Error al registrar la transacción financiera.' });
+  }
+});
+
+app.delete('/api/finance/transactions/:id', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    await financeService.delete(req.params.id);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error al eliminar la transacción financiera:', error);
+    res.status(500).json({ error: 'Error al eliminar la transacción financiera.', details: error.message });
+  }
+});
+
+app.get('/api/finance/summary', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const summary = await financeService.getSummary();
+    res.json(summary);
+  } catch (error) {
+    console.error('❌ Error al obtener el resumen financiero:', error);
+    res.status(500).json({ error: 'Error al obtener el resumen financiero.', details: error.message });
   }
 });
 
