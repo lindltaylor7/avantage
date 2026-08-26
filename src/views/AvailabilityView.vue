@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <main class="container-fluid availability-page-wrapper">
     <header class="availability-header">
       <div class="header-titles">
@@ -541,7 +541,7 @@ onUnmounted(() => {
 
 .success-box {
   border-color: rgba(34, 197, 94, 0.4);
-  color: #4FAE82;
+  color: #5FBE79;
 }
 
 .google-card {
@@ -557,8 +557,8 @@ onUnmounted(() => {
 }
 
 .google-card.connected {
-  border-color: rgba(47, 125, 90, 0.35);
-  background: rgba(47, 125, 90, 0.06);
+  border-color: rgba(46, 125, 70, 0.35);
+  background: rgba(46, 125, 70, 0.06);
 }
 
 .google-card-main {
@@ -653,7 +653,7 @@ onUnmounted(() => {
   justify-content: center;
   min-width: 74px;
   padding: 0.3rem 0.6rem;
-  background: rgba(76, 63, 145, 0.1);
+  background: rgba(111, 129, 37, 0.1);
   border-radius: 8px;
   flex-shrink: 0;
 }

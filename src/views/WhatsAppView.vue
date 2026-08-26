@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <main class="container-fluid whatsapp-page-wrapper">
     <header class="whatsapp-header">
       <div class="header-titles">
@@ -743,12 +743,12 @@ onUnmounted(() => {
 }
 
 .alert-box {
-  border-color: rgba(178, 58, 69, 0.4);
+  border-color: rgba(200, 85, 50, 0.4);
   color: var(--accent-rose);
 }
 
 .success-box {
-  border-color: rgba(47, 125, 90, 0.4);
+  border-color: rgba(46, 125, 70, 0.4);
   color: var(--accent-emerald);
 }
 
@@ -869,7 +869,7 @@ onUnmounted(() => {
 
 .contact-item.is-active {
   border-color: var(--primary);
-  background: rgba(76, 63, 145, 0.12);
+  background: rgba(111, 129, 37, 0.12);
 }
 
 .contact-avatar {
@@ -1006,12 +1006,12 @@ onUnmounted(() => {
 }
 
 .btn-bot-reset {
-  border-color: rgba(76, 63, 145, 0.4);
-  color: #A79AFF;
+  border-color: rgba(111, 129, 37, 0.4);
+  color: #B3CC66;
 }
 
 .btn-bot-reset:hover {
-  background: rgba(76, 63, 145, 0.12);
+  background: rgba(111, 129, 37, 0.12);
 }
 
 .thread-phone {
@@ -1171,7 +1171,7 @@ onUnmounted(() => {
 
 .badge-ok {
   background: rgba(34, 197, 94, 0.15);
-  color: #4FAE82;
+  color: #5FBE79;
 }
 
 .badge-error {
@@ -1193,8 +1193,8 @@ onUnmounted(() => {
 
 /* Config status banner */
 .config-status-banner {
-  background: rgba(178, 58, 69, 0.08);
-  border: 1px solid rgba(178, 58, 69, 0.3);
+  background: rgba(200, 85, 50, 0.08);
+  border: 1px solid rgba(200, 85, 50, 0.3);
   border-radius: 14px;
   padding: 1rem 1.1rem;
 }
@@ -1339,7 +1339,7 @@ onUnmounted(() => {
 }
 
 .activity-card.activity-llm {
-  border-left-color: #4C3F91;
+  border-left-color: #6F8125;
 }
 
 .activity-card.activity-ok {

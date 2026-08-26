@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="glass-panel chat-panel">
     <!-- Chat Header -->
     <div class="chat-header">
@@ -388,7 +388,7 @@ onMounted(() => {
   border-radius: 16px 16px 3px 16px;
   background: linear-gradient(135deg, var(--primary), var(--primary-hover));
   color: #FFFFFF;
-  box-shadow: 0 4px 14px rgba(76, 63, 145, 0.28);
+  box-shadow: 0 4px 14px rgba(111, 129, 37, 0.28);
 }
 
 .chat-bubble.is-bot {

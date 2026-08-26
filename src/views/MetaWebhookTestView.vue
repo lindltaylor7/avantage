@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <main class="container-fluid webhook-page-wrapper">
     <header class="webhook-header">
       <div class="header-titles">
@@ -317,7 +317,7 @@ onUnmounted(() => {
 
 .badge-ok {
   background: rgba(34, 197, 94, 0.15);
-  color: #4FAE82;
+  color: #5FBE79;
 }
 
 .badge-error {

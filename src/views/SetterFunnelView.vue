@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <main class="container-fluid kanban-page-wrapper">
     <!-- Header y Acciones Principales -->
     <header class="kanban-header">
@@ -189,7 +189,7 @@
             'is-final-column': col.final,
             'is-drag-over': hoveredColumn === col.key
           }"
-          :style="{ '--col-accent': col.color || '#2F6FB0' }"
+          :style="{ '--col-accent': col.color || '#56624A' }"
           @dragover.prevent="hoveredColumn = col.key"
           @dragleave="onColumnDragLeave(col.key)"
           @drop="onDrop(col.key)"
@@ -207,7 +207,7 @@
               </div>
               <span
                 class="col-count-badge"
-                :style="{ background: (col.color || '#2F6FB0') + '22', color: col.color || '#2F6FB0', borderColor: (col.color || '#2F6FB0') + '55' }"
+                :style="{ background: (col.color || '#56624A') + '22', color: col.color || '#56624A', borderColor: (col.color || '#56624A') + '55' }"
               >
                 {{ (filteredLeadsByColumn[col.key] || []).length }}
               </span>
@@ -774,7 +774,7 @@ const DEFAULT_SETTER_COLUMNS = [
     key: 'calificando',
     label: 'En Calificación',
     icon: '🎯',
-    color: '#4C3F91',
+    color: '#6F8125',
     final: false,
     position: 1
   },
@@ -798,7 +798,7 @@ const DEFAULT_SETTER_COLUMNS = [
     key: 'transferido_closer',
     label: 'Transferido a Closer',
     icon: '🤝',
-    color: '#2F6FB0',
+    color: '#56624A',
     final: false,
     position: 4
   },
@@ -826,7 +826,7 @@ const PRESET_COLORS = [
   { name: 'Cian', hex: '#2C8C99' },
   { name: 'Violeta', hex: '#4C3F91' },
   { name: 'Ámbar', hex: '#C9922E' },
-  { name: 'Azul', hex: '#2F6FB0' },
+  { name: 'Azul', hex: '#56624A' },
   { name: 'Esmeralda', hex: '#2F7D5A' },
   { name: 'Rosa', hex: '#B23A45' },
   { name: 'Índigo', hex: '#5560B0' },
@@ -1465,7 +1465,7 @@ onMounted(() => {
 
 /* Botones */
 .btn-action-primary {
-  background: linear-gradient(135deg, #2C8C99 0%, #2F6FB0 100%);
+  background: linear-gradient(135deg, #2C8C99 0%, #56624A 100%);
   color: #FFFFFF;
   border: none;
   padding: 0.65rem 1.25rem;
@@ -1477,12 +1477,12 @@ onMounted(() => {
   align-items: center;
   gap: 0.5rem;
   transition: all 0.25s ease;
-  box-shadow: 0 4px 14px rgba(44, 140, 153, 0.35);
+  box-shadow: 0 4px 14px rgba(158, 186, 75, 0.35);
 }
 
 .btn-action-primary:hover {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(44, 140, 153, 0.45);
+  box-shadow: 0 6px 20px rgba(158, 186, 75, 0.45);
 }
 
 .btn-action-secondary {
@@ -1579,11 +1579,11 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
-.stat-icon-wrapper.blue { background: rgba(76, 63, 145, 0.15); color: #2F6FB0; }
-.stat-icon-wrapper.green { background: rgba(47, 125, 90, 0.15); color: #2F7D5A; }
-.stat-icon-wrapper.purple { background: rgba(76, 63, 145, 0.15); color: #4C3F91; }
+.stat-icon-wrapper.blue { background: rgba(111, 129, 37, 0.15); color: #56624A; }
+.stat-icon-wrapper.green { background: rgba(46, 125, 70, 0.15); color: #2F7D5A; }
+.stat-icon-wrapper.purple { background: rgba(111, 129, 37, 0.15); color: #6F8125; }
 .stat-icon-wrapper.amber { background: rgba(201, 146, 46, 0.15); color: #C9922E; }
-.stat-icon-wrapper.cyan { background: rgba(44, 140, 153, 0.15); color: #2C8C99; }
+.stat-icon-wrapper.cyan { background: rgba(158, 186, 75, 0.15); color: #2C8C99; }
 
 .stat-info {
   display: flex;
@@ -1674,26 +1674,26 @@ onMounted(() => {
 }
 
 .channel-pill.active {
-  background: rgba(44, 140, 153, 0.2);
+  background: rgba(158, 186, 75, 0.2);
   border-color: #2C8C99;
   color: #5AAEB8;
 }
 
 .channel-pill.whatsapp-pill.active {
-  background: rgba(47, 125, 90, 0.22);
+  background: rgba(46, 125, 70, 0.22);
   border-color: #2F7D5A;
   color: var(--accent-emerald);
 }
 
 .channel-pill.fb-pill.active {
-  background: rgba(76, 63, 145, 0.22);
-  border-color: #2F6FB0;
+  background: rgba(111, 129, 37, 0.22);
+  border-color: #56624A;
   color: var(--accent-cyan);
 }
 
 .channel-pill.ig-pill.active {
-  background: rgba(156, 79, 124, 0.22);
-  border-color: #9C4F7C;
+  background: rgba(138, 63, 40, 0.22);
+  border-color: #8A3F28;
   color: var(--accent-pink);
 }
 
@@ -1772,7 +1772,7 @@ onMounted(() => {
 
 /* Toast de Proyecto Creado */
 .project-created-banner {
-  background: linear-gradient(135deg, rgba(47, 125, 90, 0.2) 0%, rgba(44, 140, 153, 0.2) 100%);
+  background: linear-gradient(135deg, rgba(46, 125, 70, 0.2) 0%, rgba(158, 186, 75, 0.2) 100%);
   border: 1px solid #2F7D5A;
   border-radius: 14px;
   padding: 0.9rem 1.25rem;
@@ -1781,7 +1781,7 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  box-shadow: 0 10px 30px -10px rgba(47, 125, 90, 0.4);
+  box-shadow: 0 10px 30px -10px rgba(46, 125, 70, 0.4);
 }
 
 .banner-content {
@@ -1856,14 +1856,14 @@ onMounted(() => {
 }
 
 .kanban-column.is-first-setter-col {
-  border-color: rgba(44, 140, 153, 0.4);
-  background: linear-gradient(180deg, rgba(44, 140, 153, 0.06) 0%, var(--bg-card) 20%);
+  border-color: rgba(158, 186, 75, 0.4);
+  background: linear-gradient(180deg, rgba(158, 186, 75, 0.06) 0%, var(--bg-card) 20%);
 }
 
 .kanban-column.is-drag-over {
   border-color: var(--col-accent);
   transform: scale(1.01);
-  box-shadow: 0 0 25px rgba(44, 140, 153, 0.35);
+  box-shadow: 0 0 25px rgba(158, 186, 75, 0.35);
 }
 
 .column-top-accent {
@@ -1958,7 +1958,7 @@ onMounted(() => {
 
 .col-menu-btn.delete-btn:hover {
   color: var(--accent-rose);
-  background: rgba(178, 58, 69, 0.15);
+  background: rgba(200, 85, 50, 0.15);
 }
 
 /* Cuerpo de la Columna y Tarjetas */
@@ -1996,11 +1996,11 @@ onMounted(() => {
 }
 
 .kanban-lead-card.channel-fb-border {
-  border-left: 3px solid #2F6FB0;
+  border-left: 3px solid #56624A;
 }
 
 .kanban-lead-card.channel-ig-border {
-  border-left: 3px solid #9C4F7C;
+  border-left: 3px solid #8A3F28;
 }
 
 .kanban-lead-card.is-being-dragged {
@@ -2037,21 +2037,21 @@ onMounted(() => {
 }
 
 .channel-tag-badge.channel-whatsapp {
-  background: rgba(47, 125, 90, 0.16);
+  background: rgba(46, 125, 70, 0.16);
   color: var(--accent-emerald);
-  border: 1px solid rgba(47, 125, 90, 0.35);
+  border: 1px solid rgba(46, 125, 70, 0.35);
 }
 
 .channel-tag-badge.channel-facebook {
-  background: rgba(47, 111, 176, 0.16);
+  background: rgba(107, 122, 94, 0.16);
   color: var(--accent-cyan);
-  border: 1px solid rgba(47, 111, 176, 0.35);
+  border: 1px solid rgba(107, 122, 94, 0.35);
 }
 
 .channel-tag-badge.channel-instagram {
-  background: rgba(156, 79, 124, 0.16);
+  background: rgba(138, 63, 40, 0.16);
   color: var(--accent-pink);
-  border: 1px solid rgba(156, 79, 124, 0.35);
+  border: 1px solid rgba(138, 63, 40, 0.35);
 }
 
 .channel-tag-badge.channel-direct {
@@ -2067,9 +2067,9 @@ onMounted(() => {
   border-radius: 8px;
 }
 
-.viability-high { background: rgba(47, 125, 90, 0.18); color: var(--accent-emerald); }
+.viability-high { background: rgba(46, 125, 70, 0.18); color: var(--accent-emerald); }
 .viability-medium { background: rgba(201, 146, 46, 0.18); color: var(--accent-amber); }
-.viability-low { background: rgba(178, 58, 69, 0.18); color: var(--accent-rose); }
+.viability-low { background: rgba(200, 85, 50, 0.18); color: var(--accent-rose); }
 .viability-unknown { background: var(--surface-2); color: var(--text-muted); }
 
 .card-lead-name-box {
@@ -2142,7 +2142,7 @@ onMounted(() => {
 }
 
 .setter-assigned-pill {
-  background: rgba(44, 140, 153, 0.12);
+  background: rgba(158, 186, 75, 0.12);
   color: #5AAEB8;
   padding: 0.1rem 0.4rem;
   border-radius: 6px;
@@ -2178,8 +2178,8 @@ onMounted(() => {
 }
 
 .quick-icon-btn.email:hover {
-  background: #2F6FB0;
-  border-color: #2F6FB0;
+  background: #56624A;
+  border-color: #56624A;
   color: #fff;
 }
 
@@ -2190,7 +2190,7 @@ onMounted(() => {
 /* Silueta Drop Preview */
 .kanban-drop-silhouette {
   border: 2px dashed #2C8C99;
-  background: rgba(44, 140, 153, 0.08);
+  background: rgba(158, 186, 75, 0.08);
   border-radius: 14px;
   padding: 0.85rem;
   display: flex;
@@ -2331,7 +2331,7 @@ onMounted(() => {
 }
 
 .final-tag {
-  background: rgba(47, 125, 90, 0.15);
+  background: rgba(46, 125, 70, 0.15);
   color: var(--accent-emerald);
   padding: 0.1rem 0.4rem;
   border-radius: 6px;
@@ -2355,7 +2355,7 @@ onMounted(() => {
 
 .add-column-ghost-card:hover {
   border-color: #2C8C99;
-  background: rgba(44, 140, 153, 0.05);
+  background: rgba(158, 186, 75, 0.05);
 }
 
 .ghost-content {
@@ -2505,7 +2505,7 @@ onMounted(() => {
 }
 
 .emoji-option-btn.active {
-  background: rgba(44, 140, 153, 0.2);
+  background: rgba(158, 186, 75, 0.2);
   border-color: #2C8C99;
 }
 
@@ -2558,7 +2558,7 @@ onMounted(() => {
   font-size: 1.1rem;
   font-weight: 800;
   color: #2C8C99;
-  background: rgba(44, 140, 153, 0.15);
+  background: rgba(158, 186, 75, 0.15);
   padding: 0.2rem 0.6rem;
   border-radius: 8px;
 }
@@ -2614,7 +2614,7 @@ onMounted(() => {
 }
 
 .setter-btn.email-solid {
-  background: #2F6FB0;
+  background: #56624A;
   color: #fff;
 }
 
@@ -2683,8 +2683,8 @@ onMounted(() => {
 }
 
 .viability-section-card {
-  background: rgba(76, 63, 145, 0.06);
-  border: 1px solid rgba(76, 63, 145, 0.25);
+  background: rgba(111, 129, 37, 0.06);
+  border: 1px solid rgba(111, 129, 37, 0.25);
   border-radius: 12px;
   padding: 1rem;
 }
@@ -2692,7 +2692,7 @@ onMounted(() => {
 .section-subtitle {
   font-size: 0.95rem;
   font-weight: 700;
-  color: #2F6FB0;
+  color: #56624A;
   margin: 0 0 0.6rem;
 }
 

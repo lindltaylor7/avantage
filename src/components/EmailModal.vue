@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div v-if="isOpen" class="modal-overlay" @click.self="$emit('close')">
     <div class="modal-content">
       <div class="modal-header">
@@ -92,8 +92,8 @@ defineEmits(['close']);
 .ethereal-banner {
   margin-bottom: 1rem;
   padding: 0.75rem 1rem;
-  background: rgba(47, 125, 90, 0.14);
-  border: 1px solid rgba(47, 125, 90, 0.35);
+  background: rgba(46, 125, 70, 0.14);
+  border: 1px solid rgba(46, 125, 70, 0.35);
   border-radius: var(--radius-md);
   display: flex;
   justify-content: space-between;

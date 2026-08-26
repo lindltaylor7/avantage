@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <main class="container-fluid ig-page-wrapper">
     <!-- Header de Instagram -->
     <header class="ig-header">
@@ -704,10 +704,10 @@ onMounted(fetchAll);
   flex-shrink: 0;
 }
 
-.ig-stat-pink { background: rgba(156, 79, 124, 0.15); color: #9C4F7C; }
+.ig-stat-pink { background: rgba(138, 63, 40, 0.15); color: #8A3F28; }
 .ig-stat-orange { background: rgba(191, 90, 42, 0.15); color: #BF5A2A; }
-.ig-stat-purple { background: rgba(103, 83, 160, 0.15); color: #6753A0; }
-.ig-stat-blue { background: rgba(47, 111, 176, 0.15); color: #2F6FB0; }
+.ig-stat-purple { background: rgba(111, 129, 37, 0.15); color: #6753A0; }
+.ig-stat-blue { background: rgba(107, 122, 94, 0.15); color: #56624A; }
 
 .stat-info {
   display: flex;
@@ -794,8 +794,8 @@ onMounted(fetchAll);
 
 /* Barra de conectado */
 .ig-connected-bar {
-  background: rgba(47, 125, 90, 0.1);
-  border: 1px solid rgba(47, 125, 90, 0.3);
+  background: rgba(46, 125, 70, 0.1);
+  border: 1px solid rgba(46, 125, 70, 0.3);
   color: var(--accent-emerald);
   border-radius: 12px;
   padding: 0.65rem 1rem;
@@ -845,7 +845,7 @@ onMounted(fetchAll);
 
 .filter-pill.active {
   background: linear-gradient(45deg, rgba(240, 148, 51, 0.2), rgba(188, 24, 136, 0.25));
-  border-color: #9C4F7C;
+  border-color: #8A3F28;
   color: var(--accent-pink);
 }
 
@@ -896,7 +896,7 @@ onMounted(fetchAll);
 
 .ig-interaction-card:hover {
   transform: translateY(-2px);
-  border-color: rgba(156, 79, 124, 0.4);
+  border-color: rgba(138, 63, 40, 0.4);
   box-shadow: 0 10px 25px -10px rgba(0, 0, 0, 0.5);
 }
 
@@ -951,9 +951,9 @@ onMounted(fetchAll);
 }
 
 .badge-comment { background: rgba(191, 90, 42, 0.18); color: #D08858; }
-.badge-mention { background: rgba(103, 83, 160, 0.18); color: #A79AFF; }
-.badge-direct_message, .badge-message { background: rgba(47, 111, 176, 0.18); color: var(--accent-cyan); }
-.badge-story_reply { background: rgba(156, 79, 124, 0.18); color: var(--accent-pink); }
+.badge-mention { background: rgba(111, 129, 37, 0.18); color: #B3CC66; }
+.badge-direct_message, .badge-message { background: rgba(107, 122, 94, 0.18); color: var(--accent-cyan); }
+.badge-story_reply { background: rgba(138, 63, 40, 0.18); color: var(--accent-pink); }
 
 .interaction-time {
   font-size: 0.75rem;
@@ -1027,13 +1027,13 @@ onMounted(fetchAll);
 }
 
 .ig-quick-btn.setter {
-  background: rgba(44, 140, 153, 0.15);
+  background: rgba(158, 186, 75, 0.15);
   color: #5AAEB8;
-  border: 1px solid rgba(44, 140, 153, 0.3);
+  border: 1px solid rgba(158, 186, 75, 0.3);
 }
 
 .ig-quick-btn.setter:hover {
-  background: rgba(44, 140, 153, 0.25);
+  background: rgba(158, 186, 75, 0.25);
 }
 
 .ig-quick-btn.external {
@@ -1069,7 +1069,7 @@ onMounted(fetchAll);
 
 .ig-media-card:hover {
   transform: translateY(-2px);
-  border-color: rgba(156, 79, 124, 0.4);
+  border-color: rgba(138, 63, 40, 0.4);
 }
 
 .ig-media-header {
@@ -1079,7 +1079,7 @@ onMounted(fetchAll);
 }
 
 .ig-media-type-tag {
-  background: rgba(156, 79, 124, 0.15);
+  background: rgba(138, 63, 40, 0.15);
   color: var(--accent-pink);
   padding: 0.2rem 0.55rem;
   border-radius: 8px;
@@ -1211,7 +1211,7 @@ onMounted(fetchAll);
 
 .badge-ok {
   background: rgba(34, 197, 94, 0.15);
-  color: #4FAE82;
+  color: #5FBE79;
 }
 
 .badge-error {

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div v-if="report" class="glass-panel report-panel">
     <!-- Encabezado del Reporte -->
     <div class="report-header">
@@ -250,7 +250,7 @@ function getLevelClass(level) {
 
 .embedding-box {
   margin-bottom: 1.5rem;
-  border-color: rgba(47, 111, 176, 0.3);
+  border-color: rgba(107, 122, 94, 0.3);
 }
 
 .embedding-grid {
@@ -284,8 +284,8 @@ function getLevelClass(level) {
 .info-box-title-rose { color: var(--accent-rose); }
 
 .delimitation-box {
-  background: rgba(76, 63, 145, 0.1);
-  border-color: rgba(76, 63, 145, 0.35);
+  background: rgba(111, 129, 37, 0.1);
+  border-color: rgba(111, 129, 37, 0.35);
 }
 
 .delimitation-title {

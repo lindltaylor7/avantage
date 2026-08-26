@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <main class="container-fluid social-page-wrapper">
     <header class="social-header">
       <div class="header-titles">
@@ -360,7 +360,7 @@ onMounted(fetchAll);
 .stat-icon-wrapper.blue { background: rgba(76, 134, 255, 0.15); }
 .stat-icon-wrapper.green { background: rgba(34, 197, 94, 0.15); }
 .stat-icon-wrapper.amber { background: rgba(201, 146, 46, 0.15); }
-.stat-icon-wrapper.purple { background: rgba(103, 83, 160, 0.15); }
+.stat-icon-wrapper.purple { background: rgba(111, 129, 37, 0.15); }
 
 .stat-info {
   display: flex;

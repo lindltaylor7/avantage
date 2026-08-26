@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="dashboard-container">
     <!-- Welcome Banner Card -->
     <div class="welcome-banner">
@@ -188,13 +188,13 @@ onMounted(() => {
   padding: 0.6rem 1.2rem;
   border-radius: 9999px;
   text-decoration: none;
-  box-shadow: 0 8px 20px -6px rgba(76, 63, 145, 0.5);
+  box-shadow: 0 8px 20px -6px rgba(111, 129, 37, 0.5);
   transition: all 0.2s ease;
 }
 
 .welcome-cta:hover {
   transform: translateY(-1px);
-  box-shadow: 0 10px 24px -6px rgba(76, 63, 145, 0.6);
+  box-shadow: 0 10px 24px -6px rgba(111, 129, 37, 0.6);
 }
 
 .welcome-illustration-wrapper {
@@ -235,9 +235,9 @@ onMounted(() => {
 }
 
 .count-pill {
-  background: rgba(76, 63, 145, 0.12);
+  background: rgba(111, 129, 37, 0.12);
   color: var(--on-tint-strong);
-  border: 1px solid rgba(76, 63, 145, 0.3);
+  border: 1px solid rgba(111, 129, 37, 0.3);
   font-size: 0.75rem;
   font-weight: 700;
   padding: 0.15rem 0.55rem;
@@ -371,11 +371,11 @@ onMounted(() => {
   border: 1px solid transparent;
 }
 
-.module-icon-bg.tint-amber { background: rgba(201, 123, 46, 0.12); border-color: rgba(201, 123, 46, 0.25); }
-.module-icon-bg.tint-pink { background: rgba(156, 79, 124, 0.12); border-color: rgba(156, 79, 124, 0.25); }
-.module-icon-bg.tint-purple { background: rgba(76, 63, 145, 0.12); border-color: rgba(76, 63, 145, 0.25); }
-.module-icon-bg.tint-rose { background: rgba(178, 58, 69, 0.12); border-color: rgba(178, 58, 69, 0.25); }
-.module-icon-bg.tint-blue { background: rgba(47, 111, 176, 0.12); border-color: rgba(47, 111, 176, 0.25); }
+.module-icon-bg.tint-amber { background: rgba(222, 117, 75, 0.12); border-color: rgba(222, 117, 75, 0.25); }
+.module-icon-bg.tint-pink { background: rgba(138, 63, 40, 0.12); border-color: rgba(138, 63, 40, 0.25); }
+.module-icon-bg.tint-purple { background: rgba(111, 129, 37, 0.12); border-color: rgba(111, 129, 37, 0.25); }
+.module-icon-bg.tint-rose { background: rgba(200, 85, 50, 0.12); border-color: rgba(200, 85, 50, 0.25); }
+.module-icon-bg.tint-blue { background: rgba(107, 122, 94, 0.12); border-color: rgba(107, 122, 94, 0.25); }
 
 .module-content {
   flex: 1;

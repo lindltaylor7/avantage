@@ -1,10 +1,10 @@
-<template>
+﻿<template>
   <main class="container" style="flex: 1; padding-top: 2rem; padding-bottom: 4rem;">
     <router-link to="/admin/projects" style="color: var(--accent-cyan); font-size: 0.85rem; text-decoration: none; display: inline-block; margin-bottom: 1rem;">
       ← Volver a Proyectos
     </router-link>
 
-    <div v-if="loadError" class="info-box" style="border-color: rgba(178, 58, 69, 0.4); margin-bottom: 1.5rem;">
+    <div v-if="loadError" class="info-box" style="border-color: rgba(200, 85, 50, 0.4); margin-bottom: 1.5rem;">
       <h4 style="color: var(--accent-rose);">⚠️ No se pudo cargar el proyecto</h4>
       <p>{{ loadError }}</p>
     </div>
@@ -492,7 +492,7 @@ function statusClass(status) {
 
 function progressColor(percentage) {
   if (percentage >= 100) return '#2F7D5A';
-  if (percentage >= 50) return '#2F6FB0';
+  if (percentage >= 50) return '#56624A';
   if (percentage > 0) return '#C9922E';
   return 'var(--surface-4)';
 }
@@ -511,11 +511,11 @@ onMounted(() => {
   font-weight: 600;
 }
 
-.status-creado { background: rgba(47, 125, 90, 0.15); color: #4FAE82; border: 1px solid rgba(47, 125, 90, 0.35); }
+.status-creado { background: rgba(46, 125, 70, 0.15); color: #5FBE79; border: 1px solid rgba(46, 125, 70, 0.35); }
 .status-iniciado { background: rgba(201, 146, 46, 0.15); color: var(--accent-amber); border: 1px solid rgba(201, 146, 46, 0.35); }
-.status-en-desarrollo { background: rgba(76, 63, 145, 0.15); color: var(--on-tint-strong); border: 1px solid rgba(76, 63, 145, 0.35); }
+.status-en-desarrollo { background: rgba(111, 129, 37, 0.15); color: var(--on-tint-strong); border: 1px solid rgba(111, 129, 37, 0.35); }
 .status-entregado { background: rgba(191, 194, 199, 0.15); color: var(--accent-silver); border: 1px solid rgba(191, 194, 199, 0.35); }
-.status-cancelado { background: rgba(178, 58, 69, 0.15); color: var(--accent-rose); border: 1px solid rgba(178, 58, 69, 0.35); }
+.status-cancelado { background: rgba(200, 85, 50, 0.15); color: var(--accent-rose); border: 1px solid rgba(200, 85, 50, 0.35); }
 
 .tab-bar {
   display: flex;
@@ -646,7 +646,7 @@ onMounted(() => {
 
 .task-delete-btn:hover {
   color: var(--accent-rose);
-  background: rgba(178, 58, 69, 0.12);
+  background: rgba(200, 85, 50, 0.12);
 }
 
 .kanban-empty {
@@ -675,8 +675,8 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  background: rgba(76, 63, 145, 0.12);
-  border: 1px solid rgba(76, 63, 145, 0.3);
+  background: rgba(111, 129, 37, 0.12);
+  border: 1px solid rgba(111, 129, 37, 0.3);
   color: var(--text-sub);
   border-radius: 9999px;
   padding: 0.3rem 0.5rem 0.3rem 0.85rem;
@@ -695,7 +695,7 @@ onMounted(() => {
 
 .collaborator-chip button:hover {
   color: var(--accent-rose);
-  background: rgba(178, 58, 69, 0.15);
+  background: rgba(200, 85, 50, 0.15);
 }
 
 /* Línea de Tiempo */
@@ -733,7 +733,7 @@ onMounted(() => {
   height: 14px;
   border-radius: 50%;
   background: var(--primary);
-  box-shadow: 0 0 0 4px rgba(76, 63, 145, 0.18);
+  box-shadow: 0 0 0 4px rgba(111, 129, 37, 0.18);
 }
 
 .timeline-content {

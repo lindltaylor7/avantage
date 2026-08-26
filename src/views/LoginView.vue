@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="login-split">
     <!-- Panel de marca -->
     <section class="login-hero">
@@ -100,7 +100,7 @@ async function handleLogin() {
   width: 100%;
 }
 
-/* Panel de marca — tono fijo (violeta de sello sobre tinta), a propósito
+/* Panel de marca — tono fijo (verde de vivero sobre tinta), a propósito
    independiente del toggle claro/oscuro: es un momento de marca, como una
    portada, no una superficie de la app. */
 .login-hero {
@@ -111,8 +111,8 @@ async function handleLogin() {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  background: linear-gradient(150deg, #14172A 0%, #241D4D 48%, #4C3F91 100%);
-  color: #F3F1EA;
+  background: linear-gradient(150deg, #0A0D0D 0%, #101414 48%, #3F4A1A 100%);
+  color: #F7F8F1;
 }
 
 .login-hero-glow {
@@ -120,7 +120,7 @@ async function handleLogin() {
   inset: -20% -10% auto auto;
   width: 60%;
   aspect-ratio: 1;
-  background: radial-gradient(circle, rgba(139, 127, 224, 0.35) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(158, 186, 75, 0.35) 0%, transparent 70%);
   pointer-events: none;
 }
 
@@ -131,7 +131,7 @@ async function handleLogin() {
   width: 46%;
   aspect-ratio: 1;
   border-radius: 50%;
-  border: 1.5px dashed rgba(243, 241, 234, 0.16);
+  border: 1.5px dashed rgba(247, 248, 241, 0.16);
   pointer-events: none;
 }
 
@@ -152,8 +152,8 @@ async function handleLogin() {
   width: 42px;
   height: 42px;
   border-radius: var(--radius-sm);
-  background: rgba(243, 241, 234, 0.12);
-  border: 1px solid rgba(243, 241, 234, 0.25);
+  background: rgba(247, 248, 241, 0.12);
+  border: 1px solid rgba(247, 248, 241, 0.25);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -181,7 +181,7 @@ async function handleLogin() {
   font-size: 0.68rem;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: rgba(243, 241, 234, 0.6);
+  color: rgba(247, 248, 241, 0.6);
 }
 
 .login-hero-middle {
@@ -199,7 +199,7 @@ async function handleLogin() {
 .login-hero-sub {
   font-size: 1rem;
   line-height: 1.6;
-  color: rgba(243, 241, 234, 0.78);
+  color: rgba(247, 248, 241, 0.78);
   max-width: 460px;
 }
 
@@ -208,7 +208,7 @@ async function handleLogin() {
   font-size: 0.75rem;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: rgba(243, 241, 234, 0.55);
+  color: rgba(247, 248, 241, 0.55);
 }
 
 /* Panel de acceso — theme-aware, igual que el resto de la app */
@@ -264,7 +264,7 @@ async function handleLogin() {
 }
 
 .login-error {
-  border-color: rgba(178, 58, 69, 0.4);
+  border-color: rgba(200, 85, 50, 0.4);
   margin-bottom: 1rem;
 }
 

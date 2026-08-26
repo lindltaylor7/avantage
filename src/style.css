@@ -1,64 +1,63 @@
 :root {
-  /* ---- Light theme (default) — "expediente" palette: bond paper + sello
-     de tinta violeta, evocando el sello húmedo de un trámite universitario
-     peruano en vez del azul corporativo genérico. ---- */
-  --bg-dark: #F4F4EF;
-  --bg-page-alt: #ECECE5;
+  /* ---- Light theme (default) — paleta "vivero": crema cálido + verde
+     olivo + terracota, evocando papel natural y tinta vegetal en vez del
+     violeta de sello anterior. ---- */
+  --bg-dark: #F2F3E8;
+  --bg-page-alt: #E8EBDC;
   --bg-card: #FFFFFF;
   --bg-card-solid: #FFFFFF;
-  --bg-card-hover: #FAFAF7;
+  --bg-card-hover: #FBFBF3;
   --bg-sidebar: #FFFFFF;
-  --border-color: #E2E2DA;
-  --border-strong: #CBCBC0;
-  --border-glow: rgba(76, 63, 145, 0.35);
+  --border-color: #D9DCC9;
+  --border-strong: #C4C9AE;
+  --border-glow: rgba(111, 129, 37, 0.35);
 
-  --primary: #4C3F91;
-  --primary-hover: #362C6B;
-  --accent-cyan: #2F6FB0;
-  --accent-silver: #8D9199;
-  --accent-emerald: #2F7D5A;
-  --accent-amber: #C97B2E;
-  --accent-rose: #B23A45;
-  --accent-pink: #9C4F7C;
+  --primary: #6F8125;
+  --primary-hover: #56621D;
+  --cta: #C85532;
+  --cta-hover: #DE754B;
+  --accent-cyan: #56624A;
+  --accent-silver: #626A62;
+  --accent-emerald: #2E7D46;
+  --accent-amber: #DE754B;
+  --accent-rose: #C85532;
+  --accent-pink: #8A3F28;
 
-  --text-main: #1B2233;
-  --text-muted: #8B8E96;
-  --text-sub: #4A4F5C;
+  --text-main: #101414;
+  --text-muted: #626A62;
+  --text-sub: #3A413A;
 
   /* Neutral "surface" tint ramp: subtle fills for chips, inputs, hover
      states. Values flip meaning (dark-tinted vs. white-tinted) per theme so
      component CSS never has to branch on the theme itself. */
-  --surface-1: rgba(27, 34, 51, 0.03);
-  --surface-2: rgba(27, 34, 51, 0.05);
-  --surface-3: rgba(27, 34, 51, 0.08);
-  --surface-4: rgba(27, 34, 51, 0.12);
-  --surface-5: rgba(27, 34, 51, 0.18);
+  --surface-1: rgba(16, 20, 20, 0.03);
+  --surface-2: rgba(16, 20, 20, 0.05);
+  --surface-3: rgba(16, 20, 20, 0.08);
+  --surface-4: rgba(16, 20, 20, 0.12);
+  --surface-5: rgba(16, 20, 20, 0.18);
 
-  --shadow-sm: 0 1px 2px rgba(27, 34, 51, 0.06);
-  --shadow-md: 0 10px 26px -10px rgba(27, 34, 51, 0.16);
-  --shadow-lg: 0 26px 50px -18px rgba(27, 34, 51, 0.22);
+  --shadow-sm: 0 1px 2px rgba(16, 20, 20, 0.06);
+  --shadow-md: 0 10px 26px -10px rgba(16, 20, 20, 0.16);
+  --shadow-lg: 0 26px 50px -18px rgba(16, 20, 20, 0.22);
 
-  /* Corner-radius scale — más cuadrada que un bento genérico: se siente a
-     documento/expediente, no a app de consumo. */
-  --radius-sm: 8px;
-  --radius-md: 12px;
+  /* Corner-radius scale — ajustada (más cerrada) para el look fresco y
+     minimalista de la nueva identidad. */
+  --radius-sm: 6px;
+  --radius-md: 10px;
   --radius-lg: 16px;
-  --radius-xl: 22px;
+  --radius-xl: 20px;
 
-  --scrollbar-track: rgba(27, 34, 51, 0.04);
-  --scrollbar-thumb: rgba(27, 34, 51, 0.16);
-  --scrollbar-thumb-hover: rgba(27, 34, 51, 0.28);
+  --scrollbar-track: rgba(16, 20, 20, 0.04);
+  --scrollbar-thumb: rgba(16, 20, 20, 0.16);
+  --scrollbar-thumb-hover: rgba(16, 20, 20, 0.28);
 
-  /* Plex Sans lleva toda la interfaz (nav, botones, tablas, formularios) —
-     carácter técnico/institucional, coherente con el lado "software" de
-     Avantage y el lenguaje regulatorio (SUNEDU/CONCYTEC) del producto.
-     Source Serif 4 se reserva para los momentos de "documento": el titular
-     del reporte de viabilidad y el hero público. Plex Mono marca los datos
-     (fechas, teléfonos, puntajes) como si fueran campos de un expediente. */
-  --font-heading: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-subheading: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-body: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-serif: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+  /* Poppins lleva toda la interfaz — geométrica, cálida y contemporánea,
+     coherente con la nueva identidad "vivero". Plex Mono se conserva para
+     los datos (fechas, teléfonos, puntajes), como campos de un expediente. */
+  --font-heading: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-subheading: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-body: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-serif: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
 
   /* Brand colors for social platform badges/icons (same in both themes). */
@@ -69,55 +68,56 @@
   --brand-facebook: #1877F2;
   --brand-email: #6B7280;
 
-  /* Text readable on top of a rgba(76,63,145,0.1-0.15) "primary tint" chip
+  /* Text readable on top of a rgba(111,129,37,0.1-0.15) "primary tint" chip
      or panel — e.g. status badges, highlighted info boxes. */
-  --on-tint-strong: #362C6B;
-  --on-tint-body: #241D4D;
-  --on-tint-muted: #5B4FA0;
+  --on-tint-strong: #4B5A1C;
+  --on-tint-body: #333D14;
+  --on-tint-muted: #6F7D3F;
 }
 
 /* ---- Dark theme — opt-in via the navbar toggle, preference remembered.
-   No es un gris genérico: sigue siendo "papel", pero leído de noche —
-   tinta color hueso sobre fondo tinta-noche, con el mismo violeta de sello
-   aclarado para contraste. ---- */
+   Fondo casi negro (verde-tinta), con el verde lima como acento de marca
+   aclarado para contraste sobre oscuro. ---- */
 :root[data-theme="dark"] {
-  --bg-dark: #15151D;
-  --bg-page-alt: #1A1A23;
-  --bg-card: rgba(30, 28, 42, 0.75);
-  --bg-card-solid: #1E1C2A;
-  --bg-card-hover: rgba(40, 37, 54, 0.85);
-  --bg-sidebar: #131219;
-  --border-color: rgba(255, 255, 255, 0.09);
-  --border-strong: rgba(255, 255, 255, 0.18);
-  --border-glow: rgba(139, 127, 224, 0.35);
+  --bg-dark: #0A0D0D;
+  --bg-page-alt: #101414;
+  --bg-card: rgba(16, 20, 20, 0.75);
+  --bg-card-solid: #101414;
+  --bg-card-hover: rgba(22, 28, 28, 0.85);
+  --bg-sidebar: #0A0D0D;
+  --border-color: rgba(247, 248, 241, 0.09);
+  --border-strong: rgba(247, 248, 241, 0.18);
+  --border-glow: rgba(158, 186, 75, 0.35);
 
-  --primary: #8B7FE0;
-  --primary-hover: #A79AFF;
-  --accent-cyan: #6FA3D8;
-  --accent-silver: #A7ABB5;
-  --accent-pink: #C77FA8;
+  --primary: #9EBA4B;
+  --primary-hover: #B3CC66;
+  --cta: #DE754B;
+  --cta-hover: #F0916A;
+  --accent-cyan: #9AA68A;
+  --accent-silver: #9BA396;
+  --accent-pink: #D98A63;
 
-  --text-main: #F3F1EA;
-  --text-muted: #9B9CA6;
-  --text-sub: #D6D3E0;
+  --text-main: #F7F8F1;
+  --text-muted: #9A9C93;
+  --text-sub: #C7C8BD;
 
-  --surface-1: rgba(255, 255, 255, 0.02);
-  --surface-2: rgba(255, 255, 255, 0.05);
-  --surface-3: rgba(255, 255, 255, 0.08);
-  --surface-4: rgba(255, 255, 255, 0.14);
-  --surface-5: rgba(255, 255, 255, 0.22);
+  --surface-1: rgba(247, 248, 241, 0.03);
+  --surface-2: rgba(247, 248, 241, 0.05);
+  --surface-3: rgba(247, 248, 241, 0.08);
+  --surface-4: rgba(247, 248, 241, 0.14);
+  --surface-5: rgba(247, 248, 241, 0.22);
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 8px 20px -6px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 20px 40px -15px rgba(0, 0, 0, 0.55);
 
-  --on-tint-strong: #A79AFF;
-  --on-tint-body: #EDEBFA;
-  --on-tint-muted: #C7BFF5;
+  --on-tint-strong: #C3D98A;
+  --on-tint-body: #EDF0E0;
+  --on-tint-muted: #B9C99A;
 
   --scrollbar-track: rgba(0, 0, 0, 0.2);
-  --scrollbar-thumb: rgba(255, 255, 255, 0.16);
-  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.3);
+  --scrollbar-thumb: rgba(247, 248, 241, 0.16);
+  --scrollbar-thumb-hover: rgba(247, 248, 241, 0.3);
 }
 
 * {
@@ -131,8 +131,8 @@ body {
   background-color: var(--bg-dark);
   color: var(--text-main);
   background-image:
-    radial-gradient(at 0% 0%, rgba(76, 63, 145, 0.06) 0px, transparent 50%),
-    radial-gradient(at 100% 100%, rgba(47, 111, 176, 0.05) 0px, transparent 50%);
+    radial-gradient(at 0% 0%, rgba(111, 129, 37, 0.07) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(200, 85, 50, 0.05) 0px, transparent 50%);
   background-attachment: fixed;
   min-height: 100vh;
   line-height: 1.6;
@@ -141,9 +141,9 @@ body {
 
 :root[data-theme="dark"] body {
   background-image:
-    radial-gradient(at 0% 0%, rgba(139, 127, 224, 0.16) 0px, transparent 50%),
-    radial-gradient(at 100% 100%, rgba(167, 171, 181, 0.07) 0px, transparent 50%),
-    radial-gradient(at 50% 50%, rgba(139, 127, 224, 0.05) 0px, transparent 50%);
+    radial-gradient(at 0% 0%, rgba(158, 186, 75, 0.16) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(155, 163, 150, 0.07) 0px, transparent 50%),
+    radial-gradient(at 50% 50%, rgba(222, 117, 75, 0.05) 0px, transparent 50%);
 }
 
 #app {
@@ -214,7 +214,7 @@ body {
   font-weight: 800;
   letter-spacing: -0.03em;
   color: #FFFFFF;
-  box-shadow: 0 4px 15px rgba(76, 63, 145, 0.4);
+  box-shadow: 0 4px 15px rgba(111, 129, 37, 0.4);
 }
 
 .logo-text h1 {
@@ -241,8 +241,8 @@ body {
   gap: 0.5rem;
   padding: 0.4rem 0.9rem;
   border-radius: 9999px;
-  background: rgba(47, 125, 90, 0.1);
-  border: 1px solid rgba(47, 125, 90, 0.3);
+  background: rgba(46, 125, 70, 0.1);
+  border: 1px solid rgba(46, 125, 70, 0.3);
   color: var(--accent-emerald);
   font-size: 0.825rem;
   font-weight: 500;
@@ -358,7 +358,7 @@ p.section-subheading {
   width: 100%;
   background: var(--surface-1);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
+  border-radius: 10px;
   padding: 0.75rem 1rem;
   color: var(--text-main);
   font-family: var(--font-body);
@@ -369,7 +369,7 @@ p.section-subheading {
 .form-input:focus, .form-select:focus, .form-textarea:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(76, 63, 145, 0.18);
+  box-shadow: 0 0 0 3px rgba(111, 129, 37, 0.18);
   background: var(--bg-card-solid);
 }
 
@@ -378,13 +378,15 @@ p.section-subheading {
   resize: vertical;
 }
 
-/* Buttons */
+/* Buttons — el verde (--primary) marca identidad (enlaces, foco, nav
+   activa); el botón de acción usa terracota (--cta) como llamado a la
+   acción, el mismo contraste de dos acentos de la referencia de marca. */
 .btn-primary {
   width: 100%;
-  background: linear-gradient(135deg, var(--primary), var(--primary-hover));
+  background: linear-gradient(135deg, var(--cta), var(--cta-hover));
   color: #FFFFFF;
   border: none;
-  border-radius: 14px;
+  border-radius: 12px;
   padding: 0.95rem 1.5rem;
   font-family: var(--font-heading);
   font-size: 1.05rem;
@@ -394,13 +396,13 @@ p.section-subheading {
   align-items: center;
   justify-content: center;
   gap: 0.6rem;
-  box-shadow: 0 8px 20px -4px rgba(76, 63, 145, 0.5);
+  box-shadow: 0 8px 20px -4px rgba(200, 85, 50, 0.45);
   transition: all 0.25s ease;
 }
 
 .btn-primary:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 12px 25px -4px rgba(76, 63, 145, 0.65);
+  box-shadow: 0 12px 25px -4px rgba(200, 85, 50, 0.6);
 }
 
 .btn-primary:disabled {
@@ -446,33 +448,33 @@ p.section-subheading {
 }
 
 .level-alta {
-  background: rgba(47, 125, 90, 0.14);
-  color: #1F5A3F;
-  border: 1px solid rgba(47, 125, 90, 0.4);
+  background: rgba(46, 125, 70, 0.14);
+  color: #1F4A2C;
+  border: 1px solid rgba(46, 125, 70, 0.4);
 }
 
 .level-media-alta {
-  background: rgba(76, 63, 145, 0.12);
-  color: #362C6B;
-  border: 1px solid rgba(76, 63, 145, 0.4);
+  background: rgba(158, 186, 75, 0.16);
+  color: #5C6B26;
+  border: 1px solid rgba(158, 186, 75, 0.45);
 }
 
 .level-media {
-  background: rgba(201, 123, 46, 0.14);
-  color: #8C5A1E;
-  border: 1px solid rgba(201, 123, 46, 0.4);
+  background: rgba(222, 117, 75, 0.16);
+  color: #8C4A24;
+  border: 1px solid rgba(222, 117, 75, 0.4);
 }
 
 .level-baja {
-  background: rgba(178, 58, 69, 0.12);
-  color: #8C2530;
-  border: 1px solid rgba(178, 58, 69, 0.4);
+  background: rgba(200, 85, 50, 0.12);
+  color: #7A3620;
+  border: 1px solid rgba(200, 85, 50, 0.4);
 }
 
-:root[data-theme="dark"] .level-alta { color: #4FAE82; }
-:root[data-theme="dark"] .level-media-alta { color: #A79AFF; }
-:root[data-theme="dark"] .level-media { color: #E0A362; }
-:root[data-theme="dark"] .level-baja { color: #E0717C; }
+:root[data-theme="dark"] .level-alta { color: #5FBE79; }
+:root[data-theme="dark"] .level-media-alta { color: #C3D98A; }
+:root[data-theme="dark"] .level-media { color: #F0A87E; }
+:root[data-theme="dark"] .level-baja { color: #E8917A; }
 
 /* Metric Progress Bar */
 .metric-item {
@@ -545,8 +547,8 @@ p.section-subheading {
 
 /* Email Banner Notification */
 .email-banner {
-  background: linear-gradient(135deg, rgba(76, 63, 145, 0.1), rgba(47, 111, 176, 0.05));
-  border: 1px solid rgba(76, 63, 145, 0.3);
+  background: linear-gradient(135deg, rgba(111, 129, 37, 0.1), rgba(200, 85, 50, 0.05));
+  border: 1px solid rgba(111, 129, 37, 0.3);
   border-radius: 14px;
   padding: 1rem 1.25rem;
   display: flex;
@@ -755,17 +757,17 @@ p.section-subheading {
 }
 
 .pill-neutral { background: var(--surface-2); color: var(--text-sub); border: 1px solid var(--border-color); }
-.pill-primary { background: rgba(76, 63, 145, 0.1); color: var(--on-tint-strong); border: 1px solid rgba(76, 63, 145, 0.3); }
-.pill-success { background: rgba(47, 125, 90, 0.12); color: #1F5A3F; border: 1px solid rgba(47, 125, 90, 0.35); }
-.pill-warning { background: rgba(201, 123, 46, 0.12); color: #8C5A1E; border: 1px solid rgba(201, 123, 46, 0.35); }
-.pill-danger { background: rgba(178, 58, 69, 0.12); color: #8C2530; border: 1px solid rgba(178, 58, 69, 0.35); }
-.pill-info { background: rgba(47, 111, 176, 0.12); color: #1F4E77; border: 1px solid rgba(47, 111, 176, 0.35); }
+.pill-primary { background: rgba(111, 129, 37, 0.1); color: var(--on-tint-strong); border: 1px solid rgba(111, 129, 37, 0.3); }
+.pill-success { background: rgba(46, 125, 70, 0.12); color: #1F4A2C; border: 1px solid rgba(46, 125, 70, 0.35); }
+.pill-warning { background: rgba(222, 117, 75, 0.14); color: #8C4A24; border: 1px solid rgba(222, 117, 75, 0.35); }
+.pill-danger { background: rgba(200, 85, 50, 0.12); color: #7A3620; border: 1px solid rgba(200, 85, 50, 0.35); }
+.pill-info { background: rgba(107, 122, 94, 0.14); color: #3F4A38; border: 1px solid rgba(107, 122, 94, 0.35); }
 
 :root[data-theme="dark"] .pill-primary { color: var(--on-tint-strong); }
-:root[data-theme="dark"] .pill-success { color: #4FAE82; }
-:root[data-theme="dark"] .pill-warning { color: #E0A362; }
-:root[data-theme="dark"] .pill-danger { color: #E0717C; }
-:root[data-theme="dark"] .pill-info { color: #7FB2E0; }
+:root[data-theme="dark"] .pill-success { color: #5FBE79; }
+:root[data-theme="dark"] .pill-warning { color: #F0A87E; }
+:root[data-theme="dark"] .pill-danger { color: #E8917A; }
+:root[data-theme="dark"] .pill-info { color: #AEB89E; }
 
 /* Tabla de datos — cabecera mono en mayúsculas (registro/expediente), filas
    con hover suave. Un solo look para todas las tablas del panel. */

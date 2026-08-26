@@ -55,7 +55,7 @@ const toneColor = computed(() => {
   align-items: center;
   justify-content: center;
   transform: rotate(-3.5deg);
-  filter: drop-shadow(0 6px 14px rgba(27, 34, 51, 0.12));
+  filter: drop-shadow(0 6px 14px rgba(16, 20, 20, 0.12));
 }
 
 .seal-svg {

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <header class="admin-navbar">
     <div class="navbar-inner">
       <!-- Left side: Collapse / Sidebar Toggle -->
@@ -468,11 +468,11 @@ onUnmounted(() => {
   font-size: 0.65rem;
   font-weight: 700;
   text-transform: uppercase;
-  background: rgba(76, 63, 145, 0.14);
+  background: rgba(111, 129, 37, 0.14);
   color: var(--on-tint-strong);
   padding: 0.15rem 0.5rem;
   border-radius: 4px;
-  border: 1px solid rgba(76, 63, 145, 0.35);
+  border: 1px solid rgba(111, 129, 37, 0.35);
 }
 
 .dropdown-divider {
@@ -508,7 +508,7 @@ onUnmounted(() => {
 }
 
 .logout-item:hover {
-  background-color: rgba(178, 58, 69, 0.14);
+  background-color: rgba(200, 85, 50, 0.14);
   color: var(--accent-rose);
 }
 
@@ -582,7 +582,7 @@ onUnmounted(() => {
 }
 
 .notif-item.is-unread {
-  background: rgba(76, 63, 145, 0.06);
+  background: rgba(111, 129, 37, 0.06);
 }
 
 .notif-item-icon {

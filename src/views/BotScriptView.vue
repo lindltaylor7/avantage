@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <main class="container-fluid bot-settings-page">
     <header class="page-header">
       <div class="page-header-titles">
@@ -193,12 +193,12 @@ onMounted(fetchSettings);
 }
 
 .bot-alert-box {
-  border-color: rgba(178, 58, 69, 0.4);
+  border-color: rgba(200, 85, 50, 0.4);
   color: var(--accent-rose);
 }
 
 .bot-success-box {
-  border-color: rgba(47, 125, 90, 0.4);
+  border-color: rgba(46, 125, 70, 0.4);
   color: var(--accent-emerald);
 }
 

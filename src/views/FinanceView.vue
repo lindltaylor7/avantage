@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <main class="container-fluid finance-page">
     <header class="page-header">
       <div class="page-header-titles">
@@ -355,12 +355,12 @@ onMounted(() => {
 }
 
 .finance-alert-box {
-  border-color: rgba(178, 58, 69, 0.4);
+  border-color: rgba(200, 85, 50, 0.4);
   color: var(--accent-rose);
 }
 
 .finance-success-box {
-  border-color: rgba(47, 125, 90, 0.4);
+  border-color: rgba(46, 125, 70, 0.4);
   color: var(--accent-emerald);
 }
 
@@ -389,14 +389,14 @@ onMounted(() => {
 }
 
 .type-btn.active {
-  background: rgba(47, 125, 90, 0.12);
-  border-color: rgba(47, 125, 90, 0.4);
+  background: rgba(46, 125, 70, 0.12);
+  border-color: rgba(46, 125, 70, 0.4);
   color: var(--accent-emerald);
 }
 
 .type-btn.is-expense.active {
-  background: rgba(178, 58, 69, 0.12);
-  border-color: rgba(178, 58, 69, 0.4);
+  background: rgba(200, 85, 50, 0.12);
+  border-color: rgba(200, 85, 50, 0.4);
   color: var(--accent-rose);
 }
 
