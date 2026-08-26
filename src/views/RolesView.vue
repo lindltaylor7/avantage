@@ -282,7 +282,7 @@ onMounted(() => {
 
 <style scoped>
 .tool-chip {
-  background: rgba(15, 23, 42, 0.6);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   border-radius: 9999px;
   padding: 0.3rem 0.85rem;

@@ -1622,7 +1622,7 @@ onMounted(() => {
 .search-filter-box {
   display: flex;
   align-items: center;
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   border-radius: 10px;
   padding: 0.45rem 0.85rem;
@@ -1731,7 +1731,7 @@ onMounted(() => {
 }
 
 .items-select {
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   color: var(--text-main);
   border-radius: 8px;
@@ -1973,7 +1973,7 @@ onMounted(() => {
 }
 
 .kanban-lead-card {
-  background: rgba(30, 30, 35, 0.9);
+  background: var(--bg-card-solid);
   border: 1px solid var(--border-color);
   border-radius: 14px;
   padding: 0.85rem;
@@ -1988,7 +1988,7 @@ onMounted(() => {
 .kanban-lead-card:hover {
   transform: translateY(-2px);
   border-color: var(--surface-4);
-  box-shadow: 0 8px 20px -8px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--shadow-md);
 }
 
 .kanban-lead-card.channel-whatsapp-border {
@@ -2260,7 +2260,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   gap: 0.25rem;
-  background: rgba(0, 0, 0, 0.15);
+  background: var(--surface-1);
 }
 
 .col-page-btn {
@@ -2313,7 +2313,7 @@ onMounted(() => {
   justify-content: space-between;
   font-size: 0.75rem;
   color: var(--text-muted);
-  background: rgba(0, 0, 0, 0.15);
+  background: var(--surface-1);
 }
 
 .footer-left-info {
@@ -2476,7 +2476,7 @@ onMounted(() => {
 }
 
 .custom-input, .custom-select {
-  background: rgba(0, 0, 0, 0.35);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   color: var(--text-main);
   border-radius: 10px;
@@ -2641,7 +2641,7 @@ onMounted(() => {
 }
 
 .detail-item {
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--surface-1);
   border: 1px solid var(--border-color);
   border-radius: 10px;
   padding: 0.75rem 0.9rem;
@@ -2742,7 +2742,7 @@ onMounted(() => {
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.1);
+  background: var(--scrollbar-track);
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {

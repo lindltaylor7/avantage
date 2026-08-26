@@ -1580,7 +1580,7 @@ onMounted(() => {
   align-items: center;
   flex-wrap: wrap;
   gap: 1rem;
-  background: rgba(20, 20, 24, 0.6);
+  background: var(--bg-card-solid);
   backdrop-filter: blur(12px);
   border: 1px solid var(--border-color);
   border-radius: 14px;
@@ -1606,7 +1606,7 @@ onMounted(() => {
 .search-input {
   width: 100%;
   padding: 0.5rem 2rem 0.5rem 2.25rem;
-  background: rgba(0, 0, 0, 0.35);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   border-radius: 10px;
   color: var(--text-main);
@@ -1697,7 +1697,7 @@ onMounted(() => {
 }
 
 .items-select {
-  background: rgba(0, 0, 0, 0.4);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   color: var(--text-main);
@@ -1766,7 +1766,7 @@ onMounted(() => {
   flex: 0 0 320px;
   width: 320px;
   max-width: 340px;
-  background: rgba(22, 22, 26, 0.85);
+  background: var(--bg-card);
   backdrop-filter: blur(16px);
   border: 1px solid var(--border-color);
   border-radius: 16px;
@@ -1809,7 +1809,7 @@ onMounted(() => {
   align-items: center;
   padding: 0.85rem 0.95rem;
   border-bottom: 1px solid var(--border-color);
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--bg-card-solid);
   gap: 0.5rem;
 }
 
@@ -1915,7 +1915,7 @@ onMounted(() => {
 
 /* Tarjeta de Lead */
 .kanban-lead-card {
-  background: rgba(30, 30, 36, 0.85);
+  background: var(--bg-card-solid);
   border: 1px solid var(--border-color);
   border-radius: 12px;
   padding: 0.85rem;
@@ -1930,7 +1930,7 @@ onMounted(() => {
 .kanban-lead-card:hover {
   border-color: var(--surface-5);
   transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-md);
 }
 
 .kanban-lead-card:active {
@@ -2249,7 +2249,7 @@ onMounted(() => {
   justify-content: center;
   gap: 0.25rem;
   padding: 0.45rem 0.5rem;
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--surface-1);
   border-top: 1px solid var(--border-color);
   flex-wrap: nowrap;
 }
@@ -2346,7 +2346,7 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: rgba(0, 0, 0, 0.15);
+  background: var(--surface-1);
 }
 
 .footer-left-info {
@@ -2466,7 +2466,7 @@ onMounted(() => {
 }
 
 .custom-input, .custom-select {
-  background: rgba(0, 0, 0, 0.4);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   border-radius: 10px;
   color: var(--text-main);

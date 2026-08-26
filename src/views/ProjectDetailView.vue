@@ -601,7 +601,7 @@ onMounted(() => {
 }
 
 .task-card {
-  background: rgba(15, 23, 42, 0.7);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   border-radius: 10px;
   padding: 0.6rem 0.75rem;

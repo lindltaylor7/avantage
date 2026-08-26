@@ -1064,7 +1064,7 @@ onMounted(() => {
 .search-input-ref1 {
   width: 100%;
   padding: 0.65rem 2.2rem 0.65rem 2.6rem;
-  background: rgba(18, 18, 22, 0.85);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   border-radius: 12px;
   color: var(--text-main);
@@ -1075,7 +1075,7 @@ onMounted(() => {
 
 .search-input-ref1:focus {
   border-color: var(--primary);
-  background: rgba(22, 22, 28, 0.95);
+  background: var(--bg-card-solid);
   box-shadow: 0 0 14px rgba(76, 63, 145, 0.25);
 }
 
@@ -1109,7 +1109,7 @@ onMounted(() => {
 
 .date-input-ref1 {
   padding: 0.65rem 2.2rem 0.65rem 2.6rem;
-  background: rgba(18, 18, 22, 0.85);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   border-radius: 12px;
   color: var(--text-main);
@@ -1125,7 +1125,7 @@ onMounted(() => {
 
 /* Tabla de Referencia 1 */
 .database-table-card {
-  background: rgba(20, 20, 24, 0.75);
+  background: var(--bg-card-solid);
   backdrop-filter: blur(16px);
   border: 1px solid var(--border-color);
   border-radius: 16px;
@@ -1140,7 +1140,7 @@ onMounted(() => {
 }
 
 .leads-ref-table thead {
-  background: rgba(12, 12, 16, 0.65);
+  background: var(--surface-1);
   border-bottom: 1px solid var(--border-color);
 }
 
@@ -1355,7 +1355,7 @@ onMounted(() => {
 }
 
 .form-section-card {
-  background: rgba(24, 24, 30, 0.7);
+  background: var(--surface-1);
   border: 1px solid var(--border-color);
   border-radius: 14px;
   padding: 1.25rem;
@@ -1420,7 +1420,7 @@ onMounted(() => {
 .field-input, .field-select, .field-textarea {
   width: 100%;
   padding: 0.65rem 0.85rem 0.65rem 2.4rem;
-  background: rgba(14, 14, 18, 0.9);
+  background: var(--surface-2);
   border: 1px solid var(--surface-3);
   border-radius: 10px;
   color: var(--text-main);

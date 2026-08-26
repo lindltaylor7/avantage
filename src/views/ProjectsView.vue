@@ -286,7 +286,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  background: rgba(15, 23, 42, 0.6);
+  background: var(--surface-2);
   border: 1px solid var(--border-color);
   border-radius: 9999px;
   padding: 0.35rem 0.9rem;
