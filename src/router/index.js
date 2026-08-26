@@ -21,7 +21,10 @@ import { isAuthenticated, hasPermission } from '../auth.js';
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', name: 'home', component: HomeView },
+    // Sistema interno: la puerta de entrada es el login, no el evaluador
+    // público. El evaluador sigue existiendo, solo que ya no es la portada.
+    { path: '/', redirect: () => (isAuthenticated() ? { name: 'dashboard' } : { name: 'login' }) },
+    { path: '/evaluador-tesis', name: 'home', component: HomeView },
     { path: '/login', name: 'login', component: LoginView },
     { path: '/dashboard', name: 'dashboard', component: DashboardView, meta: { requiresAuth: true } },
     { path: '/admin/database', name: 'database', component: DatabaseView, meta: { requiresAuth: true, permission: 'leads.view' } },

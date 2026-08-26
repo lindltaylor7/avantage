@@ -5,7 +5,10 @@
       <router-view />
     </AdminLayout>
 
-    <!-- Public Layout for Home & Login -->
+    <!-- Login: pantalla completa, sin el header/footer público -->
+    <router-view v-else-if="isBareRoute" />
+
+    <!-- Public Layout for the rest of the public site -->
     <template v-else>
       <header class="site-header">
         <div class="container header-inner">
@@ -55,9 +58,10 @@
 </template>
 
 <script setup>
-import { computed } from 'vue';
+import { computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { authState, clearSession } from './auth.js';
+import { authState, clearSession, setSession } from './auth.js';
+import { apiFetch } from './apiClient.js';
 import AdminLayout from './components/AdminLayout.vue';
 
 const route = useRoute();
@@ -67,10 +71,33 @@ const isAdminRoute = computed(() => {
   return route.path === '/dashboard' || route.path.startsWith('/admin');
 });
 
+const isBareRoute = computed(() => route.path === '/login');
+
 function handleLogout() {
   clearSession();
   router.push('/login');
 }
+
+// Los permisos quedan grabados en el usuario guardado al iniciar sesión, así
+// que si un admin cambia los permisos de un rol (o se agrega un módulo
+// nuevo, como Finanzas), quien ya tenía la sesión abierta no lo ve hasta
+// volver a loguearse. Para no depender de eso, se refrescan en silencio al
+// abrir la app — si el token ya no es válido, apiFetch se encarga de cerrar
+// la sesión sola.
+async function refreshPermissions() {
+  if (!authState.token) return;
+  try {
+    const response = await apiFetch('/api/auth/me');
+    if (response.ok) {
+      const data = await response.json();
+      setSession(authState.token, data.user);
+    }
+  } catch (error) {
+    console.warn('No se pudo refrescar el usuario/permisos:', error);
+  }
+}
+
+onMounted(refreshPermissions);
 </script>
 
 <style scoped>
