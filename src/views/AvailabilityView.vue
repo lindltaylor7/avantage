@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <main class="container-fluid availability-page-wrapper">
     <header class="availability-header">
       <div class="header-titles">
@@ -71,9 +71,15 @@
         </button>
       </div>
 
-      <p v-if="upcomingMeetings.length === 0 && !isLoadingMeetings" class="meetings-empty">
-        No hay reuniones agendadas todavía. Cuando Avan cierre una cita por WhatsApp, va a aparecer aquí.
-      </p>
+      <div v-if="upcomingMeetings.length === 0 && !isLoadingMeetings" class="meetings-empty-box">
+        <div class="empty-state-visual">
+          <img src="/images/calendar_schedule_art.jpg" alt="Agenda despejada" class="empty-state-photo" />
+        </div>
+        <h5 class="meetings-empty-title">Tu agenda de llamadas está despejada</h5>
+        <p class="meetings-empty-desc">
+          Cuando Avan agende una videollamada con un prospecto calificado desde WhatsApp, o la agendes tú, se sincronizará automáticamente aquí con su enlace de Google Meet.
+        </p>
+      </div>
 
       <ul v-else class="meetings-list">
         <li v-for="meeting in upcomingMeetings" :key="meeting.id" class="meeting-row">
@@ -623,9 +629,45 @@ onUnmounted(() => {
   font-size: 0.78rem;
 }
 
-.meetings-empty {
-  font-size: 0.85rem;
-  color: var(--text-sub);
+.meetings-empty-box {
+  padding: 1.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.empty-state-visual {
+  width: 150px;
+  height: 110px;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-bottom: 1rem;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-color);
+}
+
+.empty-state-photo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.meetings-empty-title {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--text-main);
+  margin-bottom: 0.35rem;
+}
+
+.meetings-empty-desc {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  max-width: 440px;
+  line-height: 1.45;
+  margin: 0;
 }
 
 .meetings-list {

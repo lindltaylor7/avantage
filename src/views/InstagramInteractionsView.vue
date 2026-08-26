@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <main class="container-fluid ig-page-wrapper">
     <!-- Header de Instagram -->
     <header class="ig-header">
@@ -166,9 +166,11 @@
     <!-- TAB 1: Feed de Interacciones -->
     <section v-if="activeTab === 'interactions'">
       <div v-if="!isLoading && interactions.length === 0" class="empty-state">
-        <span class="empty-icon">📭</span>
-        <p>Aún no se han registrado interacciones de Instagram.</p>
-        <p class="empty-hint">Publica un comentario o envía un mensaje de prueba a tu cuenta de Instagram.</p>
+        <div class="empty-state-visual">
+          <img src="/images/empty_chat_state.jpg" alt="Instagram Interacciones" class="empty-state-photo" />
+        </div>
+        <h4 class="empty-title">Aún no se han registrado interacciones de Instagram</h4>
+        <p class="empty-subtitle">Publica un comentario, envía un mensaje directo (DM) o interactúa con una publicación para que aparezca aquí.</p>
       </div>
 
       <div v-else class="interactions-list">
@@ -234,9 +236,12 @@
 
     <!-- TAB 2: Publicaciones & Reels Recientes -->
     <section v-if="activeTab === 'media'" class="ig-media-grid">
-      <div v-if="mediaList.length === 0" class="empty-state">
-        <span class="empty-icon">🎬</span>
-        <p>No se encontraron publicaciones recientes de Instagram.</p>
+      <div v-if="mediaList.length === 0" class="empty-state full-width">
+        <div class="empty-state-visual">
+          <img src="/images/empty_inbox.jpg" alt="Contenido Instagram" class="empty-state-photo" />
+        </div>
+        <h4 class="empty-title">No se encontraron publicaciones recientes</h4>
+        <p class="empty-subtitle">Conecta tu cuenta de Instagram Business para sincronizar los últimos posts y reels.</p>
       </div>
 
       <article v-for="media in mediaList" :key="media.id" class="ig-media-card">
@@ -1227,7 +1232,7 @@ onMounted(fetchAll);
   color: var(--text-sub);
   overflow-x: auto;
   white-space: pre;
-  font-family: 'Courier New', monospace;
+  font-family: var(--font-mono);
   margin: 0;
 }
 

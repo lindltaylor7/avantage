@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <main class="container-fluid database-page-wrapper">
     <!-- Header de la Vista -->
     <header class="database-header">
@@ -178,8 +178,11 @@
           <tr v-if="filteredLeads.length === 0 && !isLoading">
             <td colspan="4" class="empty-table-cell">
               <div class="empty-table-state">
-                <span class="empty-icon">📭</span>
-                <p>No se encontraron prospectos que coincidan con la búsqueda o fecha seleccionada.</p>
+                <div class="empty-state-visual">
+                  <img src="/images/empty_inbox.jpg" alt="Búsqueda de prospectos" class="empty-state-photo" />
+                </div>
+                <h4 class="empty-table-title">No se encontraron prospectos</h4>
+                <p class="empty-table-desc">No hay registros que coincidan con la búsqueda o fecha seleccionada.</p>
                 <button class="btn-action-secondary" @click="clearFilters">Limpiar Filtros</button>
               </div>
             </td>
@@ -1186,7 +1189,7 @@ onMounted(() => {
 .client-phone-text {
   font-size: 0.8rem;
   color: var(--text-muted);
-  font-family: monospace;
+  font-family: var(--font-mono);
 }
 
 .assigned-pill {
@@ -1198,7 +1201,7 @@ onMounted(() => {
 .date-text {
   font-size: 0.84rem;
   color: var(--text-main);
-  font-family: monospace;
+  font-family: var(--font-mono);
 }
 
 .td-options {
@@ -1272,19 +1275,47 @@ onMounted(() => {
 
 .empty-table-cell {
   text-align: center;
-  padding: 3rem 1.5rem;
+  padding: 2.5rem 1.5rem;
 }
 
 .empty-table-state {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.5rem;
   color: var(--text-muted);
 }
 
-.empty-icon {
-  font-size: 2.2rem;
+.empty-state-visual {
+  width: 140px;
+  height: 105px;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-bottom: 0.5rem;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-color);
+}
+
+.empty-state-photo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.empty-table-title {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--text-main);
+  margin: 0;
+}
+
+.empty-table-desc {
+  font-size: 0.84rem;
+  color: var(--text-muted);
+  max-width: 400px;
+  margin-bottom: 0.5rem;
 }
 
 /* ================================================================= */

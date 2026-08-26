@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <main class="container-fluid webhook-page-wrapper">
     <header class="webhook-header">
       <div class="header-titles">
@@ -333,7 +333,7 @@ onUnmounted(() => {
   color: var(--text-sub);
   overflow-x: auto;
   white-space: pre;
-  font-family: 'Courier New', monospace;
+  font-family: var(--font-mono);
   margin: 0;
 }
 

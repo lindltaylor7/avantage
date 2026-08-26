@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="dashboard-container">
     <!-- Welcome Banner Card -->
     <div class="welcome-banner">
@@ -15,13 +15,7 @@
       </div>
 
       <div class="welcome-illustration-wrapper">
-        <svg class="fallback-svg" viewBox="0 0 240 180" fill="none">
-          <rect x="20" y="120" width="200" height="12" rx="4" fill="var(--surface-4)"/>
-          <rect x="50" y="60" width="140" height="60" rx="8" fill="var(--surface-3)" stroke="var(--primary)" stroke-width="2"/>
-          <circle cx="120" cy="40" r="16" fill="var(--primary)"/>
-          <path d="M100 80h40v20h-40z" fill="var(--accent-cyan)"/>
-          <circle cx="160" cy="110" r="8" fill="var(--accent-emerald)"/>
-        </svg>
+        <img src="/images/welcome_dashboard.jpg" alt="Avantage Workspace" class="welcome-img" />
       </div>
     </div>
 
@@ -34,12 +28,11 @@
 
       <div class="section-body">
         <div v-if="pendingCommunicationsCount === 0" class="empty-state">
-          <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-            <polyline points="22,6 12,13 2,6"/>
-          </svg>
-          <p class="empty-title">No hay comunicaciones pendientes por atender</p>
-          <p class="empty-subtitle">Todo está al día en tu bandeja. Nuevos leads o solicitudes aparecerán aquí.</p>
+          <div class="empty-state-visual">
+            <img src="/images/empty_inbox.jpg" alt="Bandeja al día" class="empty-state-photo" />
+          </div>
+          <p class="empty-title">¡Todo al día! No hay comunicaciones pendientes por atender</p>
+          <p class="empty-subtitle">Tu bandeja de entrada está despejada. Nuevos prospectos de tesis, mensajes y solicitudes aparecerán aquí.</p>
         </div>
         <div v-else class="communications-list">
           <div v-for="comm in pendingCommunications" :key="comm.id" class="comm-item">
@@ -198,17 +191,29 @@ onMounted(() => {
 }
 
 .welcome-illustration-wrapper {
-  width: 220px;
-  height: 140px;
+  width: 240px;
+  height: 155px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--border-color);
+  background: var(--surface-1);
 }
 
-.fallback-svg {
+.welcome-img {
   width: 100%;
   height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.3s ease;
+}
+
+.welcome-banner:hover .welcome-img {
+  transform: scale(1.03);
 }
 
 /* Section Cards matching reference image */
@@ -249,30 +254,47 @@ onMounted(() => {
 }
 
 .empty-state {
-  padding: 2.5rem 1.5rem;
+  padding: 2rem 1.5rem;
   text-align: center;
   background-color: var(--surface-1);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   border: 1px dashed var(--border-color);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 
-.empty-icon {
-  width: 42px;
-  height: 42px;
-  stroke: var(--text-muted);
-  margin-bottom: 0.75rem;
+.empty-state-visual {
+  width: 140px;
+  height: 140px;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-bottom: 1rem;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-color);
+}
+
+.empty-state-photo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .empty-title {
+  font-family: var(--font-heading);
   font-weight: 600;
-  font-size: 0.95rem;
-  color: var(--text-sub);
-  margin-bottom: 0.25rem;
+  font-size: 1rem;
+  color: var(--text-main);
+  margin-bottom: 0.35rem;
 }
 
 .empty-subtitle {
-  font-size: 0.825rem;
+  font-size: 0.85rem;
   color: var(--text-muted);
+  max-width: 480px;
+  line-height: 1.45;
 }
 
 .communications-list {

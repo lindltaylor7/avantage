@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <main class="container-fluid social-page-wrapper">
     <header class="social-header">
       <div class="header-titles">
@@ -89,9 +89,11 @@
 
     <!-- Lista de interacciones -->
     <section v-if="!isLoading && interactions.length === 0" class="empty-state">
-      <span class="empty-icon">📭</span>
-      <p>Aún no se ha recibido ninguna interacción.</p>
-      <p class="empty-hint">Asegúrate de suscribir el campo "feed" en el webhook de Meta y comenta/reacciona a un post de prueba.</p>
+      <div class="empty-state-visual">
+        <img src="/images/empty_chat_state.jpg" alt="Facebook Feed" class="empty-state-photo" />
+      </div>
+      <h4 class="empty-title">Aún no se han recibido interacciones de Facebook</h4>
+      <p class="empty-subtitle">Asegúrate de suscribir el campo "feed" en el webhook de Meta y comenta o reacciona a un post de prueba en tu página.</p>
     </section>
 
     <section v-else class="interactions-list">
@@ -119,9 +121,11 @@
     <!-- Mensajes de Messenger -->
     <h3 class="subsection-title">📩 Mensajes de Messenger ({{ messengerStats.total || 0 }})</h3>
     <section v-if="!isLoading && messengerMessages.length === 0" class="empty-state">
-      <span class="empty-icon">📭</span>
-      <p>Aún no se ha recibido ningún mensaje directo.</p>
-      <p class="empty-hint">Asegúrate de suscribir el campo "messages" en el webhook de Meta y escribe a la Página desde Messenger.</p>
+      <div class="empty-state-visual">
+        <img src="/images/empty_inbox.jpg" alt="Messenger Inbox" class="empty-state-photo" />
+      </div>
+      <h4 class="empty-title">Aún no se ha recibido ningún mensaje directo de Messenger</h4>
+      <p class="empty-subtitle">Asegúrate de suscribir el campo "messages" en el webhook de Meta y envía un mensaje a la página para verificar la recepción.</p>
     </section>
     <section v-else class="messenger-list">
       <article v-for="msg in messengerMessages" :key="msg.id" class="messenger-card">

@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div v-if="report" class="glass-panel report-panel">
     <!-- Encabezado del Reporte -->
     <div class="report-header">
@@ -145,11 +145,26 @@
 
   <!-- Empty State Placeholder -->
   <div v-else class="glass-panel report-empty">
-    <div class="report-empty-icon">🎓</div>
+    <div class="report-empty-image-wrapper">
+      <img src="/images/thesis_viability_guide.jpg" alt="Evaluador de Viabilidad de Tesis" class="report-empty-img" />
+    </div>
+    <span class="page-eyebrow">Diagnóstico Automático</span>
     <h3 class="report-empty-title">Esperando solicitud de evaluación</h3>
     <p class="report-empty-text">
-      Completa el formulario con tu tema de tesis para generar los embeddings vectoriales con Ollama y calcular el índice de viabilidad académica en Perú.
+      Ingresa tu propuesta en el asistente interactivo para contrastar tu investigación contra los estándares de SUNEDU y CONCYTEC.
     </p>
+
+    <div class="report-empty-features">
+      <div class="feature-chip">
+        <span>🧬</span> Embeddings Ollama
+      </div>
+      <div class="feature-chip">
+        <span>🇵🇪</span> Líneas CONCYTEC
+      </div>
+      <div class="feature-chip">
+        <span>📊</span> Rigor Metodológico
+      </div>
+    </div>
   </div>
 </template>
 
@@ -305,33 +320,67 @@ function getLevelClass(level) {
 }
 
 .report-empty {
-  padding: 3rem 2rem;
+  padding: 2.5rem 2rem;
   text-align: center;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 480px;
+  min-height: 520px;
 }
 
-.report-empty-icon {
-  font-size: 4rem;
-  margin-bottom: 1rem;
-  opacity: 0.8;
+.report-empty-image-wrapper {
+  width: 220px;
+  height: 155px;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--border-color);
+  margin-bottom: 1.25rem;
+  background: var(--surface-1);
+}
+
+.report-empty-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .report-empty-title {
   font-family: var(--font-heading);
   font-weight: 700;
-  font-size: 1.35rem;
+  font-size: 1.25rem;
   color: var(--text-main);
+  margin-top: 0.35rem;
   margin-bottom: 0.5rem;
 }
 
 .report-empty-text {
   color: var(--text-muted);
-  max-width: 420px;
-  font-size: 0.9rem;
-  line-height: 1.5;
+  max-width: 440px;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  margin-bottom: 1.25rem;
+}
+
+.report-empty-features {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.feature-chip {
+  background: var(--surface-2);
+  border: 1px solid var(--border-color);
+  padding: 0.35rem 0.85rem;
+  border-radius: 9999px;
+  font-size: 0.78rem;
+  color: var(--text-sub);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 500;
 }
 </style>

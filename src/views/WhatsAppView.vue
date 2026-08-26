@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <main class="container-fluid whatsapp-page-wrapper">
     <header class="whatsapp-header">
       <div class="header-titles">
@@ -177,9 +177,11 @@
     <!-- Bandeja de conversaciones -->
     <h3 class="subsection-title">Conversaciones</h3>
     <section v-if="!isLoading && conversations.length === 0" class="empty-state">
-      <span class="empty-icon">📭</span>
-      <p>Aún no se ha recibido ningún mensaje de WhatsApp.</p>
-      <p class="empty-hint">Envía un mensaje de prueba al número de WhatsApp Business conectado.</p>
+      <div class="empty-state-visual">
+        <img src="/images/empty_chat_state.jpg" alt="WhatsApp Inbox" class="empty-state-photo" />
+      </div>
+      <h4 class="empty-title">Aún no se han recibido conversaciones</h4>
+      <p class="empty-subtitle">Envía un mensaje de prueba al número de WhatsApp Business conectado o usa el simulador de mensajes para interactuar con Avan.</p>
     </section>
 
     <section v-else class="whatsapp-inbox">
@@ -262,8 +264,11 @@
         </template>
 
         <div v-else class="thread-placeholder">
-          <span class="empty-icon">💬</span>
-          <p>Selecciona una conversación para ver el hilo y responder.</p>
+          <div class="thread-placeholder-card">
+            <img src="/images/empty_chat_state.jpg" alt="Chat" class="thread-placeholder-img" />
+            <h4 class="thread-placeholder-title">Bandeja de Conversación</h4>
+            <p class="thread-placeholder-desc">Selecciona un contacto del panel izquierdo para ver los mensajes en vivo o continuar la atención personalizada.</p>
+          </div>
         </div>
       </div>
     </section>
@@ -1123,9 +1128,41 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: var(--text-sub);
+  padding: 2rem 1.5rem;
+  background: var(--surface-1);
+}
+
+.thread-placeholder-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   text-align: center;
-  padding: 1rem;
+  max-width: 380px;
+}
+
+.thread-placeholder-img {
+  width: 170px;
+  height: 125px;
+  border-radius: var(--radius-lg);
+  object-fit: cover;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-color);
+  margin-bottom: 1.25rem;
+}
+
+.thread-placeholder-title {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: var(--text-main);
+  margin-bottom: 0.4rem;
+}
+
+.thread-placeholder-desc {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0;
 }
 
 .events-list {
@@ -1187,7 +1224,7 @@ onUnmounted(() => {
   color: var(--text-sub);
   overflow-x: auto;
   white-space: pre;
-  font-family: 'Courier New', monospace;
+  font-family: var(--font-mono);
   margin: 0;
 }
 
@@ -1366,7 +1403,7 @@ onUnmounted(() => {
 
 .activity-wa {
   color: var(--accent-cyan);
-  font-family: 'Courier New', monospace;
+  font-family: var(--font-mono);
 }
 
 .activity-time {

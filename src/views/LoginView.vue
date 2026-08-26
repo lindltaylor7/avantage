@@ -1,7 +1,8 @@
-﻿<template>
+<template>
   <div class="login-split">
     <!-- Panel de marca -->
     <section class="login-hero">
+      <div class="login-hero-bg-art"></div>
       <div class="login-hero-glow"></div>
       <div class="login-hero-ring"></div>
 
@@ -113,6 +114,18 @@ async function handleLogin() {
   justify-content: space-between;
   background: linear-gradient(150deg, #0A0D0D 0%, #101414 48%, #3F4A1A 100%);
   color: #F7F8F1;
+}
+
+.login-hero-bg-art {
+  position: absolute;
+  inset: 0;
+  background-image: url('/images/welcome_dashboard.jpg');
+  background-size: cover;
+  background-position: center;
+  opacity: 0.12;
+  mix-blend-mode: luminosity;
+  filter: contrast(1.2) brightness(0.8);
+  pointer-events: none;
 }
 
 .login-hero-glow {

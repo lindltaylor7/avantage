@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <main class="container-fluid finance-page">
     <header class="page-header">
       <div class="page-header-titles">
@@ -154,9 +154,11 @@
         <p>Cargando movimientos...</p>
       </div>
       <div v-else-if="transactions.length === 0" class="empty-state">
-        <span class="empty-state-icon">🗂️</span>
-        <p class="empty-state-title">Sin movimientos registrados</p>
-        <p class="empty-state-text">Usa "+ Registrar movimiento" para anotar el primer ingreso o egreso.</p>
+        <div class="empty-state-visual">
+          <img src="/images/finance_balance_art.jpg" alt="Finanzas y Crecimiento" class="empty-state-photo" />
+        </div>
+        <p class="empty-state-title">Sin movimientos registrados en este período</p>
+        <p class="empty-state-text">Usa el botón "+ Registrar movimiento" para anotar tu primer ingreso de matrícula o egreso operativo.</p>
       </div>
       <div v-else class="data-table-wrapper">
         <table class="data-table">
@@ -646,6 +648,23 @@ onMounted(() => {
 .finance-delete-btn {
   padding: 0.3rem 0.55rem;
   font-size: 0.8rem;
+}
+
+.empty-state-visual {
+  width: 150px;
+  height: 110px;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-bottom: 1rem;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-color);
+}
+
+.empty-state-photo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 @media (max-width: 768px) {

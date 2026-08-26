@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <main class="container" style="flex: 1; padding-top: 2rem; padding-bottom: 4rem;">
     <div style="display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem;">
       <div>
@@ -85,8 +85,17 @@
         </tbody>
       </table>
 
-      <div v-else-if="!isLoading" style="text-align: center; padding: 2.5rem 1rem; color: var(--text-muted);">
-        Todavía no hay proyectos. Se crean automáticamente cuando un lead llega a la columna "Ganado" del funnel.
+      <div v-else-if="!isLoading" class="projects-empty-card">
+        <div class="empty-state-visual">
+          <img src="/images/empty_projects_state.jpg" alt="Proyectos y Avances" class="empty-state-photo" />
+        </div>
+        <h4 class="projects-empty-title">Aún no hay proyectos registrados</h4>
+        <p class="projects-empty-desc">
+          Los proyectos se generan automáticamente cuando un prospecto llega al estado "Ganado" en el funnel comercial, o puedes crearlo manualmente.
+        </p>
+        <button class="btn-primary" style="width: auto; padding: 0.55rem 1.25rem; font-size: 0.85rem;" @click="openCreateModal">
+          + Registrar Primer Proyecto
+        </button>
       </div>
     </div>
 
@@ -342,4 +351,46 @@ onMounted(() => {
 .status-en-desarrollo { background: rgba(111, 129, 37, 0.15); color: var(--on-tint-strong); border: 1px solid rgba(111, 129, 37, 0.35); }
 .status-entregado { background: rgba(191, 194, 199, 0.15); color: var(--accent-silver); border: 1px solid rgba(191, 194, 199, 0.35); }
 .status-cancelado { background: rgba(200, 85, 50, 0.15); color: var(--accent-rose); border: 1px solid rgba(200, 85, 50, 0.35); }
+
+.projects-empty-card {
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.empty-state-visual {
+  width: 170px;
+  height: 125px;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-bottom: 1.25rem;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-color);
+}
+
+.empty-state-photo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.projects-empty-title {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 1.15rem;
+  color: var(--text-main);
+  margin-bottom: 0.4rem;
+}
+
+.projects-empty-desc {
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  max-width: 480px;
+  line-height: 1.5;
+  margin-bottom: 1.25rem;
+}
 </style>
