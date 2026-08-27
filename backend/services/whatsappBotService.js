@@ -4,12 +4,18 @@ import { WhatsappBotSettingsService } from './whatsappBotSettingsService.js';
 
 const MAX_ACTIVITY_LOG = 100;
 
-// Rango de espera antes de cada mensaje automático (simula el tiempo de
-// "escribiendo..." de una persona real y evita ráfagas de mensajes
-// instantáneos que WhatsApp puede marcar como comportamiento de spam/bot,
-// afectando la calidad del número o llevando a su restricción.
-const BOT_DELAY_MIN_MS = Number(process.env.WHATSAPP_BOT_DELAY_MIN_MS) || 1500;
-const BOT_DELAY_MAX_MS = Number(process.env.WHATSAPP_BOT_DELAY_MAX_MS) || 3500;
+// Espera mínima estricta entre dos mensajes salientes del bot al MISMO
+// contacto: evita ráfagas de mensajes instantáneos que WhatsApp puede marcar
+// como comportamiento de spam/bot (afecta la calidad del número o lo lleva a
+// una restricción). Es configurable por contacto desde el panel
+// (whatsapp_bot_settings.message_gap_seconds); este valor solo es el
+// respaldo si la configuración no está disponible.
+const DEFAULT_MESSAGE_GAP_MS = (Number(process.env.WHATSAPP_BOT_MESSAGE_GAP_SECONDS) || 5) * 1000;
+
+// Pausa breve de "está escribiendo" antes de un mensaje cuando ya pasó de
+// sobra la espera mínima desde el mensaje anterior (para que no salga
+// instantáneo tras una operación lenta como la llamada al LLM).
+const TYPING_PAUSE_MS = 1500;
 
 // Asesor cuyo Google Calendar usa el bot para agendar las llamadas que
 // ofrece al terminar de calificar el tema (por ahora uno solo, fijo, en vez
@@ -66,10 +72,6 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function randomDelay() {
-  return BOT_DELAY_MIN_MS + Math.random() * (BOT_DELAY_MAX_MS - BOT_DELAY_MIN_MS);
-}
-
 function numberedList(items) {
   return items.map((item, i) => `${i + 1}. ${item}`).join('\n');
 }
@@ -103,6 +105,12 @@ export class WhatsappBotService {
     // de las burbujas de un contacto mientras se espera el silencio de
     // MESSAGE_DEBOUNCE_MS antes de procesar el turno conversacional.
     this.pendingMessages = new Map();
+    // wa_id -> timestamp del último mensaje que el bot le envió (para respetar
+    // la espera mínima estricta entre mensajes).
+    this.lastSentAt = new Map();
+    // wa_id -> message_id del último mensaje entrante, necesario para mostrarle
+    // el indicador de "escribiendo..." de WhatsApp antes de responder.
+    this.lastInboundMessageId = new Map();
     // Bitácora en memoria (más reciente primero) de lo que hace el bot: cuándo
     // agrupa mensajes, qué le manda al LLM de Ollama Cloud, qué responde, y si
     // el envío por WhatsApp tuvo éxito. Sirve para verificar visualmente desde
@@ -175,10 +183,45 @@ export class WhatsappBotService {
     }
   }
 
+  /**
+   * Envía un mensaje del bot respetando: (1) el indicador de "escribiendo..."
+   * de WhatsApp si está habilitado, y (2) una espera mínima estricta desde el
+   * mensaje anterior al mismo contacto (message_gap_seconds), para no caer en
+   * comportamiento de spam.
+   */
   async send(waId, text) {
-    await sleep(randomDelay());
+    let settings = {};
+    try {
+      settings = await this.settingsService.get();
+    } catch { /* si falla, se usan los valores por defecto de abajo */ }
+
+    const gapMs = settings.message_gap_seconds != null
+      ? Math.max(0, Number(settings.message_gap_seconds) * 1000)
+      : DEFAULT_MESSAGE_GAP_MS;
+
+    const last = this.lastSentAt.get(waId) || 0;
+    const sinceLast = last ? Date.now() - last : Infinity;
+    const waitMs = last === 0
+      ? gapMs
+      : Math.max(gapMs - sinceLast, TYPING_PAUSE_MS);
+
+    const typingEnabled = settings.typing_indicator_enabled == null ? true : !!settings.typing_indicator_enabled;
+    if (typingEnabled) {
+      const inboundId = this.lastInboundMessageId.get(waId);
+      if (inboundId) {
+        try {
+          await this.whatsappMessageService.sendTypingIndicator(inboundId);
+        } catch (error) {
+          this.logActivity({ type: 'typing_indicator_failed', waId, error: error.message });
+        }
+      }
+    }
+
+    if (waitMs > 0) await sleep(waitMs);
+
     try {
       await this.whatsappMessageService.sendTextMessage(waId, text);
+      this.lastSentAt.set(waId, Date.now());
       this.logActivity({ type: 'send_success', waId, text });
     } catch (error) {
       this.logActivity({ type: 'send_failed', waId, text, error: error.message });
@@ -192,7 +235,12 @@ export class WhatsappBotService {
    * de silencio antes de mandarlos al LLM; la selección de horario tras
    * ofrecer agendar se procesa aparte, sin debounce.
    */
-  async handleIncomingMessage(waId, text) {
+  async handleIncomingMessage(waId, text, messageId = null) {
+    // Se guarda el id del mensaje entrante para poder mostrar el indicador de
+    // "escribiendo..." de WhatsApp (que se envía referenciando ese id) antes
+    // de cada respuesta del bot.
+    if (messageId) this.lastInboundMessageId.set(waId, messageId);
+
     // Si ya hay un buffer en curso para este wa_id, esta burbuja se suma a
     // las anteriores y se reinicia la espera de silencio, en vez de procesar
     // un turno por cada mensaje suelto.
@@ -344,6 +392,7 @@ export class WhatsappBotService {
       incomingText,
       isFirstTurn,
       toneInstructions: settings.tone_instructions,
+      shortReplies: settings.short_replies_enabled == null ? true : !!settings.short_replies_enabled,
       contactName
     });
     this.logActivity({
@@ -486,6 +535,21 @@ export class WhatsappBotService {
 
       await this.send(waId, '📅 ¿Qué día te gustaría para la llamada? (ej: "mañana", "el jueves", o una fecha)');
     } catch (error) {
+      // Si la conexión de Google Calendar del asesor caducó, avisar al equipo
+      // en el panel para que la reconecte — si no, todos los leads que
+      // lleguen a este punto se transfieren a mano en silencio.
+      if (error.code === 'GOOGLE_RECONNECT_REQUIRED' && this.notificationService) {
+        try {
+          await this.notificationService.create({
+            type: 'google_calendar_disconnected',
+            title: 'Reconecta el Google Calendar del asesor',
+            body: 'Avan no pudo ofrecer agendar una llamada: la conexión de Google Calendar caducó. Reconéctala en "Disponibilidad".',
+            link: '/admin/availability'
+          });
+        } catch (notifyError) {
+          console.error('❌ [WhatsApp Bot] Error al crear la notificación de Google Calendar desconectado:', notifyError);
+        }
+      }
       await this.handOffToAdvisor(waId, error.message);
     }
   }

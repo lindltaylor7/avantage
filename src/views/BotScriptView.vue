@@ -70,6 +70,34 @@
         </p>
       </section>
 
+      <section class="glass-panel bot-settings-panel">
+        <h3 class="bot-info-title">💬 Comportamiento de los mensajes</h3>
+
+        <label class="bot-toggle-row">
+          <input type="checkbox" v-model="form.shortRepliesEnabled" />
+          <span>
+            <strong>Respuestas cortas</strong>
+            <span class="bot-field-hint">Fuerza al bot a responder en 1 línea, directo al grano, sin introducciones ni cierres largos.</span>
+          </span>
+        </label>
+
+        <label class="bot-toggle-row">
+          <input type="checkbox" v-model="form.typingIndicatorEnabled" />
+          <span>
+            <strong>Mostrar "escribiendo…"</strong>
+            <span class="bot-field-hint">Antes de cada respuesta, marca el mensaje del contacto como leído y muestra el indicador de escritura de WhatsApp.</span>
+          </span>
+        </label>
+
+        <div class="form-group bot-gap-group">
+          <label class="form-label">Espera mínima entre mensajes del bot (segundos)</label>
+          <input v-model.number="form.messageGapSeconds" type="number" min="0" max="60" class="form-input bot-gap-input" />
+          <p class="bot-field-hint">
+            Espera estricta entre dos mensajes seguidos del bot al mismo contacto, para no caer en comportamiento de spam. Recomendado: 5.
+          </p>
+        </div>
+      </section>
+
       <section class="glass-panel bot-info-panel">
         <h3 class="bot-info-title">⚙️ Cómo funciona ahora</h3>
         <div class="bot-info-grid">
@@ -105,7 +133,10 @@ const form = reactive({
   toneInstructions: '',
   defaultAcademicLevel: 'Pregrado (Bachiller/Título)',
   defaultFieldOfStudy: '',
-  defaultLocation: ''
+  defaultLocation: '',
+  shortRepliesEnabled: true,
+  typingIndicatorEnabled: true,
+  messageGapSeconds: 5
 });
 
 function toForm(settings) {
@@ -113,7 +144,10 @@ function toForm(settings) {
     toneInstructions: settings.tone_instructions || '',
     defaultAcademicLevel: settings.default_academic_level || 'Pregrado (Bachiller/Título)',
     defaultFieldOfStudy: settings.default_field_of_study || '',
-    defaultLocation: settings.default_location || ''
+    defaultLocation: settings.default_location || '',
+    shortRepliesEnabled: settings.short_replies_enabled == null ? true : !!settings.short_replies_enabled,
+    typingIndicatorEnabled: settings.typing_indicator_enabled == null ? true : !!settings.typing_indicator_enabled,
+    messageGapSeconds: settings.message_gap_seconds == null ? 5 : Number(settings.message_gap_seconds)
   };
 }
 
@@ -227,6 +261,31 @@ onMounted(fetchSettings);
 .bot-defaults-grid .form-group {
   margin-bottom: 0;
 }
+
+.bot-toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border-color);
+  cursor: pointer;
+}
+
+.bot-toggle-row:first-of-type { padding-top: 0.25rem; }
+
+.bot-toggle-row input {
+  margin-top: 0.2rem;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.bot-toggle-row span { display: block; }
+.bot-toggle-row strong { display: block; font-size: 0.9rem; color: var(--text-main); }
+.bot-toggle-row .bot-field-hint { margin-top: 0.15rem; }
+
+.bot-gap-group { margin-top: 1rem; margin-bottom: 0; }
+.bot-gap-input { max-width: 120px; }
 
 .bot-info-panel {
   padding: 1.5rem;

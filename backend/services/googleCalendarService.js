@@ -115,6 +115,29 @@ export class GoogleCalendarService {
   }
 
   /**
+   * Cuando Google responde `invalid_grant`, el refresh token del asesor ya no
+   * sirve (lo revocó, caducó por inactividad, o cambió su contraseña). Se
+   * borra la conexión guardada para que el panel muestre "no conectado" y el
+   * asesor sepa que tiene que volver a autorizar, y se lanza un error claro
+   * (code GOOGLE_RECONNECT_REQUIRED) en vez del críptico "invalid_grant".
+   */
+  async handleTokenError(userId, error) {
+    const reason = String(error?.response?.data?.error || error?.message || '');
+    if (reason.includes('invalid_grant')) {
+      try {
+        await db('google_calendar_connections').where({ user_id: userId }).delete();
+      } catch (dbError) {
+        console.error('❌ [Google Calendar] Error al borrar la conexión caducada:', dbError);
+      }
+      console.warn(`⚠️ [Google Calendar] El refresh token del usuario ${userId} ya no es válido (invalid_grant); se eliminó la conexión. El asesor debe volver a conectar su Google Calendar desde "Disponibilidad".`);
+      const friendly = new Error('La conexión de Google Calendar del asesor caducó. Debe volver a conectarla desde la sección "Disponibilidad".');
+      friendly.code = 'GOOGLE_RECONNECT_REQUIRED';
+      throw friendly;
+    }
+    throw error;
+  }
+
+  /**
    * Cliente OAuth2 listo para llamar la API, con refresco automático del
    * access_token (googleapis lo renueva solo si está por vencer) y persiste
    * el access_token renovado para no repetir el refresh en cada llamada.
@@ -157,7 +180,9 @@ export class GoogleCalendarService {
     const client = await this.getAuthorizedClient(userId);
     const calendar = google.calendar({ version: 'v3', auth: client });
 
-    const { data } = await calendar.events.insert({
+    let data;
+    try {
+      ({ data } = await calendar.events.insert({
       calendarId: 'primary',
       conferenceDataVersion: 1,
       sendUpdates: attendeeEmail ? 'all' : 'none',
@@ -174,7 +199,10 @@ export class GoogleCalendarService {
           }
         }
       }
-    });
+      }));
+    } catch (error) {
+      await this.handleTokenError(userId, error);
+    }
 
     return {
       eventId: data.id,
@@ -197,13 +225,18 @@ export class GoogleCalendarService {
 
     const client = await this.getAuthorizedClient(userId);
     const calendar = google.calendar({ version: 'v3', auth: client });
-    const { data } = await calendar.events.list({
-      calendarId: 'primary',
-      timeMin: candidates[0].start.toISOString(),
-      timeMax: candidates[candidates.length - 1].end.toISOString(),
-      singleEvents: true,
-      orderBy: 'startTime'
-    });
+    let data;
+    try {
+      ({ data } = await calendar.events.list({
+        calendarId: 'primary',
+        timeMin: candidates[0].start.toISOString(),
+        timeMax: candidates[candidates.length - 1].end.toISOString(),
+        singleEvents: true,
+        orderBy: 'startTime'
+      }));
+    } catch (error) {
+      await this.handleTokenError(userId, error);
+    }
     const busyPeriods = (data.items || [])
       .filter((event) => event.status !== 'cancelled' && event.start?.dateTime && event.end?.dateTime)
       .map((event) => ({ start: new Date(event.start.dateTime).getTime(), end: new Date(event.end.dateTime).getTime() }));

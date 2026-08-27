@@ -250,7 +250,7 @@ Detalles adicionales: ${additionalNotes || 'Ninguno'}`;
    * no hay conexión a Ollama Cloud (sin API key, o la llamada falla), se usa
    * una lógica de respaldo mínima basada en reglas.
    */
-  async converseAsAvan({ history, knownAnswers, incomingText, isFirstTurn, toneInstructions, contactName }) {
+  async converseAsAvan({ history, knownAnswers, incomingText, isFirstTurn, toneInstructions, contactName, shortReplies = true }) {
     const activeApiKey = this.apiKey || process.env.OLLAMA_API_KEY || '';
     let activeHost = this.host || 'https://ollama.com';
     if (activeHost === 'https://api.ollama.com') activeHost = 'https://ollama.com';
@@ -275,7 +275,9 @@ REGLA DURA #2 — INTENCIÓN DE AGENDAR: si en cualquier momento el contacto pid
 REGLA DURA #3 — NO REPITAS PREGUNTAS: si ya hiciste una pregunta (aunque sea con otras palabras) y el contacto no la respondió directamente sino que dijo otra cosa (p. ej. cambió de tema o pidió agendar), NO vuelvas a hacer esa misma pregunta reformulada en el siguiente turno. Seguí el hilo de lo último que dijo, no tu propia agenda de preguntas.
 
 REGLAS DE TONO Y FORMATO (es WhatsApp, no un formulario):
-- Máximo 2-4 líneas por mensaje. Cercano, empático, natural, nada de tono corporativo o de encuesta. Nunca enumeres preguntas ni digas "Pregunta X de Y". Sin listas ni viñetas. Máximo 1-2 emojis.
+- ${shortReplies
+  ? 'RESPUESTAS MUY CORTAS: 1 línea, idealmente menos de 25 palabras. Una sola idea + una sola pregunta. Sin introducciones ("Entiendo que...", "Qué interesante..."), sin cierres ("quedo atento", "cualquier cosa me avisas"), sin repetir lo que ya dijiste. Ve directo al grano.'
+  : 'Máximo 2-3 líneas por mensaje.'} Cercano, empático, natural, nada de tono corporativo o de encuesta. Nunca enumeres preguntas ni digas "Pregunta X de Y". Sin listas ni viñetas. Máximo 1 emoji.
 - Haz UNA sola pregunta a la vez: la más relevante según lo que ya sabes (ver "DATOS YA CONFIRMADOS" abajo) y lo que la persona acaba de escribir.
 - No le prometas ni menciones un "reporte de viabilidad", "evaluación con IA" ni ningún puntaje — el valor que le ofreces es la llamada con el asesor, no un análisis automático.
 - Si preguntan por precios/costos, no los inventes ni los evadas en seco: dile que el asesor se los detalla en la llamada, y usa eso para impulsar el agendamiento (regla dura #2).

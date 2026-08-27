@@ -100,7 +100,7 @@ export class WhatsappWebhookService {
           // nuevo (Meta puede reenviar el mismo evento por reintentos; sin
           // este chequeo el bot procesaría el mismo mensaje dos veces).
           if (isNew && this.botService && message.type === 'text' && message.text?.body) {
-            await this.botService.handleIncomingMessage(senderId, message.text.body);
+            await this.botService.handleIncomingMessage(senderId, message.text.body, message.id);
           }
         } catch (error) {
           console.error(`❌ [WhatsApp Webhook] Error al guardar el mensaje ${message.id}:`, error);

@@ -239,6 +239,38 @@ export class WhatsappMessageService {
   }
 
   /**
+   * Marca el último mensaje del contacto como leído y muestra el indicador de
+   * "escribiendo..." de WhatsApp (dura hasta 25s o hasta que el bot envía su
+   * respuesta). Requiere el `message_id` del mensaje entrante. Silencioso si
+   * WhatsApp no está configurado o no hay un id.
+   */
+  async sendTypingIndicator(messageId) {
+    const phoneNumberId = process.env.META_WHATSAPP_PHONE_NUMBER_ID;
+    const accessToken = process.env.META_WHATSAPP_ACCESS_TOKEN || process.env.META_PAGE_ACCESS_TOKEN;
+    if (!phoneNumberId || !accessToken || !messageId) return;
+
+    const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${phoneNumberId}/messages`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        status: 'read',
+        message_id: messageId,
+        typing_indicator: { type: 'text' }
+      })
+    });
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data?.error?.message || `WhatsApp rechazó el indicador de escritura (HTTP ${response.status}).`);
+    }
+  }
+
+  /**
    * Actualiza el estado (sent/delivered/read/failed) de un mensaje saliente a
    * partir de las actualizaciones de estado recibidas por webhook, guardando
    * el motivo del fallo si WhatsApp lo reporta.

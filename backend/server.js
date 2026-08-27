@@ -1411,8 +1411,14 @@ app.get('/api/whatsapp/bot-settings', requireAuth, requirePermission('leads.view
 
 app.put('/api/whatsapp/bot-settings', requireAuth, requirePermission('leads.view'), async (req, res) => {
   try {
-    const { toneInstructions, defaultAcademicLevel, defaultFieldOfStudy, defaultLocation } = req.body || {};
-    const settings = await whatsappBotSettingsService.update({ toneInstructions, defaultAcademicLevel, defaultFieldOfStudy, defaultLocation });
+    const {
+      toneInstructions, defaultAcademicLevel, defaultFieldOfStudy, defaultLocation,
+      shortRepliesEnabled, typingIndicatorEnabled, messageGapSeconds
+    } = req.body || {};
+    const settings = await whatsappBotSettingsService.update({
+      toneInstructions, defaultAcademicLevel, defaultFieldOfStudy, defaultLocation,
+      shortRepliesEnabled, typingIndicatorEnabled, messageGapSeconds
+    });
     res.json({ settings });
   } catch (error) {
     console.error('❌ Error al guardar la configuración del bot:', error);
