@@ -203,11 +203,19 @@ app.put('/api/availability/me', requireAuth, async (req, res) => {
 app.get('/api/google/status', requireAuth, async (req, res) => {
   try {
     const configured = googleCalendarService.isConfigured();
-    const connection = configured ? await googleCalendarService.getConnection(req.user.id) : null;
+    if (!configured) {
+      return res.json({ configured: false, connected: false, email: null });
+    }
+    // Verifica que el token siga vivo (no solo que exista la fila), para que
+    // el panel no muestre "Conectado" cuando en realidad Google ya revocó el
+    // acceso — que es justo lo que hacía fallar al bot en silencio.
+    const status = await googleCalendarService.verifyConnection(req.user.id);
     res.json({
-      configured,
-      connected: !!connection,
-      email: connection?.google_email || null
+      configured: true,
+      connected: status.connected,
+      email: status.email,
+      needsReconnect: status.needsReconnect || false,
+      warning: status.warning || null
     });
   } catch (error) {
     console.error('❌ Error al obtener el estado de Google Calendar:', error);

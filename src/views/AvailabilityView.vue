@@ -36,6 +36,9 @@
           <span v-else-if="googleStatus.connected" class="google-sub">
             Conectado como <strong>{{ googleStatus.email }}</strong>. Las reuniones que se agenden contigo se crearán ahí, con link de Google Meet.
           </span>
+          <span v-else-if="googleStatus.needsReconnect" class="google-sub google-sub-warn">
+            ⚠️ Tu conexión con Google Calendar caducó (Google revocó el acceso). Vuelve a conectarla para que Avan pueda agendar llamadas en tu calendario.
+          </span>
           <span v-else class="google-sub">
             Conecta tu cuenta de Google para que las reuniones agendadas contigo generen automáticamente un link de Google Meet en tu propio calendario.
           </span>
@@ -191,7 +194,7 @@ const isSaving = ref(false);
 const errorMessage = ref('');
 const savedMessage = ref('');
 
-const googleStatus = ref({ configured: false, connected: false, email: null });
+const googleStatus = ref({ configured: false, connected: false, email: null, needsReconnect: false });
 const isConnectingGoogle = ref(false);
 const isTestingGoogle = ref(false);
 const googleTestResult = ref(null);
@@ -595,6 +598,11 @@ onUnmounted(() => {
   font-size: 0.82rem;
   color: var(--text-sub);
   line-height: 1.4;
+}
+
+.google-sub-warn {
+  color: var(--accent-rose);
+  font-weight: 600;
 }
 
 .google-actions {

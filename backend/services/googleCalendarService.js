@@ -66,6 +66,36 @@ export class GoogleCalendarService {
     return db('google_calendar_connections').where({ user_id: userId }).first();
   }
 
+  /**
+   * Comprueba que la conexión guardada siga VIVA (no basta con que exista la
+   * fila): fuerza un refresco del access token. Si el refresh token ya fue
+   * revocado/expiró (`invalid_grant`), borra la conexión y devuelve
+   * `connected: false` para que el panel muestre "Conectar" en vez de un
+   * "Conectado" falso.
+   */
+  async verifyConnection(userId) {
+    const connection = await this.getConnection(userId);
+    if (!connection) return { connected: false, email: null };
+
+    try {
+      const client = await this.getAuthorizedClient(userId);
+      const token = await client.getAccessToken(); // refresca si hace falta
+      if (!token || !token.token) throw new Error('Google no devolvió un access token válido.');
+      return { connected: true, email: connection.google_email };
+    } catch (error) {
+      const reason = String(error?.response?.data?.error || error?.message || '');
+      if (reason.includes('invalid_grant')) {
+        await db('google_calendar_connections').where({ user_id: userId }).delete().catch(() => {});
+        console.warn(`⚠️ [Google Calendar] La conexión del usuario ${userId} ya no es válida (invalid_grant); se eliminó. El asesor debe reconectar.`);
+        return { connected: false, email: null, needsReconnect: true };
+      }
+      // Otro tipo de error (red, cuota, etc.): no se borra la conexión, pero
+      // se avisa de que no se pudo verificar en este momento.
+      console.warn(`⚠️ [Google Calendar] No se pudo verificar la conexión del usuario ${userId}: ${reason}`);
+      return { connected: true, email: connection.google_email, warning: reason };
+    }
+  }
+
   async saveConnectionFromCode(userId, code) {
     const client = this.createOAuthClient();
     const { tokens } = await client.getToken(code);
