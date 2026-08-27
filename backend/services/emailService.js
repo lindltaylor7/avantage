@@ -273,6 +273,42 @@ export class EmailService {
   }
 
   /**
+   * Envía un correo genérico con un archivo adjunto (p. ej. la constancia
+   * tributaria de un ingreso) al cliente.
+   */
+  async sendFileEmail(recipientEmail, { subject, message, filePath, filename }) {
+    await this.initPromise;
+
+    const fromAddress = process.env.SMTP_FROM || '"Avantage Group" <tesis@avantagegroup.pe>';
+    const bodyText = message?.trim() || 'Adjuntamos el documento solicitado.';
+
+    const mailOptions = {
+      from: fromAddress,
+      to: recipientEmail,
+      subject: subject?.trim() || 'Documento tributario — Avantage Group',
+      text: bodyText,
+      html: `<p style="font-family: 'Segoe UI', Tahoma, sans-serif; font-size: 14px; color: #0F172A; white-space: pre-line;">${bodyText}</p>`,
+      attachments: [{ filename: filename || 'documento', path: filePath }]
+    };
+
+    try {
+      if (!this.transporter) throw new Error('El servidor de correo no está disponible.');
+      const info = await this.transporter.sendMail(mailOptions);
+      const previewUrl = nodemailer.getTestMessageUrl(info) || null;
+      return {
+        success: true,
+        messageId: info.messageId,
+        recipient: recipientEmail,
+        previewUrl,
+        mode: previewUrl ? 'Ethereal Mail (Prueba activa)' : 'Servidor SMTP Directo'
+      };
+    } catch (error) {
+      console.error('Error al enviar el archivo por correo:', error);
+      return { success: false, error: error.message, recipient: recipientEmail, mode: 'Error' };
+    }
+  }
+
+  /**
    * Envía el correo al destinatario
    */
   async sendReportEmail(recipientEmail, reportData) {

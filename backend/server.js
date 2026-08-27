@@ -28,9 +28,10 @@ import { GoogleCalendarService } from './services/googleCalendarService.js';
 import { ScheduledMeetingService } from './services/scheduledMeetingService.js';
 import { NotificationService } from './services/notificationService.js';
 import { FinanceService } from './services/financeService.js';
+import { FinanceLedgerService } from './services/financeLedgerService.js';
 import { signToken, requireAuth, requirePermission, signGoogleOAuthState, verifyGoogleOAuthState } from './middleware/auth.js';
 
-import { uploadProjectUpdateAttachment, uploadDir } from './middleware/upload.js';
+import { uploadProjectUpdateAttachment, uploadDir, uploadFinanceReceipt, uploadFinanceFile, financeReceiptDir } from './middleware/upload.js';
 
 // Estado del funnel Kanban que marca el fin del proceso comercial: al llegar
 // aquí se genera automáticamente el proyecto asociado al lead.
@@ -98,6 +99,7 @@ const googleCalendarService = new GoogleCalendarService();
 const scheduledMeetingService = new ScheduledMeetingService();
 const notificationService = new NotificationService();
 const financeService = new FinanceService();
+const financeLedgerService = new FinanceLedgerService();
 const whatsappBotService = new WhatsappBotService({ ollamaService, emailService, leadService, whatsappMessageService, settingsService: whatsappBotSettingsService, googleCalendarService, scheduledMeetingService, notificationService });
 const whatsappWebhookService = new WhatsappWebhookService({ botService: whatsappBotService });
 const advisorAvailabilityService = new AdvisorAvailabilityService();
@@ -411,6 +413,310 @@ app.get('/api/finance/summary', requireAuth, requirePermission('finance.view'), 
   } catch (error) {
     console.error('❌ Error al obtener el resumen financiero:', error);
     res.status(500).json({ error: 'Error al obtener el resumen financiero.', details: error.message });
+  }
+});
+
+/**
+ * Libro contable de Finanzas (pestañas INGRESOS, LIBRO DIARIO y GASTOS FIJOS).
+ * Todo el módulo se controla con el permiso `finance.view`.
+ */
+app.get('/api/finance/leads-directory', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const leads = await financeLedgerService.listLeadsDirectory();
+    res.json({ leads });
+  } catch (error) {
+    console.error('❌ Error al obtener el directorio de leads de Finanzas:', error);
+    res.status(500).json({ error: 'Error al obtener el directorio de leads.', details: error.message });
+  }
+});
+
+// --- Ingresos ---
+app.get('/api/finance/income', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const income = await financeLedgerService.listIncome();
+    res.json({ income });
+  } catch (error) {
+    console.error('❌ Error al obtener los ingresos:', error);
+    res.status(500).json({ error: 'Error al obtener los ingresos.', details: error.message });
+  }
+});
+
+app.post('/api/finance/income', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const { fecha, leadId, cuota, emitir, monto, banco, estado, tributario } = req.body || {};
+    const record = await financeLedgerService.createIncome({
+      fecha, leadId, cuota, emitir, monto, banco, estado, tributario, createdBy: req.user.id
+    });
+    res.status(201).json({ income: record });
+  } catch (error) {
+    console.error('❌ Error al registrar el ingreso:', error);
+    res.status(400).json({ error: error.message || 'Error al registrar el ingreso.' });
+  }
+});
+
+app.patch('/api/finance/income/:id/estado', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const record = await financeLedgerService.updateIncomeEstado(req.params.id, req.body?.estado);
+    if (!record) return res.status(404).json({ error: 'Ingreso no encontrado.' });
+    res.json({ income: record });
+  } catch (error) {
+    console.error('❌ Error al actualizar el estado del ingreso:', error);
+    res.status(400).json({ error: error.message || 'Error al actualizar el estado del ingreso.' });
+  }
+});
+
+app.delete('/api/finance/income/:id', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    await financeLedgerService.deleteIncome(req.params.id);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error al eliminar el ingreso:', error);
+    res.status(500).json({ error: 'Error al eliminar el ingreso.', details: error.message });
+  }
+});
+
+app.post('/api/finance/income/:id/receipts', requireAuth, requirePermission('finance.view'), uploadFinanceReceipt, async (req, res) => {
+  try {
+    const receipt = await financeLedgerService.addIncomeReceipt(req.params.id, req.file);
+    res.status(201).json({ receipt });
+  } catch (error) {
+    console.error('❌ Error al subir el comprobante del ingreso:', error);
+    res.status(400).json({ error: error.message || 'Error al subir el comprobante.' });
+  }
+});
+
+app.post('/api/finance/income/:id/tributario', requireAuth, requirePermission('finance.view'), uploadFinanceFile, async (req, res) => {
+  try {
+    const record = await financeLedgerService.setTributarioFile(req.params.id, req.file);
+    res.status(201).json({ income: record });
+  } catch (error) {
+    console.error('❌ Error al subir el archivo tributario:', error);
+    res.status(400).json({ error: error.message || 'Error al subir el archivo tributario.' });
+  }
+});
+
+app.get('/api/finance/income/:id/tributario', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const income = await financeLedgerService.getIncomeById(req.params.id);
+    if (!income || !income.tributario_filename) return res.status(404).json({ error: 'Archivo no encontrado.' });
+    res.sendFile(path.join(financeReceiptDir, income.tributario_filename));
+  } catch (error) {
+    console.error('❌ Error al obtener el archivo tributario:', error);
+    res.status(500).json({ error: 'Error al obtener el archivo tributario.', details: error.message });
+  }
+});
+
+app.delete('/api/finance/income/:id/tributario', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const record = await financeLedgerService.deleteTributarioFile(req.params.id);
+    if (!record) return res.status(404).json({ error: 'Ingreso no encontrado.' });
+    res.json({ income: record });
+  } catch (error) {
+    console.error('❌ Error al eliminar el archivo tributario:', error);
+    res.status(500).json({ error: 'Error al eliminar el archivo tributario.', details: error.message });
+  }
+});
+
+/**
+ * Envía el archivo tributario de un ingreso al cliente por correo o WhatsApp.
+ * Si no se indica `to`, se usa el correo/teléfono del lead asociado.
+ */
+app.post('/api/finance/income/:id/tributario/send', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const { channel, to, message } = req.body || {};
+    const income = await financeLedgerService.getIncomeById(req.params.id);
+    if (!income) return res.status(404).json({ error: 'Ingreso no encontrado.' });
+    if (!income.tributario_filename) {
+      return res.status(400).json({ error: 'Este ingreso no tiene un archivo tributario cargado.' });
+    }
+
+    const filePath = path.join(financeReceiptDir, income.tributario_filename);
+    const filename = income.tributario_original_name || income.tributario_filename;
+
+    if (channel === 'email') {
+      const recipient = (to || '').trim() || income.lead_email;
+      if (!recipient) {
+        return res.status(400).json({ error: 'No hay un correo de destino (el lead no tiene correo registrado).' });
+      }
+      const result = await emailService.sendFileEmail(recipient, {
+        subject: `Documento tributario — ${income.code}`,
+        message,
+        filePath,
+        filename
+      });
+      if (!result.success) return res.status(502).json({ error: result.error || 'No se pudo enviar el correo.' });
+      return res.json({ result: { ...result, channel: 'email' } });
+    }
+
+    if (channel === 'whatsapp') {
+      const recipient = (to || '').trim() || income.lead_phone;
+      if (!recipient) {
+        return res.status(400).json({ error: 'No hay un número de destino (el lead no tiene teléfono registrado).' });
+      }
+      const sent = await whatsappMessageService.sendMediaMessage(recipient, {
+        filePath,
+        filename,
+        mimeType: income.tributario_mime_type,
+        caption: message
+      });
+      return res.json({ result: { success: true, channel: 'whatsapp', recipient, messageId: sent?.message_id || null } });
+    }
+
+    return res.status(400).json({ error: 'El canal debe ser "email" o "whatsapp".' });
+  } catch (error) {
+    console.error('❌ Error al enviar el archivo tributario:', error);
+    res.status(502).json({ error: error.message || 'Error al enviar el archivo tributario.' });
+  }
+});
+
+app.get('/api/finance/receipts/:id', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const receipt = await financeLedgerService.getReceiptById(req.params.id);
+    if (!receipt) return res.status(404).json({ error: 'Comprobante no encontrado.' });
+    res.sendFile(path.join(financeReceiptDir, receipt.filename));
+  } catch (error) {
+    console.error('❌ Error al obtener el comprobante:', error);
+    res.status(500).json({ error: 'Error al obtener el comprobante.', details: error.message });
+  }
+});
+
+app.delete('/api/finance/receipts/:id', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    await financeLedgerService.deleteReceipt(req.params.id);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error al eliminar el comprobante:', error);
+    res.status(500).json({ error: 'Error al eliminar el comprobante.', details: error.message });
+  }
+});
+
+// --- Libro diario ---
+app.get('/api/finance/journal', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const journal = await financeLedgerService.listJournal();
+    res.json({ journal });
+  } catch (error) {
+    console.error('❌ Error al obtener el libro diario:', error);
+    res.status(500).json({ error: 'Error al obtener el libro diario.', details: error.message });
+  }
+});
+
+app.post('/api/finance/journal', requireAuth, requirePermission('finance.view'), uploadFinanceReceipt, async (req, res) => {
+  try {
+    const { fecha, detalle, monto, moneda, banco, estado, area, asientoPorDestino } = req.body || {};
+    const record = await financeLedgerService.createJournal({
+      fecha, detalle, monto, moneda, banco, estado, area, asientoPorDestino,
+      receipt: req.file, createdBy: req.user.id
+    });
+    res.status(201).json({ journal: record });
+  } catch (error) {
+    console.error('❌ Error al registrar el asiento del libro diario:', error);
+    res.status(400).json({ error: error.message || 'Error al registrar el asiento.' });
+  }
+});
+
+app.get('/api/finance/journal/:id/receipt', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const row = await financeLedgerService.getJournalById(req.params.id);
+    if (!row || !row.receipt_filename) return res.status(404).json({ error: 'Comprobante no encontrado.' });
+    res.sendFile(path.join(financeReceiptDir, row.receipt_filename));
+  } catch (error) {
+    console.error('❌ Error al obtener el comprobante del libro diario:', error);
+    res.status(500).json({ error: 'Error al obtener el comprobante.', details: error.message });
+  }
+});
+
+app.delete('/api/finance/journal/:id', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    await financeLedgerService.deleteJournal(req.params.id);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error al eliminar el asiento del libro diario:', error);
+    res.status(500).json({ error: 'Error al eliminar el asiento.', details: error.message });
+  }
+});
+
+// --- Finanzas (resumen por mes y banco) ---
+app.get('/api/finance/overview', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const overview = await financeLedgerService.getOverview({ monthsBack: req.query.months });
+    res.json(overview);
+  } catch (error) {
+    console.error('❌ Error al obtener el resumen de finanzas:', error);
+    res.status(500).json({ error: 'Error al obtener el resumen de finanzas.', details: error.message });
+  }
+});
+
+// --- Gastos fijos ---
+app.get('/api/finance/fixed-expenses', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const expenses = await financeLedgerService.listFixedExpenses();
+    res.json({ expenses });
+  } catch (error) {
+    console.error('❌ Error al obtener los gastos fijos:', error);
+    res.status(500).json({ error: 'Error al obtener los gastos fijos.', details: error.message });
+  }
+});
+
+app.post('/api/finance/fixed-expenses', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const { fecha, concepto, metodoPago, detalle, banco } = req.body || {};
+    const record = await financeLedgerService.createFixedExpense({
+      fecha, concepto, metodoPago, detalle, banco, createdBy: req.user.id
+    });
+    res.status(201).json({ expense: record });
+  } catch (error) {
+    console.error('❌ Error al registrar el gasto fijo:', error);
+    res.status(400).json({ error: error.message || 'Error al registrar el gasto fijo.' });
+  }
+});
+
+/**
+ * Panel de control de pago mensual de los gastos fijos: matriz gasto × mes con
+ * el estado pagado/pendiente.
+ */
+app.get('/api/finance/fixed-expenses/panel', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const panel = await financeLedgerService.getFixedExpensesPanel({ monthsBack: req.query.months });
+    res.json(panel);
+  } catch (error) {
+    console.error('❌ Error al obtener el panel de gastos fijos:', error);
+    res.status(500).json({ error: 'Error al obtener el panel de gastos fijos.', details: error.message });
+  }
+});
+
+app.put('/api/finance/fixed-expenses/:id/payments/:period', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const payment = await financeLedgerService.setFixedExpensePayment(req.params.id, req.params.period, {
+      estado: req.body?.estado,
+      updatedBy: req.user.id
+    });
+    res.json({ payment });
+  } catch (error) {
+    console.error('❌ Error al actualizar el pago del gasto fijo:', error);
+    res.status(400).json({ error: error.message || 'Error al actualizar el pago del gasto fijo.' });
+  }
+});
+
+app.put('/api/finance/fixed-expenses/:id', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const { fecha, concepto, metodoPago, detalle, banco } = req.body || {};
+    const record = await financeLedgerService.updateFixedExpense(req.params.id, { fecha, concepto, metodoPago, detalle, banco });
+    if (!record) return res.status(404).json({ error: 'Gasto fijo no encontrado.' });
+    res.json({ expense: record });
+  } catch (error) {
+    console.error('❌ Error al actualizar el gasto fijo:', error);
+    res.status(400).json({ error: error.message || 'Error al actualizar el gasto fijo.' });
+  }
+});
+
+app.delete('/api/finance/fixed-expenses/:id', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    await financeLedgerService.deleteFixedExpense(req.params.id);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error al eliminar el gasto fijo:', error);
+    res.status(500).json({ error: 'Error al eliminar el gasto fijo.', details: error.message });
   }
 });
 

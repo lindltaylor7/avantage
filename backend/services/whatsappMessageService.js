@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { db } from '../db/connection.js';
 
 const GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v21.0';
@@ -150,6 +152,87 @@ export class WhatsappMessageService {
       direction: 'outbound',
       status: 'sent',
       raw_payload: JSON.stringify(data)
+    });
+
+    return this.getById(id);
+  }
+
+  /**
+   * Envía un archivo (imagen o documento) a un contacto vía la Graph API:
+   * primero sube el fichero al endpoint /media para obtener un media id y
+   * luego manda el mensaje referenciándolo. Igual que el texto libre, solo
+   * funciona dentro de la ventana de 24h desde el último mensaje del cliente.
+   */
+  async sendMediaMessage(waId, { filePath, filename, mimeType, caption }) {
+    const phoneNumberId = process.env.META_WHATSAPP_PHONE_NUMBER_ID;
+    const accessToken = process.env.META_WHATSAPP_ACCESS_TOKEN || process.env.META_PAGE_ACCESS_TOKEN;
+    if (!phoneNumberId) {
+      throw new Error('META_WHATSAPP_PHONE_NUMBER_ID no está configurado en el servidor.');
+    }
+    if (!accessToken) {
+      throw new Error('META_WHATSAPP_ACCESS_TOKEN (o META_PAGE_ACCESS_TOKEN) no está configurado en el servidor.');
+    }
+    if (!fs.existsSync(filePath)) {
+      throw new Error('El archivo a enviar no existe en el servidor.');
+    }
+
+    const resolvedMime = mimeType || 'application/octet-stream';
+    const isImage = resolvedMime.startsWith('image/');
+    const isBsuid = /^[A-Za-z]{2}\.[A-Za-z0-9]+$/.test(waId);
+    const baseUrl = `https://graph.facebook.com/${GRAPH_API_VERSION}/${phoneNumberId}`;
+
+    // 1. Subir el archivo y obtener el media id.
+    const fileBuffer = await fs.promises.readFile(filePath);
+    const uploadForm = new FormData();
+    uploadForm.append('messaging_product', 'whatsapp');
+    uploadForm.append('type', resolvedMime);
+    uploadForm.append('file', new Blob([fileBuffer], { type: resolvedMime }), filename || path.basename(filePath));
+
+    const uploadResponse = await fetch(`${baseUrl}/media`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}` },
+      body: uploadForm
+    });
+    const uploadData = await uploadResponse.json();
+    if (!uploadResponse.ok || !uploadData.id) {
+      const reason = uploadData?.error?.message || JSON.stringify(uploadData);
+      throw new Error(`WhatsApp rechazó la subida del archivo: ${reason}`);
+    }
+
+    // 2. Enviar el mensaje con el media id.
+    const mediaObject = isImage
+      ? { id: uploadData.id, caption: caption || undefined }
+      : { id: uploadData.id, filename: filename || 'documento', caption: caption || undefined };
+
+    const sendResponse = await fetch(`${baseUrl}/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        ...(isBsuid ? { recipient: waId } : { to: waId }),
+        type: isImage ? 'image' : 'document',
+        [isImage ? 'image' : 'document']: mediaObject
+      })
+    });
+    const sendData = await sendResponse.json();
+    if (!sendResponse.ok) {
+      const reason = sendData?.error?.message || JSON.stringify(sendData);
+      throw new Error(`WhatsApp rechazó el envío: ${reason}`);
+    }
+
+    const messageId = sendData.messages?.[0]?.id;
+    const [id] = await db('whatsapp_messages').insert({
+      wa_id: waId,
+      contact_name: null,
+      message_id: messageId,
+      message_type: isImage ? 'image' : 'document',
+      body: caption || `[${isImage ? 'Imagen' : 'Documento'}] ${filename || ''}`.trim(),
+      direction: 'outbound',
+      status: 'sent',
+      raw_payload: JSON.stringify(sendData)
     });
 
     return this.getById(id);
