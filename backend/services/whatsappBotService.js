@@ -31,6 +31,13 @@ const BOOKING_WINDOW_DAYS = MAX_BOOKING_DAYS_AHEAD + 1;
 // Cantidad de horarios que se le ofrecen al contacto a la vez.
 const SLOTS_TO_OFFER = 3;
 
+// Estados del flujo de agendamiento (todos "esperan respuesta del contacto").
+const SCHEDULING_STATUSES = ['scheduling_mode', 'scheduling_phone', 'scheduling_email', 'scheduling_date', 'scheduling_time'];
+
+// Descuento que se aplica si el lead elige reunión por Google Meet en vez de
+// llamada telefónica (solo informativo: lo confirma el jefe comercial).
+const MEET_DISCOUNT_PCT = Number(process.env.WHATSAPP_MEET_DISCOUNT_PCT) || 10;
+
 // Los mensajes de un contacto suelen llegar en varias burbujas seguidas
 // (p. ej. "Hola" y luego, unos segundos después, el tema real). En vez de
 // mandarle cada burbuja al LLM por separado, se espera este tiempo de
@@ -62,6 +69,39 @@ function limaTodayIso() {
 function addDaysIso(iso, days) {
   const [y, m, d] = iso.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}
+
+function digitsOnly(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+/** ¿El texto que escribió el lead parece un número de teléfono usable? (7-15 dígitos) */
+function looksLikePhone(value) {
+  const d = digitsOnly(value);
+  return d.length >= 7 && d.length <= 15;
+}
+
+/**
+ * ¿El wa_id ES un número de teléfono real (no un BSUID tipo "PE.15518885...")?
+ * Los BSUID de Instagram/Facebook traen 15 dígitos pero también un prefijo de
+ * letras y un punto, así que se exige que el wa_id sea SOLO dígitos.
+ */
+function waIdIsPhone(waId) {
+  return /^\d{8,15}$/.test(String(waId || ''));
+}
+
+function looksLikeEmail(value) {
+  return /\S+@\S+\.\S+/.test(String(value || ''));
+}
+
+/** Interpreta la elección de modalidad de llamada: 'phone' | 'meet' | null. */
+function parseCallMode(text) {
+  const n = normalize(text || '');
+  const isRefusal = ['no', 'ninguna', 'ninguno'].includes(n.trim());
+  if (isRefusal) return null;
+  if (/(^|\D)1(\D|$)/.test(n) || n.includes('telefon') || n.includes('llamada telef') || n.includes('celular') || n.includes('numero')) return 'phone';
+  if (/(^|\D)2(\D|$)/.test(n) || n.includes('meet') || n.includes('video') || n.includes('virtual') || n.includes('descuento') || n.includes('zoom')) return 'meet';
+  return null;
 }
 
 const MEETING_DATETIME_FORMATTER = new Intl.DateTimeFormat('es-PE', {
@@ -151,9 +191,14 @@ export class WhatsappBotService {
     const prev = this.turnChains.get(waId) || Promise.resolve();
     const next = prev.catch(() => {}).then(() => fn());
     this.turnChains.set(waId, next);
-    next.finally(() => {
+    // Limpieza al terminar (ok o error). Se hace con un handler que NO
+    // relanza, para que esta rama de la promesa no genere un
+    // "unhandledRejection" (la rama `next` que se devuelve sí propaga el
+    // error, y de ella se encarga quien llama con su propio .catch).
+    const cleanup = () => {
       if (this.turnChains.get(waId) === next) this.turnChains.delete(waId);
-    });
+    };
+    next.then(cleanup, cleanup);
     return next;
   }
 
@@ -328,7 +373,7 @@ export class WhatsappBotService {
       return;
     }
 
-    if (session.status === 'scheduling_date' || session.status === 'scheduling_time') {
+    if (SCHEDULING_STATUSES.includes(session.status)) {
       await this.clearNudge(waId);
       // Se encola tras cualquier turno en curso; al ejecutarse re-lee el
       // estado real (pudo haber cambiado mientras esperaba en la cola).
@@ -351,14 +396,15 @@ export class WhatsappBotService {
     const session = await this.getSession(waId);
     if (!session || !session.bot_enabled) return;
 
-    if (session.status === 'scheduling_date') {
-      await this.handleSchedulingDateReply(waId, session, text);
-    } else if (session.status === 'scheduling_time') {
-      await this.handleSchedulingTimeReply(waId, session, text);
-    } else if (session.status === 'active') {
-      await this.runConversationTurn(waId, text);
+    switch (session.status) {
+      case 'scheduling_mode': return this.handleSchedulingModeReply(waId, session, text);
+      case 'scheduling_phone': return this.handleSchedulingPhoneReply(waId, session, text);
+      case 'scheduling_email': return this.handleSchedulingEmailReply(waId, session, text);
+      case 'scheduling_date': return this.handleSchedulingDateReply(waId, session, text);
+      case 'scheduling_time': return this.handleSchedulingTimeReply(waId, session, text);
+      case 'active': return this.runConversationTurn(waId, text);
+      default: return; // 'completed' u otro: no se hace nada aquí.
     }
-    // 'completed' u otro: no se hace nada aquí.
   }
 
   /**
@@ -421,8 +467,7 @@ export class WhatsappBotService {
     // caso no se corre otro turno de conversación libre: se redirige el
     // mensaje al handler que corresponde al estado real.
     if (session && session.status !== 'active') {
-      if (session.status === 'scheduling_date') return this.handleSchedulingDateReply(waId, session, incomingText);
-      if (session.status === 'scheduling_time') return this.handleSchedulingTimeReply(waId, session, incomingText);
+      if (SCHEDULING_STATUSES.includes(session.status)) return this.dispatchByStatus(waId, incomingText);
       return; // 'completed' u otro: nada
     }
     if (session && !session.bot_enabled) return;
@@ -580,16 +625,16 @@ export class WhatsappBotService {
     this.logActivity({ type: 'scheduling_offer_skipped', waId, reason });
     await this.updateSession(waId, { status: 'completed' });
     await this.moveFunnelStage(waId, 'transferido_closer');
-    await this.send(waId, 'Un asesor se pondrá en contacto contigo pronto para coordinar una llamada. ¡Gracias! 🙌');
+    await this.send(waId, 'El jefe comercial se pondrá en contacto contigo pronto para coordinar la reunión. ¡Gracias! 🙌');
   }
 
   /**
-   * Tras finalizar la evaluación, empieza el agendamiento preguntando qué
-   * día prefiere el lead (en vez de tirarle de una una lista de horarios) —
-   * ese día se interpreta en el siguiente turno vía IA y se cruza con el
-   * calendario real del asesor. Si Calendar no está listo o no hay ningún
-   * bloque libre en los próximos días, se transfiere a seguimiento manual
-   * sin bloquear la conversación.
+   * Tras conocer el tema, arranca el agendamiento: valida que el calendario
+   * del asesor esté disponible y le pregunta al lead la MODALIDAD de la
+   * llamada (telefónica o por Meet, con descuento). Según lo que elija se le
+   * pide su número o su correo, y recién después se pasa a elegir día y hora.
+   * Si Calendar no está listo o no hay bloques libres, se transfiere a
+   * seguimiento manual sin bloquear la conversación.
    */
   async offerScheduling(waId, { topic, email }) {
     try {
@@ -603,10 +648,10 @@ export class WhatsappBotService {
 
       const session = await this.getSession(waId);
       const answers = typeof session.answers === 'string' ? JSON.parse(session.answers) : (session.answers || {});
-      answers.__scheduling = { topic, email };
-      await this.updateSession(waId, { status: 'scheduling_date', answers: JSON.stringify(answers) });
+      answers.__scheduling = { topic, email: email || null, mode: null, phone: null, discount: 0 };
+      await this.updateSession(waId, { status: 'scheduling_mode', answers: JSON.stringify(answers) });
 
-      await this.send(waId, `📅 ¿Qué día te viene bien para la llamada? Puede ser hoy o hasta el ${formatDateLabel(addDaysIso(limaTodayIso(), MAX_BOOKING_DAYS_AHEAD))}.`);
+      await this.send(waId, `Para la llamada con el asesor, ¿cómo prefieres?\n\n1. Telefónica\n2. Vía Meet (con ${MEET_DISCOUNT_PCT}% de descuento)`);
     } catch (error) {
       // Si la conexión de Google Calendar del asesor caducó, avisar al equipo
       // en el panel para que la reconecte — si no, todos los leads que
@@ -625,6 +670,121 @@ export class WhatsappBotService {
       }
       await this.handOffToAdvisor(waId, error.message);
     }
+  }
+
+  /** Utilidad: lee `answers.__scheduling` de la sesión (o null si no existe). */
+  _readScheduling(session) {
+    const answers = typeof session.answers === 'string' ? JSON.parse(session.answers) : (session.answers || {});
+    return { answers, scheduling: answers.__scheduling || null };
+  }
+
+  /** Frase común que aborta el agendamiento si el lead dice "no"/"después". */
+  _isSchedulingRefusal(text) {
+    return ['no', 'omitir', 'despues', 'después', 'luego', 'mas tarde', 'más tarde'].includes(normalize((text || '').trim()));
+  }
+
+  /** Pasa al paso de elegir día (tras resolver modalidad y datos de contacto). */
+  async promptForDate(waId) {
+    await this.updateSession(waId, { status: 'scheduling_date' });
+    await this.send(
+      waId,
+      `📅 ¿Qué día te viene bien para la llamada con el jefe comercial? Puede ser hoy o hasta el ${formatDateLabel(addDaysIso(limaTodayIso(), MAX_BOOKING_DAYS_AHEAD))}.`
+    );
+  }
+
+  /**
+   * Elección de modalidad: 1 = telefónica, 2 = por Meet (con descuento). Si
+   * elige telefónica y no tenemos su número (contacto identificado solo por
+   * BSUID de Instagram/Facebook), se le pide. Si elige Meet y no dio su
+   * correo, se le pide.
+   */
+  async handleSchedulingModeReply(waId, session, text) {
+    const { answers, scheduling } = this._readScheduling(session);
+    if (!scheduling) { await this.updateSession(waId, { status: 'completed' }); return; }
+
+    if (this._isSchedulingRefusal(text)) {
+      delete answers.__scheduling;
+      await this.updateSession(waId, { answers: JSON.stringify(answers) });
+      await this.handOffToAdvisor(waId, 'El lead prefirió no agendar.');
+      return;
+    }
+
+    const mode = parseCallMode(text);
+    if (!mode) {
+      await this.send(waId, `Responde *1* para llamada telefónica, o *2* para Meet (con ${MEET_DISCOUNT_PCT}% de descuento).`);
+      return;
+    }
+
+    scheduling.mode = mode;
+    scheduling.discount = mode === 'meet' ? MEET_DISCOUNT_PCT : 0;
+
+    if (mode === 'phone') {
+      if (waIdIsPhone(waId)) {
+        scheduling.phone = digitsOnly(waId);
+        await this.updateSession(waId, { answers: JSON.stringify(answers) });
+        await this.promptForDate(waId);
+      } else {
+        await this.updateSession(waId, { status: 'scheduling_phone', answers: JSON.stringify(answers) });
+        await this.send(waId, 'Perfecto 📞 ¿A qué número te llamamos? (con código de país, ej: 51987654321)');
+      }
+      return;
+    }
+
+    // mode === 'meet'
+    if (looksLikeEmail(scheduling.email)) {
+      await this.updateSession(waId, { answers: JSON.stringify(answers) });
+      await this.promptForDate(waId);
+    } else {
+      await this.updateSession(waId, { status: 'scheduling_email', answers: JSON.stringify(answers) });
+      await this.send(waId, `Perfecto, aplico el ${MEET_DISCOUNT_PCT}% de descuento ✉️ ¿A qué correo te envío el link de Meet?`);
+    }
+  }
+
+  /** Captura el número de teléfono para la llamada telefónica. */
+  async handleSchedulingPhoneReply(waId, session, text) {
+    const { answers, scheduling } = this._readScheduling(session);
+    if (!scheduling) { await this.updateSession(waId, { status: 'completed' }); return; }
+
+    if (this._isSchedulingRefusal(text)) {
+      delete answers.__scheduling;
+      await this.updateSession(waId, { answers: JSON.stringify(answers) });
+      await this.handOffToAdvisor(waId, 'El lead no quiso dejar su número.');
+      return;
+    }
+
+    if (!looksLikePhone(text)) {
+      await this.send(waId, 'No reconocí el número 🤔 Pásamelo con el código de país (ej: 51987654321).');
+      return;
+    }
+
+    scheduling.phone = digitsOnly(text);
+    await this.updateSession(waId, { answers: JSON.stringify(answers) });
+    await this.promptForDate(waId);
+  }
+
+  /** Captura el correo para enviar el link de Meet. */
+  async handleSchedulingEmailReply(waId, session, text) {
+    const { answers, scheduling } = this._readScheduling(session);
+    if (!scheduling) { await this.updateSession(waId, { status: 'completed' }); return; }
+
+    const trimmed = (text || '').trim();
+
+    if (looksLikeEmail(trimmed)) {
+      scheduling.email = trimmed.toLowerCase();
+    } else if (this._isSchedulingRefusal(trimmed) || normalize(trimmed).includes('no tengo')) {
+      // Sigue sin correo: el link de Meet se le manda por acá mismo.
+    } else {
+      scheduling.emailAttempts = (scheduling.emailAttempts || 0) + 1;
+      if (scheduling.emailAttempts < 2) {
+        await this.updateSession(waId, { answers: JSON.stringify(answers) });
+        await this.send(waId, 'No parece un correo válido 🤔 ¿me lo confirmas? (ej: nombre@correo.com)');
+        return;
+      }
+      // Tras 2 intentos fallidos, se continúa sin correo.
+    }
+
+    await this.updateSession(waId, { answers: JSON.stringify(answers) });
+    await this.promptForDate(waId);
   }
 
   /**
@@ -757,13 +917,22 @@ export class WhatsappBotService {
       return;
     }
 
+    const isPhone = scheduling.mode === 'phone';
+    const contactPhone = scheduling.phone || (waIdIsPhone(waId) ? digitsOnly(waId) : null);
+    const modalidadLabel = isPhone ? 'Llamada telefónica' : 'Videollamada por Google Meet';
+    const discountText = scheduling.discount ? ` | Descuento aplicado: ${scheduling.discount}%` : '';
+
     try {
       const event = await this.googleCalendarService.createMeetEvent(BOOKING_ADVISOR_USER_ID, {
-        summary: `Asesoría de tesis - ${scheduling.topic}`,
-        description: `Llamada agendada automáticamente por Avan (WhatsApp) con el contacto ${waId}.`,
+        summary: `${isPhone ? '📞' : '💻'} Asesoría de tesis - ${scheduling.topic}`,
+        description:
+          `Agendada automáticamente por Avan (WhatsApp) con el contacto ${waId}.\n` +
+          `Modalidad: ${modalidadLabel}${discountText}\n` +
+          (isPhone && contactPhone ? `Teléfono del lead para la llamada: ${contactPhone}\n` : '') +
+          (scheduling.email ? `Correo del lead: ${scheduling.email}\n` : ''),
         startTime: slot.startTime,
         endTime: slot.endTime,
-        attendeeEmail: scheduling.email || undefined
+        attendeeEmail: (!isPhone && scheduling.email) ? scheduling.email : undefined
       });
 
       delete answers.__scheduling;
@@ -771,7 +940,9 @@ export class WhatsappBotService {
 
       const lead = await this.leadService.findByPhone(waId);
       if (lead) {
-        const noteAppend = `\nReunión agendada: ${slot.label}${event.meetLink ? ` — ${event.meetLink}` : ''}`;
+        const noteAppend = `\nReunión agendada (${isPhone ? 'telefónica' : 'Meet'}${scheduling.discount ? `, ${scheduling.discount}% dto` : ''}): ${slot.label}` +
+          (isPhone && contactPhone ? ` — Tel: ${contactPhone}` : '') +
+          (!isPhone && event.meetLink ? ` — ${event.meetLink}` : '');
         await this.leadService.updateLead(lead.id, { additionalNotes: `${lead.additional_notes || ''}${noteAppend}` });
       }
       await this.moveFunnelStage(waId, 'cita_agendada');
@@ -785,7 +956,7 @@ export class WhatsappBotService {
             topic: scheduling.topic,
             startTime: slot.startTime,
             endTime: slot.endTime,
-            meetLink: event.meetLink,
+            meetLink: isPhone ? null : event.meetLink,
             calendarEventId: event.eventId
           });
         } catch (recordError) {
@@ -800,7 +971,7 @@ export class WhatsappBotService {
           await this.notificationService.create({
             type: 'meeting_booked',
             title: `Reunión agendada con ${name || waId}`,
-            body: `${slot.label}${scheduling.topic ? ` — ${scheduling.topic}` : ''}`,
+            body: `${slot.label} — ${isPhone ? '📞 Telefónica' : '💻 Meet'}${scheduling.discount ? ` (${scheduling.discount}% dto)` : ''}${scheduling.topic ? ` — ${scheduling.topic}` : ''}`,
             link: '/admin/availability'
           });
         } catch (notifyError) {
@@ -810,8 +981,11 @@ export class WhatsappBotService {
 
       await this.send(
         waId,
-        `✅ ¡Listo${name ? `, ${name}` : ''}! Tu llamada quedó agendada para *${slot.label}*.` +
-        (event.meetLink ? `\n\n🔗 Link de Google Meet: ${event.meetLink}` : '') +
+        `✅ ¡Listo${name ? `, ${name}` : ''}! Tu ${isPhone ? 'llamada telefónica' : 'reunión por Meet'} con el jefe comercial quedó agendada para *${slot.label}*.` +
+        (isPhone
+          ? `\n\n📞 Te llamaremos${contactPhone ? ` al ${contactPhone}` : ''}.`
+          : (event.meetLink ? `\n\n🔗 Link de Google Meet: ${event.meetLink}` : '') +
+            (scheduling.discount ? `\n\n🎁 Se aplicó ${scheduling.discount}% de descuento.` : '')) +
         '\n\nTe esperamos. ¡Gracias! 🙌'
       );
     } catch (error) {
@@ -833,7 +1007,7 @@ export class WhatsappBotService {
     const now = Date.now();
 
     const awaitingReply = await db('whatsapp_bot_sessions')
-      .whereIn('status', ['active', 'scheduling_date', 'scheduling_time'])
+      .whereIn('status', ['active', ...SCHEDULING_STATUSES])
       .where('bot_enabled', true)
       .whereNull('nudge_sent_at');
 
@@ -851,7 +1025,7 @@ export class WhatsappBotService {
     }
 
     const awaitingFreeze = await db('whatsapp_bot_sessions')
-      .whereIn('status', ['active', 'scheduling_date', 'scheduling_time'])
+      .whereIn('status', ['active', ...SCHEDULING_STATUSES])
       .where('bot_enabled', true)
       .whereNotNull('nudge_sent_at');
 

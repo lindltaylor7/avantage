@@ -51,6 +51,16 @@ const STALE_CONVERSATION_SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 
 dotenv.config();
 
+// Red de seguridad: una promesa rechazada sin `catch` en cualquier parte (p.
+// ej. un envío de WhatsApp que falla en un flujo en segundo plano) NO debe
+// tumbar todo el servidor. Se registra y la app sigue corriendo.
+process.on('unhandledRejection', (reason) => {
+  console.error('⚠️ [Server] Unhandled promise rejection (ignorada, el servidor sigue):', reason);
+});
+process.on('uncaughtException', (error) => {
+  console.error('⚠️ [Server] Uncaught exception (ignorada, el servidor sigue):', error);
+});
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 

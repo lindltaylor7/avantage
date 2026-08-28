@@ -5,9 +5,9 @@
         <span class="page-eyebrow">Configuración de Avan</span>
         <h2 class="section-heading"><span class="heading-icon">🤖</span> Personalidad y objetivo del bot</h2>
         <p class="section-subheading bot-subheading">
-          Avan ya no sigue un guion de preguntas fijas: conversa libremente guiado por IA hasta reunir el tema de
-          tesis y el correo del contacto, y luego ofrece agendar una llamada. Aquí ajustas su tono y los valores por
-          defecto que usa cuando el contacto no menciona su nivel, carrera o ámbito.
+          Avan ya no sigue un guion de preguntas fijas: conversa libremente guiado por IA hasta entender el tema de
+          tesis del contacto, y luego le ofrece una reunión con el jefe comercial (telefónica o por Meet). Aquí ajustas su tono y los
+          valores por defecto que usa cuando el contacto no menciona su nivel, carrera o ámbito.
         </p>
       </div>
 
@@ -107,11 +107,11 @@
           </div>
           <div class="info-box">
             <h4>🧩 Extracción en segundo plano</h4>
-            <p>Va identificando tema, ámbito, nivel, carrera y correo del hilo real de la conversación, sin que el contacto note que está "llenando un formulario".</p>
+            <p>Va identificando tema, ámbito, nivel y carrera del hilo real de la conversación (y el correo solo si el contacto lo menciona), sin que note que está "llenando un formulario".</p>
           </div>
           <div class="info-box">
             <h4>📅 Cierre con agendamiento</h4>
-            <p>Al reunir tema y correo, evalúa la viabilidad, envía el reporte por correo, y ofrece agendar una llamada con los horarios libres reales del asesor.</p>
+            <p>Al conocer el tema, ofrece la reunión con el jefe comercial, pregunta si la quiere telefónica o por Meet (10% dto.), pide el número o el correo según corresponda y propone los horarios libres reales del calendario (hasta 2 días desde hoy).</p>
           </div>
         </div>
       </section>
