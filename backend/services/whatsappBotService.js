@@ -22,6 +22,15 @@ const TYPING_PAUSE_MS = 1500;
 // de resolver dinámicamente a partir de "assigned_to" del lead).
 const BOOKING_ADVISOR_USER_ID = Number(process.env.GOOGLE_BOOKING_ADVISOR_USER_ID) || 1;
 
+// Horizonte máximo de agendamiento: solo se ofrecen (y aceptan) horarios de
+// hoy hasta N días más adelante. days = N + 1 en los constructores de bloques,
+// que cuentan el día 0 = hoy.
+const MAX_BOOKING_DAYS_AHEAD = Number(process.env.WHATSAPP_BOOKING_MAX_DAYS_AHEAD) || 2;
+const BOOKING_WINDOW_DAYS = MAX_BOOKING_DAYS_AHEAD + 1;
+
+// Cantidad de horarios que se le ofrecen al contacto a la vez.
+const SLOTS_TO_OFFER = 3;
+
 // Los mensajes de un contacto suelen llegar en varias burbujas seguidas
 // (p. ej. "Hola" y luego, unos segundos después, el tema real). En vez de
 // mandarle cada burbuja al LLM por separado, se espera este tiempo de
@@ -48,6 +57,11 @@ function formatDateLabel(dateStr) {
 
 function limaTodayIso() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+}
+
+function addDaysIso(iso, days) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
 }
 
 const MEETING_DATETIME_FORMATTER = new Intl.DateTimeFormat('es-PE', {
@@ -105,9 +119,13 @@ export class WhatsappBotService {
     // de las burbujas de un contacto mientras se espera el silencio de
     // MESSAGE_DEBOUNCE_MS antes de procesar el turno conversacional.
     this.pendingMessages = new Map();
-    // wa_id -> timestamp del último mensaje que el bot le envió (para respetar
-    // la espera mínima estricta entre mensajes).
+    // wa_id -> timestamp (reservado) del próximo envío permitido, para respetar
+    // la espera mínima estricta entre mensajes incluso con envíos concurrentes.
     this.lastSentAt = new Map();
+    // wa_id -> Promise del turno en curso. TODO lo que le responde al contacto
+    // pasa por esta cola: nunca corren dos turnos en paralelo para el mismo
+    // contacto (eso duplicaba mensajes y rompía la espera entre ellos).
+    this.turnChains = new Map();
     // wa_id -> message_id del último mensaje entrante, necesario para mostrarle
     // el indicador de "escribiendo..." de WhatsApp antes de responder.
     this.lastInboundMessageId = new Map();
@@ -122,6 +140,21 @@ export class WhatsappBotService {
   logActivity(entry) {
     this.activity.unshift({ id: randomUUID(), at: new Date().toISOString(), ...entry });
     if (this.activity.length > MAX_ACTIVITY_LOG) this.activity.length = MAX_ACTIVITY_LOG;
+  }
+
+  /**
+   * Encola `fn` para que se ejecute cuando termine cualquier procesamiento
+   * anterior del mismo contacto. Garantiza que jamás corran dos turnos en
+   * paralelo para un wa_id (la causa de los mensajes duplicados).
+   */
+  runSerialized(waId, fn) {
+    const prev = this.turnChains.get(waId) || Promise.resolve();
+    const next = prev.catch(() => {}).then(() => fn());
+    this.turnChains.set(waId, next);
+    next.finally(() => {
+      if (this.turnChains.get(waId) === next) this.turnChains.delete(waId);
+    });
+    return next;
   }
 
   getActivity() {
@@ -199,11 +232,17 @@ export class WhatsappBotService {
       ? Math.max(0, Number(settings.message_gap_seconds) * 1000)
       : DEFAULT_MESSAGE_GAP_MS;
 
-    const last = this.lastSentAt.get(waId) || 0;
-    const sinceLast = last ? Date.now() - last : Infinity;
-    const waitMs = last === 0
-      ? gapMs
-      : Math.max(gapMs - sinceLast, TYPING_PAUSE_MS);
+    // Reserva el momento del próximo envío ANTES de esperar: si dos send()
+    // corren casi a la vez, el segundo ve el timestamp reservado por el
+    // primero y se encola detrás con el gap completo (en vez de que ambos
+    // calculen la espera sobre el mismo "último envío" y salgan juntos).
+    const now = Date.now();
+    const reserved = this.lastSentAt.get(waId) || 0;
+    const sendAt = reserved === 0
+      ? now + gapMs
+      : Math.max(now + TYPING_PAUSE_MS, reserved + gapMs);
+    this.lastSentAt.set(waId, sendAt);
+    const waitMs = sendAt - now;
 
     const typingEnabled = settings.typing_indicator_enabled == null ? true : !!settings.typing_indicator_enabled;
     if (typingEnabled) {
@@ -221,7 +260,9 @@ export class WhatsappBotService {
 
     try {
       await this.whatsappMessageService.sendTextMessage(waId, text);
-      this.lastSentAt.set(waId, Date.now());
+      // Ancla el próximo gap al envío real (por si el sleep se desvió), sin
+      // bajar de lo ya reservado.
+      this.lastSentAt.set(waId, Math.max(Date.now(), sendAt));
       this.logActivity({ type: 'send_success', waId, text });
     } catch (error) {
       this.logActivity({ type: 'send_failed', waId, text, error: error.message });
@@ -274,7 +315,7 @@ export class WhatsappBotService {
       // igual que antes: el bot ya no vuelve a responder solo.
       const meeting = this.scheduledMeetingService ? await this.scheduledMeetingService.getLatestForContact(waId) : null;
       if (meeting) {
-        await this.handlePostBookingMessage(waId, meeting, text);
+        await this.runSerialized(waId, () => this.handlePostBookingMessage(waId, meeting, text));
         return;
       }
 
@@ -287,21 +328,37 @@ export class WhatsappBotService {
       return;
     }
 
-    if (session.status === 'scheduling_date') {
+    if (session.status === 'scheduling_date' || session.status === 'scheduling_time') {
       await this.clearNudge(waId);
-      await this.handleSchedulingDateReply(waId, session, text);
-      return;
-    }
-
-    if (session.status === 'scheduling_time') {
-      await this.clearNudge(waId);
-      await this.handleSchedulingTimeReply(waId, session, text);
+      // Se encola tras cualquier turno en curso; al ejecutarse re-lee el
+      // estado real (pudo haber cambiado mientras esperaba en la cola).
+      await this.runSerialized(waId, () => this.dispatchByStatus(waId, text));
       return;
     }
 
     // status === 'active': se agrupa antes de procesar el turno.
     await this.clearNudge(waId);
     this.bufferMessage(waId, text);
+  }
+
+  /**
+   * Enruta un mensaje al handler correcto según el estado ACTUAL de la sesión
+   * (re-leído justo antes de procesar). Se usa desde la cola serializada para
+   * que un mensaje encolado mientras corría otro turno no se procese con un
+   * estado ya obsoleto.
+   */
+  async dispatchByStatus(waId, text) {
+    const session = await this.getSession(waId);
+    if (!session || !session.bot_enabled) return;
+
+    if (session.status === 'scheduling_date') {
+      await this.handleSchedulingDateReply(waId, session, text);
+    } else if (session.status === 'scheduling_time') {
+      await this.handleSchedulingTimeReply(waId, session, text);
+    } else if (session.status === 'active') {
+      await this.runConversationTurn(waId, text);
+    }
+    // 'completed' u otro: no se hace nada aquí.
   }
 
   /**
@@ -337,7 +394,11 @@ export class WhatsappBotService {
     if (pending.timer) clearTimeout(pending.timer);
     pending.timer = setTimeout(() => {
       this.pendingMessages.delete(waId);
-      this.runConversationTurn(waId, pending.messages.join('\n')).catch((error) => {
+      const joined = pending.messages.join('\n');
+      // A la cola serializada: si todavía hay un turno anterior en curso para
+      // este contacto, este espera a que termine (y re-evalúa el estado)
+      // en vez de correr en paralelo y duplicar mensajes.
+      this.runSerialized(waId, () => this.runConversationTurn(waId, joined)).catch((error) => {
         this.logActivity({ type: 'conversation_turn_failed', waId, error: error.message });
         console.error(`❌ [WhatsApp Bot] Error en el turno de conversación con ${waId}:`, error);
       });
@@ -354,6 +415,18 @@ export class WhatsappBotService {
    */
   async runConversationTurn(waId, incomingText) {
     let session = await this.getSession(waId);
+
+    // El estado pudo cambiar mientras este turno esperaba en la cola
+    // serializada (p. ej. un turno anterior ya pasó a ofrecer agendar). En ese
+    // caso no se corre otro turno de conversación libre: se redirige el
+    // mensaje al handler que corresponde al estado real.
+    if (session && session.status !== 'active') {
+      if (session.status === 'scheduling_date') return this.handleSchedulingDateReply(waId, session, incomingText);
+      if (session.status === 'scheduling_time') return this.handleSchedulingTimeReply(waId, session, incomingText);
+      return; // 'completed' u otro: nada
+    }
+    if (session && !session.bot_enabled) return;
+
     const isFirstTurn = !session;
 
     if (!session) {
@@ -441,10 +514,10 @@ export class WhatsappBotService {
     const synthesizedTopic = `${problem}: Caso de estudio y propuesta en ${location}`;
     const additionalNotes = `Problema: ${problem} | Ámbito: ${location} | Origen: WhatsApp (Avan, bot automático)`;
 
-    await this.send(
-      waId,
-      '¡Genial! Con lo que me cuentas, quiero conectarte con un asesor de Avantage Group para que lo revisen juntos 🙌 Dame un momento...'
-    );
+    // Antes había aquí un mensaje intro largo ("¡Genial! Con lo que me
+    // cuentas...") que además duplicaba el "dame un momento" del LLM. Se
+    // eliminó: el turno ya cerró con una respuesta breve y offerScheduling()
+    // hace la siguiente pregunta directamente.
 
     // El status NO se toca aquí a propósito: el lead se queda en
     // "calificando" (Setter Funnel) mientras se resuelve el agendamiento.
@@ -525,15 +598,15 @@ export class WhatsappBotService {
       const connection = await this.googleCalendarService.getConnection(BOOKING_ADVISOR_USER_ID);
       if (!connection) throw new Error('El asesor por defecto no tiene Google Calendar conectado');
 
-      const preview = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID, { limit: 1 });
-      if (preview.length === 0) throw new Error('Sin bloques libres próximos');
+      const preview = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID, { limit: 1, days: BOOKING_WINDOW_DAYS });
+      if (preview.length === 0) throw new Error(`Sin bloques libres en los próximos ${MAX_BOOKING_DAYS_AHEAD} días`);
 
       const session = await this.getSession(waId);
       const answers = typeof session.answers === 'string' ? JSON.parse(session.answers) : (session.answers || {});
       answers.__scheduling = { topic, email };
       await this.updateSession(waId, { status: 'scheduling_date', answers: JSON.stringify(answers) });
 
-      await this.send(waId, '📅 ¿Qué día te gustaría para la llamada? (ej: "mañana", "el jueves", o una fecha)');
+      await this.send(waId, `📅 ¿Qué día te viene bien para la llamada? Puede ser hoy o hasta el ${formatDateLabel(addDaysIso(limaTodayIso(), MAX_BOOKING_DAYS_AHEAD))}.`);
     } catch (error) {
       // Si la conexión de Google Calendar del asesor caducó, avisar al equipo
       // en el panel para que la reconecte — si no, todos los leads que
@@ -575,24 +648,42 @@ export class WhatsappBotService {
       return;
     }
 
-    const { date } = await this.ollamaService.parseSchedulingDate(trimmed, limaTodayIso());
+    const todayIso = limaTodayIso();
+    const maxDateIso = addDaysIso(todayIso, MAX_BOOKING_DAYS_AHEAD);
+    const { date } = await this.ollamaService.parseSchedulingDate(trimmed, todayIso, MAX_BOOKING_DAYS_AHEAD);
     if (!date) {
-      await this.send(waId, 'No logré identificar el día 🤔 ¿me confirmas una fecha? (ej: "mañana", "el jueves", "28 de agosto")');
+      await this.send(waId, `No identifiqué el día 🤔 Puede ser hoy o hasta el ${formatDateLabel(maxDateIso)}.`);
       return;
     }
 
-    let slots = await this.googleCalendarService.getFreeSlotsForDate(BOOKING_ADVISOR_USER_ID, date);
-    let intro = `📅 Para el *${formatDateLabel(date)}*, tengo estos horarios libres:`;
+    let slots;
+    let intro;
 
-    if (slots.length === 0) {
-      slots = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID);
+    if (date < todayIso || date > maxDateIso) {
+      // Fuera del horizonte permitido (hoy .. hoy+2): se ofrecen directamente
+      // los próximos horarios reales dentro del rango.
+      slots = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID, { limit: SLOTS_TO_OFFER, days: BOOKING_WINDOW_DAYS });
       if (slots.length === 0) {
         delete answers.__scheduling;
         await this.updateSession(waId, { answers: JSON.stringify(answers) });
-        await this.handOffToAdvisor(waId, 'Sin bloques libres tras pedirle una fecha al lead.');
+        await this.handOffToAdvisor(waId, `El lead pidió una fecha fuera del rango (hoy..${maxDateIso}) y no hay bloques libres dentro del rango.`);
         return;
       }
-      intro = `Ese día no tengo espacio libre, pero tengo estos horarios cercanos:`;
+      intro = `Solo puedo coordinar hasta el ${formatDateLabel(maxDateIso)}. Estos son los horarios libres:`;
+    } else {
+      slots = await this.googleCalendarService.getFreeSlotsForDate(BOOKING_ADVISOR_USER_ID, date, { limit: SLOTS_TO_OFFER });
+      intro = `📅 Para el ${formatDateLabel(date)} tengo estos horarios:`;
+
+      if (slots.length === 0) {
+        slots = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID, { limit: SLOTS_TO_OFFER, days: BOOKING_WINDOW_DAYS });
+        if (slots.length === 0) {
+          delete answers.__scheduling;
+          await this.updateSession(waId, { answers: JSON.stringify(answers) });
+          await this.handOffToAdvisor(waId, 'Sin bloques libres tras pedirle una fecha al lead.');
+          return;
+        }
+        intro = `Ese día no tengo espacio, pero tengo estos horarios cercanos:`;
+      }
     }
 
     scheduling.slots = slots;
@@ -646,7 +737,7 @@ export class WhatsappBotService {
       }
 
       if (preferredTime) {
-        const nearSlots = await this.googleCalendarService.getFreeSlotsNearTime(BOOKING_ADVISOR_USER_ID, preferredTime);
+        const nearSlots = await this.googleCalendarService.getFreeSlotsNearTime(BOOKING_ADVISOR_USER_ID, preferredTime, { limit: SLOTS_TO_OFFER, days: BOOKING_WINDOW_DAYS });
         if (nearSlots.length > 0) {
           scheduling.slots = nearSlots;
           await this.updateSession(waId, { answers: JSON.stringify(answers) });

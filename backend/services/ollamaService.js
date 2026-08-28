@@ -390,7 +390,7 @@ Responde ÚNICAMENTE en JSON válido con esta forma exacta (usa null en los camp
    * convierte a "YYYY-MM-DD" (calendario de Lima). Devuelve date: null si no
    * logra identificar un día claro dentro de un rango razonable.
    */
-  async parseSchedulingDate(text, todayIso) {
+  async parseSchedulingDate(text, todayIso, maxDaysAhead = 2) {
     const activeApiKey = this.apiKey || process.env.OLLAMA_API_KEY || '';
     let activeHost = this.host || 'https://ollama.com';
     if (activeHost === 'https://api.ollama.com') activeHost = 'https://ollama.com';
@@ -404,7 +404,7 @@ Responde ÚNICAMENTE en JSON válido con esta forma exacta (usa null en los camp
 Alguien acaba de responder esto cuando le preguntaron qué día prefiere para una llamada:
 """${text}"""
 
-Interpreta a qué fecha se refiere (puede decir "mañana", "el jueves", "el 28", "en dos semanas", una fecha explícita, etc.) y conviértela a formato YYYY-MM-DD, siempre una fecha de hoy en adelante (nunca en el pasado) y dentro de los próximos 30 días. Si el texto NO expresa ningún día concreto (ej. "cuando puedas", "no sé", o simplemente no habla de fechas), responde null.
+Interpreta a qué fecha se refiere (puede decir "hoy", "mañana", "pasado mañana", "el jueves", "el 28", una fecha explícita, etc.) y conviértela a formato YYYY-MM-DD. La fecha debe estar entre hoy (${todayIso}) y ${maxDaysAhead} días después como máximo. Si pide un día más lejano, igual devuélvelo tal cual (el sistema le explicará el límite). Si el texto NO expresa ningún día concreto (ej. "cuando puedas", "no sé", o simplemente no habla de fechas), responde null.
 
 Responde ÚNICAMENTE en JSON válido: {"date": "YYYY-MM-DD" o null}`;
 
