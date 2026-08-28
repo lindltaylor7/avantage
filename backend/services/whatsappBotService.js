@@ -50,16 +50,20 @@ const MESSAGE_DEBOUNCE_MS = Number(process.env.WHATSAPP_BOT_FIRST_MESSAGE_DEBOUN
 const INACTIVITY_NUDGE_MS = 60 * 60 * 1000;
 const INACTIVITY_FREEZE_MS = 60 * 60 * 1000;
 
-const DATE_LABEL_FORMATTER = new Intl.DateTimeFormat('es-PE', {
-  timeZone: 'America/Lima', weekday: 'long', day: 'numeric', month: 'long'
+const SHORT_DAY_FORMATTER = new Intl.DateTimeFormat('es-PE', {
+  timeZone: 'America/Lima', weekday: 'long', day: 'numeric'
 });
 
-function formatDateLabel(dateStr) {
-  // dateStr: "YYYY-MM-DD" en calendario de Lima; se ancla al mediodía UTC
-  // para que ninguna conversión de zona horaria lo empuje al día anterior.
+/**
+ * Etiqueta corta de día para las frases del bot, ej. "viernes 28" (o "hoy" si
+ * es hoy). `dateStr` es "YYYY-MM-DD" en calendario de Lima; se ancla al
+ * mediodía UTC para que ninguna conversión de zona horaria lo empuje al día
+ * anterior.
+ */
+function formatShortDayLabel(dateStr) {
+  if (dateStr === limaTodayIso()) return 'hoy';
   const [y, m, d] = dateStr.split('-').map(Number);
-  const label = DATE_LABEL_FORMATTER.format(new Date(Date.UTC(y, m - 1, d, 12)));
-  return label.charAt(0).toUpperCase() + label.slice(1);
+  return SHORT_DAY_FORMATTER.format(new Date(Date.UTC(y, m - 1, d, 12))).replace(',', '');
 }
 
 function limaTodayIso() {
@@ -690,42 +694,48 @@ export class WhatsappBotService {
   }
 
   /**
-   * Pasa al paso de elegir día. Consulta la disponibilidad REAL del asesor y
-   * nombra solo los días que de verdad tienen espacio (en vez de prometer
-   * "puede ser hoy" cuando hoy ya no queda nada).
+   * Pasa al paso de agendamiento consultando la disponibilidad REAL del
+   * asesor. Si solo hay un día con espacio, NO pregunta el día: pasa directo
+   * a ofrecer los horarios de ese día. Si hay varios, pregunta cuál prefiere.
    */
   async promptForDate(waId) {
     const upcoming = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID, { limit: 30, days: BOOKING_WINDOW_DAYS });
     const days = [...new Set(upcoming.map((s) => s.date))].sort();
 
+    const { answers, scheduling } = this._readScheduling(await this.getSession(waId));
+
     if (days.length === 0) {
       // Entre la comprobación de offerScheduling y este punto se ocupó la
       // última franja: se transfiere a un asesor en vez de dejarlo colgado.
-      const { answers } = this._readScheduling(await this.getSession(waId));
-      delete answers.__scheduling;
+      if (scheduling) delete answers.__scheduling;
       await this.updateSession(waId, { answers: JSON.stringify(answers) });
       await this.handOffToAdvisor(waId, 'Sin bloques libres al momento de proponer el día.');
       return;
     }
 
-    const { answers, scheduling } = this._readScheduling(await this.getSession(waId));
-    if (scheduling) {
-      scheduling.availableDays = days;
-      await this.updateSession(waId, { status: 'scheduling_date', answers: JSON.stringify(answers) });
-    } else {
-      await this.updateSession(waId, { status: 'scheduling_date' });
+    if (scheduling) scheduling.availableDays = days;
+
+    // Un solo día disponible → sin rodeos: se muestran los horarios de una vez.
+    if (days.length === 1) {
+      const day = days[0];
+      const slots = upcoming.filter((s) => s.date === day).slice(0, SLOTS_TO_OFFER);
+      if (scheduling) scheduling.slots = slots;
+      await this.updateSession(waId, { status: 'scheduling_time', answers: JSON.stringify(answers) });
+      await this.send(
+        waId,
+        `📅 Tenemos agenda para el ${formatShortDayLabel(day)}. Estos son los horarios:\n\n` +
+        `${numberedList(slots.map((s) => s.label))}\n\n` +
+        'Responde con el número que prefieras, o "no" si prefieres que te contacten después.'
+      );
+      return;
     }
 
-    const todayIso = limaTodayIso();
-    const labels = days.map((d) => (d === todayIso ? 'hoy' : formatDateLabel(d)));
-    let disponibilidad;
-    if (labels.length === 1) {
-      disponibilidad = `El día más cercano con espacio es *${labels[0]}*.`;
-    } else {
-      disponibilidad = `Tengo espacio ${labels.slice(0, -1).join(', ')} y ${labels[labels.length - 1]}.`;
-    }
-
-    await this.send(waId, `📅 ${disponibilidad} ¿Qué día prefieres para la llamada con el jefe comercial?`);
+    // Varios días → se pregunta cuál prefiere.
+    await this.updateSession(waId, { status: 'scheduling_date', answers: JSON.stringify(answers) });
+    await this.send(
+      waId,
+      `📅 Tenemos agenda disponible: ${this._availableDaysPhrase(days)}. ¿Qué día prefieres para la llamada con el jefe comercial?`
+    );
   }
 
   /**
@@ -825,8 +835,7 @@ export class WhatsappBotService {
 
   /** Frase legible con los días que sí tienen espacio (ej. "hoy y el viernes 28"). */
   _availableDaysPhrase(days) {
-    const todayIso = limaTodayIso();
-    const labels = (days || []).map((d) => (d === todayIso ? 'hoy' : formatDateLabel(d)));
+    const labels = (days || []).map(formatShortDayLabel);
     if (labels.length === 0) return '';
     if (labels.length === 1) return labels[0];
     return `${labels.slice(0, -1).join(', ')} y ${labels[labels.length - 1]}`;
@@ -875,12 +884,12 @@ export class WhatsappBotService {
     const { date } = await this.ollamaService.parseSchedulingDate(trimmed, todayIso, MAX_BOOKING_DAYS_AHEAD);
 
     if (!date) {
-      await this.send(waId, `No identifiqué el día 🤔 Tengo espacio ${daysPhrase}. ¿Cuál prefieres?`);
+      await this.send(waId, `No identifiqué el día 🤔 Tenemos agenda ${daysPhrase}. ¿Cuál prefieres?`);
       return;
     }
 
     if (!availableDays.includes(date)) {
-      await this.send(waId, `Ese día no tengo espacio 🙈 Puedo ${daysPhrase}. ¿Cuál te viene bien?`);
+      await this.send(waId, `Ese día no hay agenda 🙈 Tenemos ${daysPhrase}. ¿Cuál te viene bien?`);
       return;
     }
 
@@ -896,11 +905,11 @@ export class WhatsappBotService {
         return;
       }
       await this.updateSession(waId, { status: 'scheduling_date', answers: JSON.stringify(answers) });
-      await this.send(waId, `Justo se ocupó ese día 😅 Ahora tengo ${this._availableDaysPhrase(scheduling.availableDays)}. ¿Cuál prefieres?`);
+      await this.send(waId, `Justo se ocupó ese día 😅 Ahora tenemos ${this._availableDaysPhrase(scheduling.availableDays)}. ¿Cuál prefieres?`);
       return;
     }
 
-    const intro = `📅 Para el ${date === todayIso ? 'día de hoy' : formatDateLabel(date)} tengo estos horarios:`;
+    const intro = `📅 Horarios para el ${formatShortDayLabel(date)}:`;
     scheduling.slots = slots;
     await this.updateSession(waId, { status: 'scheduling_time', answers: JSON.stringify(answers) });
 
