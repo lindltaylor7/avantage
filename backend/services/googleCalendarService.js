@@ -25,6 +25,25 @@ function formatSlotLabel(date) {
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
+const LIMA_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit'
+});
+
+/** Fecha del bloque en calendario de Lima, formato "YYYY-MM-DD". */
+function limaDateOf(date) {
+  return LIMA_DATE_FORMATTER.format(date);
+}
+
+/** Da forma uniforme a un bloque libre para devolverlo a los llamadores. */
+function toFreeSlot(slot) {
+  return {
+    startTime: slot.start.toISOString(),
+    endTime: slot.end.toISOString(),
+    label: formatSlotLabel(slot.start),
+    date: limaDateOf(slot.start)
+  };
+}
+
 /**
  * Conexión OAuth de cada asesor con su propio Google Calendar, usada para
  * crear reuniones con Google Meet directamente en su calendario real.
@@ -333,11 +352,7 @@ export class GoogleCalendarService {
     if (candidates.length === 0) return [];
 
     const freeSlots = await this.filterAgainstCalendar(userId, candidates);
-    return freeSlots.slice(0, limit).map((slot) => ({
-      startTime: slot.start.toISOString(),
-      endTime: slot.end.toISOString(),
-      label: formatSlotLabel(slot.start)
-    }));
+    return freeSlots.slice(0, limit).map(toFreeSlot);
   }
 
   /**
@@ -371,11 +386,7 @@ export class GoogleCalendarService {
     candidates.sort((a, b) => a.start - b.start);
 
     const freeSlots = await this.filterAgainstCalendar(userId, candidates);
-    return freeSlots.slice(0, limit).map((slot) => ({
-      startTime: slot.start.toISOString(),
-      endTime: slot.end.toISOString(),
-      label: formatSlotLabel(slot.start)
-    }));
+    return freeSlots.slice(0, limit).map(toFreeSlot);
   }
 
   /**
@@ -410,10 +421,6 @@ export class GoogleCalendarService {
       .map((slot) => ({ slot, diff: Math.abs(minutesOfDayLima(slot.start) - preferredMinutes) }))
       .sort((a, b) => a.diff - b.diff || (a.slot.start - b.slot.start));
 
-    return ranked.slice(0, limit).map(({ slot }) => ({
-      startTime: slot.start.toISOString(),
-      endTime: slot.end.toISOString(),
-      label: formatSlotLabel(slot.start)
-    }));
+    return ranked.slice(0, limit).map(({ slot }) => toFreeSlot(slot));
   }
 }

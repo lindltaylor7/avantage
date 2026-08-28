@@ -66,11 +66,6 @@ function limaTodayIso() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 }
 
-function addDaysIso(iso, days) {
-  const [y, m, d] = iso.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
-}
-
 function digitsOnly(value) {
   return String(value || '').replace(/\D/g, '');
 }
@@ -529,13 +524,16 @@ export class WhatsappBotService {
     if (extracted.email && extracted.email.includes('@')) answers.email = extracted.email;
 
     await this.updateSession(waId, { answers: JSON.stringify(answers) });
-    await this.send(waId, result.reply);
 
-    // El correo ya no es obligatorio: basta con conocer el tema para pasar
-    // a la llamada con el asesor (el correo, si lo dejó, solo se usa para
-    // la invitación del Meet y el reporte de respaldo, ambos en silencio).
+    // Basta con conocer el tema para pasar a la reunión con el jefe comercial.
+    // Cuando eso pasa, NO se manda `result.reply`: el LLM a veces cierra el
+    // turno con una pregunta suelta (carrera, nivel...) que no debe llegarle
+    // al contacto; offerScheduling() toma el hilo con la propuesta y la
+    // elección de modalidad.
     if (result.ready && answers.problem) {
       await this.finalize(waId, answers);
+    } else {
+      await this.send(waId, result.reply);
     }
   }
 
@@ -651,7 +649,7 @@ export class WhatsappBotService {
       answers.__scheduling = { topic, email: email || null, mode: null, phone: null, discount: 0 };
       await this.updateSession(waId, { status: 'scheduling_mode', answers: JSON.stringify(answers) });
 
-      await this.send(waId, `Para la llamada con el asesor, ¿cómo prefieres?\n\n1. Telefónica\n2. Vía Meet (con ${MEET_DISCOUNT_PCT}% de descuento)`);
+      await this.send(waId, `Coordinemos una reunión con nuestro jefe comercial para revisar tu tema 🙌 ¿Cómo prefieres la llamada?\n\n1. Telefónica\n2. Vía Meet (con ${MEET_DISCOUNT_PCT}% de descuento)`);
     } catch (error) {
       // Si la conexión de Google Calendar del asesor caducó, avisar al equipo
       // en el panel para que la reconecte — si no, todos los leads que
@@ -683,13 +681,43 @@ export class WhatsappBotService {
     return ['no', 'omitir', 'despues', 'después', 'luego', 'mas tarde', 'más tarde'].includes(normalize((text || '').trim()));
   }
 
-  /** Pasa al paso de elegir día (tras resolver modalidad y datos de contacto). */
+  /**
+   * Pasa al paso de elegir día. Consulta la disponibilidad REAL del asesor y
+   * nombra solo los días que de verdad tienen espacio (en vez de prometer
+   * "puede ser hoy" cuando hoy ya no queda nada).
+   */
   async promptForDate(waId) {
-    await this.updateSession(waId, { status: 'scheduling_date' });
-    await this.send(
-      waId,
-      `📅 ¿Qué día te viene bien para la llamada con el jefe comercial? Puede ser hoy o hasta el ${formatDateLabel(addDaysIso(limaTodayIso(), MAX_BOOKING_DAYS_AHEAD))}.`
-    );
+    const upcoming = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID, { limit: 30, days: BOOKING_WINDOW_DAYS });
+    const days = [...new Set(upcoming.map((s) => s.date))].sort();
+
+    if (days.length === 0) {
+      // Entre la comprobación de offerScheduling y este punto se ocupó la
+      // última franja: se transfiere a un asesor en vez de dejarlo colgado.
+      const { answers } = this._readScheduling(await this.getSession(waId));
+      delete answers.__scheduling;
+      await this.updateSession(waId, { answers: JSON.stringify(answers) });
+      await this.handOffToAdvisor(waId, 'Sin bloques libres al momento de proponer el día.');
+      return;
+    }
+
+    const { answers, scheduling } = this._readScheduling(await this.getSession(waId));
+    if (scheduling) {
+      scheduling.availableDays = days;
+      await this.updateSession(waId, { status: 'scheduling_date', answers: JSON.stringify(answers) });
+    } else {
+      await this.updateSession(waId, { status: 'scheduling_date' });
+    }
+
+    const todayIso = limaTodayIso();
+    const labels = days.map((d) => (d === todayIso ? 'hoy' : formatDateLabel(d)));
+    let disponibilidad;
+    if (labels.length === 1) {
+      disponibilidad = `El día más cercano con espacio es *${labels[0]}*.`;
+    } else {
+      disponibilidad = `Tengo espacio ${labels.slice(0, -1).join(', ')} y ${labels[labels.length - 1]}.`;
+    }
+
+    await this.send(waId, `📅 ${disponibilidad} ¿Qué día prefieres para la llamada con el jefe comercial?`);
   }
 
   /**
@@ -787,10 +815,19 @@ export class WhatsappBotService {
     await this.promptForDate(waId);
   }
 
+  /** Frase legible con los días que sí tienen espacio (ej. "hoy y el viernes 28"). */
+  _availableDaysPhrase(days) {
+    const todayIso = limaTodayIso();
+    const labels = (days || []).map((d) => (d === todayIso ? 'hoy' : formatDateLabel(d)));
+    if (labels.length === 0) return '';
+    if (labels.length === 1) return labels[0];
+    return `${labels.slice(0, -1).join(', ')} y ${labels[labels.length - 1]}`;
+  }
+
   /**
-   * Interpreta con IA qué día pidió el lead y muestra los horarios libres
-   * reales de ese día. Si ese día no tiene espacio, ofrece de una vez las
-   * próximas alternativas reales en vez de hacerlo adivinar otra fecha.
+   * Interpreta con IA qué día pidió el lead. Solo se agenda en un día que de
+   * verdad tenga espacio libre (los que se le nombraron al proponerle elegir);
+   * si pide otro, se le recuerdan los días disponibles reales.
    */
   async handleSchedulingDateReply(waId, session, text) {
     const answers = typeof session.answers === 'string' ? JSON.parse(session.answers) : (session.answers || {});
@@ -809,43 +846,53 @@ export class WhatsappBotService {
     }
 
     const todayIso = limaTodayIso();
-    const maxDateIso = addDaysIso(todayIso, MAX_BOOKING_DAYS_AHEAD);
-    const { date } = await this.ollamaService.parseSchedulingDate(trimmed, todayIso, MAX_BOOKING_DAYS_AHEAD);
-    if (!date) {
-      await this.send(waId, `No identifiqué el día 🤔 Puede ser hoy o hasta el ${formatDateLabel(maxDateIso)}.`);
+
+    // Días con espacio real. Se recalculan siempre (pudo cambiar la agenda) y
+    // se guardan para no volver a consultar en cada intento.
+    let availableDays = scheduling.availableDays;
+    if (!availableDays || availableDays.length === 0) {
+      const upcoming = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID, { limit: 30, days: BOOKING_WINDOW_DAYS });
+      availableDays = [...new Set(upcoming.map((s) => s.date))].sort();
+      scheduling.availableDays = availableDays;
+    }
+
+    if (availableDays.length === 0) {
+      delete answers.__scheduling;
+      await this.updateSession(waId, { answers: JSON.stringify(answers) });
+      await this.handOffToAdvisor(waId, 'Sin bloques libres al procesar la fecha elegida.');
       return;
     }
 
-    let slots;
-    let intro;
+    const daysPhrase = this._availableDaysPhrase(availableDays);
+    const { date } = await this.ollamaService.parseSchedulingDate(trimmed, todayIso, MAX_BOOKING_DAYS_AHEAD);
 
-    if (date < todayIso || date > maxDateIso) {
-      // Fuera del horizonte permitido (hoy .. hoy+2): se ofrecen directamente
-      // los próximos horarios reales dentro del rango.
-      slots = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID, { limit: SLOTS_TO_OFFER, days: BOOKING_WINDOW_DAYS });
-      if (slots.length === 0) {
-        delete answers.__scheduling;
-        await this.updateSession(waId, { answers: JSON.stringify(answers) });
-        await this.handOffToAdvisor(waId, `El lead pidió una fecha fuera del rango (hoy..${maxDateIso}) y no hay bloques libres dentro del rango.`);
-        return;
-      }
-      intro = `Solo puedo coordinar hasta el ${formatDateLabel(maxDateIso)}. Estos son los horarios libres:`;
-    } else {
-      slots = await this.googleCalendarService.getFreeSlotsForDate(BOOKING_ADVISOR_USER_ID, date, { limit: SLOTS_TO_OFFER });
-      intro = `📅 Para el ${formatDateLabel(date)} tengo estos horarios:`;
-
-      if (slots.length === 0) {
-        slots = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID, { limit: SLOTS_TO_OFFER, days: BOOKING_WINDOW_DAYS });
-        if (slots.length === 0) {
-          delete answers.__scheduling;
-          await this.updateSession(waId, { answers: JSON.stringify(answers) });
-          await this.handOffToAdvisor(waId, 'Sin bloques libres tras pedirle una fecha al lead.');
-          return;
-        }
-        intro = `Ese día no tengo espacio, pero tengo estos horarios cercanos:`;
-      }
+    if (!date) {
+      await this.send(waId, `No identifiqué el día 🤔 Tengo espacio ${daysPhrase}. ¿Cuál prefieres?`);
+      return;
     }
 
+    if (!availableDays.includes(date)) {
+      await this.send(waId, `Ese día no tengo espacio 🙈 Puedo ${daysPhrase}. ¿Cuál te viene bien?`);
+      return;
+    }
+
+    const slots = await this.googleCalendarService.getFreeSlotsForDate(BOOKING_ADVISOR_USER_ID, date, { limit: SLOTS_TO_OFFER });
+    if (slots.length === 0) {
+      // Se ocupó la última franja de ese día entre que se propuso y ahora.
+      const fresh = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID, { limit: 30, days: BOOKING_WINDOW_DAYS });
+      scheduling.availableDays = [...new Set(fresh.map((s) => s.date))].sort();
+      if (scheduling.availableDays.length === 0) {
+        delete answers.__scheduling;
+        await this.updateSession(waId, { answers: JSON.stringify(answers) });
+        await this.handOffToAdvisor(waId, 'Sin bloques libres tras pedirle una fecha al lead.');
+        return;
+      }
+      await this.updateSession(waId, { status: 'scheduling_date', answers: JSON.stringify(answers) });
+      await this.send(waId, `Justo se ocupó ese día 😅 Ahora tengo ${this._availableDaysPhrase(scheduling.availableDays)}. ¿Cuál prefieres?`);
+      return;
+    }
+
+    const intro = `📅 Para el ${date === todayIso ? 'día de hoy' : formatDateLabel(date)} tengo estos horarios:`;
     scheduling.slots = slots;
     await this.updateSession(waId, { status: 'scheduling_time', answers: JSON.stringify(answers) });
 

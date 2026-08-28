@@ -12,7 +12,10 @@
       </div>
 
       <div class="header-actions">
-        <button class="btn-action-primary" @click="openCreateColumnModal">
+        <button class="btn-action-primary" @click="openCreateLeadModal">
+          <span class="btn-icon">👤</span> Nuevo Lead
+        </button>
+        <button class="btn-action-secondary" @click="openCreateColumnModal()">
           <span class="btn-icon">➕</span> Nueva Etapa
         </button>
         <button class="btn-action-secondary" @click="fetchAll" :disabled="isLoading" title="Actualizar datos">
@@ -179,10 +182,20 @@
     <!-- Tablero Kanban Dinámico con Scroll Suave -->
     <div class="kanban-viewport custom-scrollbar" ref="kanbanBoardRef">
       <div class="kanban-columns-container">
+        <template v-for="(col, colIndex) in columns" :key="col.key">
+        <!-- Insertador rápido de etapa (antes de esta columna) -->
+        <button
+          class="col-inserter"
+          type="button"
+          :title="colIndex === 0 ? 'Insertar etapa al inicio' : 'Insertar etapa aquí'"
+          @click="openCreateColumnModal(colIndex)"
+        >
+          <span class="col-inserter-line"></span>
+          <span class="col-inserter-plus">+</span>
+        </button>
+
         <!-- Columna de Kanban -->
         <div
-          v-for="(col, colIndex) in columns"
-          :key="col.key"
           class="kanban-column"
           :class="{
             'is-first-setter-col': colIndex === 0,
@@ -197,14 +210,11 @@
           <!-- Barra superior de acento de color -->
           <div class="column-top-accent"></div>
 
-          <!-- Cabecera de Columna con Controles de Flechas y Opciones -->
+          <!-- Cabecera de Columna: título a todo el ancho, controles debajo -->
           <div class="kanban-column-header">
-            <div class="col-title-group">
+            <div class="col-title-row">
               <span class="col-icon">{{ col.icon || '📌' }}</span>
-              <div class="col-title-texts">
-                <span class="col-label" :title="col.label">{{ col.label }}</span>
-                <span v-if="colIndex === 0" class="col-setter-badge">💬 Chats WhatsApp / FB / IG</span>
-              </div>
+              <span class="col-label" :title="col.label">{{ col.label }}</span>
               <span
                 class="col-count-badge"
                 :style="{ background: (col.color || '#56624A') + '22', color: col.color || '#56624A', borderColor: (col.color || '#56624A') + '55' }"
@@ -213,7 +223,9 @@
               </span>
             </div>
 
-            <!-- Controles de Flechas y Menú de Columna -->
+            <span v-if="colIndex === 0" class="col-setter-badge">💬 Chats WhatsApp / FB / IG</span>
+
+            <!-- Controles de la columna (fila propia, debajo del nombre) -->
             <div class="col-actions-group">
               <button
                 class="col-arrow-btn"
@@ -230,6 +242,13 @@
                 title="Mover columna a la derecha"
               >
                 ▶
+              </button>
+              <button
+                class="col-menu-btn"
+                @click.stop="openCreateColumnModal(colIndex + 1)"
+                title="Insertar una etapa después de esta"
+              >
+                ➕
               </button>
               <button
                 class="col-menu-btn"
@@ -465,13 +484,24 @@
             <span v-if="col.final" class="final-tag">🏆 Cierre Exitoso</span>
           </div>
         </div>
+        </template>
 
-        <!-- Tarjeta Fantasma para Añadir Nueva Columna Rápido -->
-        <div class="add-column-ghost-card" @click="openCreateColumnModal">
+        <!-- Insertador final + tarjeta fantasma para añadir al final -->
+        <button
+          class="col-inserter"
+          type="button"
+          title="Insertar etapa al final"
+          @click="openCreateColumnModal(columns.length)"
+        >
+          <span class="col-inserter-line"></span>
+          <span class="col-inserter-plus">+</span>
+        </button>
+
+        <div class="add-column-ghost-card" @click="openCreateColumnModal(columns.length)">
           <div class="ghost-content">
             <span class="ghost-plus">➕</span>
             <span class="ghost-text">Crear Nueva Etapa</span>
-            <span class="ghost-hint">Añade una etapa al Setter Funnel</span>
+            <span class="ghost-hint">O usa el “+” entre columnas para insertarla en su sitio</span>
           </div>
         </div>
       </div>
@@ -487,6 +517,11 @@
           <button class="modal-close-btn" @click="showCreateColModal = false">✕</button>
         </div>
         <form @submit.prevent="saveNewColumn" class="modal-body">
+          <p v-if="insertAtIndex !== null" class="insert-position-hint">
+            📍 Se insertará en la posición <strong>{{ insertAtIndex + 1 }}</strong>
+            <template v-if="columns[insertAtIndex]"> (antes de “{{ columns[insertAtIndex].label }}”)</template>
+            <template v-else> (al final)</template>
+          </p>
           <div class="form-group">
             <label class="form-label">Nombre de la etapa *</label>
             <input
@@ -543,6 +578,84 @@
           <div class="modal-actions">
             <button type="button" class="btn-action-ghost" @click="showCreateColModal = false">Cancelar</button>
             <button type="submit" class="btn-action-primary">Crear Etapa</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- ================================================================= -->
+    <!-- MODAL 1B: Nuevo Lead Manual                                       -->
+    <!-- ================================================================= -->
+    <div v-if="showCreateLeadModal" class="modal-overlay" @click.self="showCreateLeadModal = false">
+      <div class="modal-content column-modal-card">
+        <div class="modal-header">
+          <h3 class="modal-title">👤 Nuevo Lead Manual</h3>
+          <button class="modal-close-btn" @click="showCreateLeadModal = false">✕</button>
+        </div>
+        <form @submit.prevent="saveNewLead" class="modal-body">
+          <p v-if="leadFormError" class="info-box alert-box lead-form-error">{{ leadFormError }}</p>
+
+          <div class="lead-form-grid">
+            <div class="form-group">
+              <label class="form-label">Nombre completo *</label>
+              <input v-model="leadForm.fullName" type="text" class="form-input custom-input" placeholder="Ej: Edward Ramírez" required autofocus />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Celular *</label>
+              <input v-model="leadForm.phone" type="text" class="form-input custom-input" placeholder="51987654321" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Correo</label>
+              <input v-model="leadForm.email" type="email" class="form-input custom-input" placeholder="correo@ejemplo.com" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">DNI</label>
+              <input v-model="leadForm.dni" type="text" class="form-input custom-input" placeholder="12345678" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Universidad</label>
+              <input v-model="leadForm.university" type="text" class="form-input custom-input" placeholder="Universidad Continental" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Carrera</label>
+              <input v-model="leadForm.career" type="text" class="form-input custom-input" placeholder="Ingeniería Civil" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Canal de origen</label>
+              <input v-model="leadForm.source" type="text" class="form-input custom-input" list="lead-source-options" placeholder="WhatsApp, Instagram, Referido..." />
+              <datalist id="lead-source-options">
+                <option value="WhatsApp Directo" />
+                <option value="Instagram Ads" />
+                <option value="Facebook Ads" />
+                <option value="Referido" />
+                <option value="Manual" />
+              </datalist>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Setter / Asesor</label>
+              <input v-model="leadForm.assignedTo" type="text" class="form-input custom-input" placeholder="Kevin" />
+            </div>
+            <div class="form-group lead-form-full">
+              <label class="form-label">Tema / Consulta</label>
+              <input v-model="leadForm.topic" type="text" class="form-input custom-input" placeholder="Ej: Tesis de ingeniería civil sobre concreto reciclado" />
+            </div>
+            <div class="form-group lead-form-full">
+              <label class="form-label">Etapa inicial en el Setter Funnel</label>
+              <select v-model="leadForm.status" class="form-select custom-select">
+                <option v-for="c in columns" :key="c.key" :value="c.key">{{ c.icon }} {{ c.label }}</option>
+              </select>
+            </div>
+            <div class="form-group lead-form-full">
+              <label class="form-label">Notas del Setter</label>
+              <textarea v-model="leadForm.additionalNotes" class="form-input custom-input lead-notes-textarea" rows="2" placeholder="Contexto, cómo llegó, siguiente paso..."></textarea>
+            </div>
+          </div>
+
+          <div class="modal-actions">
+            <button type="button" class="btn-action-ghost" @click="showCreateLeadModal = false">Cancelar</button>
+            <button type="submit" class="btn-action-primary" :disabled="isSavingLead">
+              {{ isSavingLead ? 'Guardando...' : 'Registrar Lead' }}
+            </button>
           </div>
         </form>
       </div>
@@ -919,11 +1032,30 @@ function getColumnRangeText(colKey) {
 
 // Modales
 const showCreateColModal = ref(false);
+const insertAtIndex = ref(null); // null = añadir al final; nº = insertar en esa posición
 const newColumnForm = reactive({
   label: '',
   icon: '🎯',
   color: '#2C8C99',
   final: false
+});
+
+// Modal Nuevo Lead manual
+const showCreateLeadModal = ref(false);
+const isSavingLead = ref(false);
+const leadFormError = ref('');
+const leadForm = reactive({
+  fullName: '',
+  phone: '',
+  email: '',
+  dni: '',
+  university: '',
+  career: '',
+  topic: '',
+  source: 'Manual',
+  assignedTo: 'Kevin',
+  status: 'conversacion_abierta',
+  additionalNotes: ''
 });
 
 const showEditColModal = ref(false);
@@ -1238,7 +1370,8 @@ async function updateLeadStatusFromSelect(leadId, newStatus) {
 }
 
 // Modal Gestión de Columnas
-function openCreateColumnModal() {
+function openCreateColumnModal(index = null) {
+  insertAtIndex.value = (typeof index === 'number' && index >= 0 && index <= columns.value.length) ? index : null;
   newColumnForm.label = '';
   newColumnForm.icon = '🎯';
   newColumnForm.color = '#2C8C99';
@@ -1249,16 +1382,78 @@ function openCreateColumnModal() {
 function saveNewColumn() {
   if (!newColumnForm.label.trim()) return;
   const key = 'setter_col_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 5);
-  columns.value.push({
+  const newCol = {
     key,
     label: newColumnForm.label.trim(),
     icon: newColumnForm.icon || '📌',
     color: newColumnForm.color || '#2C8C99',
     final: Boolean(newColumnForm.final),
-    position: columns.value.length
-  });
+    position: 0
+  };
+  const at = insertAtIndex.value;
+  if (at !== null) {
+    columns.value.splice(at, 0, newCol);
+  } else {
+    columns.value.push(newCol);
+  }
+  columns.value.forEach((c, i) => { c.position = i; });
   persistSetterColumns();
   showCreateColModal.value = false;
+  insertAtIndex.value = null;
+}
+
+// Modal Nuevo Lead manual
+function openCreateLeadModal() {
+  leadFormError.value = '';
+  leadForm.fullName = '';
+  leadForm.phone = '';
+  leadForm.email = '';
+  leadForm.dni = '';
+  leadForm.university = '';
+  leadForm.career = '';
+  leadForm.topic = '';
+  leadForm.source = 'Manual';
+  leadForm.assignedTo = 'Kevin';
+  leadForm.status = columns.value[0]?.key || 'conversacion_abierta';
+  leadForm.additionalNotes = '';
+  showCreateLeadModal.value = true;
+}
+
+async function saveNewLead() {
+  leadFormError.value = '';
+  if (!leadForm.fullName.trim() || !leadForm.phone.trim()) {
+    leadFormError.value = 'El nombre completo y el celular son obligatorios.';
+    return;
+  }
+  isSavingLead.value = true;
+  try {
+    const payload = {
+      fullName: leadForm.fullName.trim(),
+      phone: leadForm.phone.trim(),
+      email: leadForm.email.trim(),
+      dni: leadForm.dni.trim(),
+      university: leadForm.university.trim(),
+      fieldOfStudy: leadForm.career.trim(),
+      topic: leadForm.topic.trim() || `Asesoría para ${leadForm.fullName.trim()}`,
+      source: leadForm.source.trim() || 'Manual',
+      assignedTo: leadForm.assignedTo.trim() || 'Kevin',
+      status: leadForm.status,
+      additionalNotes: leadForm.additionalNotes.trim() || null
+    };
+    const res = await apiFetch('/api/leads', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo registrar el lead.');
+    showCreateLeadModal.value = false;
+    await fetchAll();
+  } catch (err) {
+    leadFormError.value = err.message || 'Error al registrar el lead.';
+  } finally {
+    isSavingLead.value = false;
+  }
 }
 
 function openEditColumnModal(col) {
@@ -1833,7 +2028,7 @@ onMounted(() => {
 
 .kanban-columns-container {
   display: flex;
-  gap: 1.25rem;
+  gap: 0.35rem;
   align-items: flex-start;
   min-width: min-content;
 }
@@ -1873,47 +2068,44 @@ onMounted(() => {
 }
 
 .kanban-column-header {
-  padding: 1rem 1.15rem 0.85rem;
+  padding: 0.9rem 1rem 0.75rem;
   border-bottom: 1px solid var(--border-color);
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
+  flex-direction: column;
   gap: 0.5rem;
 }
 
-.col-title-group {
+.col-title-row {
   display: flex;
   align-items: flex-start;
   gap: 0.5rem;
-  flex: 1;
-  overflow: hidden;
 }
 
 .col-icon {
-  font-size: 1.25rem;
-  line-height: 1.2;
-}
-
-.col-title-texts {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  font-size: 1.2rem;
+  line-height: 1.3;
+  flex-shrink: 0;
 }
 
 .col-label {
-  font-size: 0.95rem;
+  flex: 1;
+  min-width: 0;
+  font-size: 0.92rem;
   font-weight: 700;
   color: var(--text-main);
-  white-space: nowrap;
+  line-height: 1.3;
+  /* Título casi completo: hasta 2 líneas antes de recortar */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 .col-setter-badge {
   font-size: 0.68rem;
   color: #5AAEB8;
   font-weight: 600;
-  margin-top: 1px;
 }
 
 .col-count-badge {
@@ -1923,12 +2115,111 @@ onMounted(() => {
   border-radius: 12px;
   border: 1px solid;
   flex-shrink: 0;
+  height: fit-content;
 }
 
 .col-actions-group {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+/* Insertador rápido de etapa entre columnas */
+.col-inserter {
+  align-self: stretch;
+  min-height: 120px;
+  width: 26px;
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  border-radius: 8px;
+  transition: background 0.15s ease;
+}
+
+.col-inserter-line {
+  width: 2px;
+  flex: 1;
+  background: transparent;
+  border-radius: 2px;
+  transition: background 0.15s ease;
+}
+
+.col-inserter-plus {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--surface-3);
+  color: var(--text-muted);
+  border: 1px dashed var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1;
+  margin: 0.35rem 0;
+  transition: all 0.15s ease;
+}
+
+.col-inserter:hover .col-inserter-line {
+  background: #2C8C99;
+}
+
+.col-inserter:hover .col-inserter-plus {
+  background: #2C8C99;
+  color: #fff;
+  border-color: #2C8C99;
+  transform: scale(1.15);
+}
+
+.insert-position-hint {
+  font-size: 0.8rem;
+  color: var(--text-sub);
+  background: var(--surface-2);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 0.5rem 0.75rem;
+  margin: 0 0 0.25rem;
+}
+
+/* Formulario Nuevo Lead */
+.lead-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.9rem 1rem;
+}
+
+.lead-form-grid .form-group {
+  margin-bottom: 0;
+}
+
+.lead-form-full {
+  grid-column: 1 / -1;
+}
+
+.lead-notes-textarea {
+  resize: vertical;
+  min-height: 52px;
+  font-family: inherit;
+}
+
+.lead-form-error {
+  margin-bottom: 0.5rem;
+}
+
+@media (max-width: 560px) {
+  .lead-form-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .col-arrow-btn, .col-menu-btn {
