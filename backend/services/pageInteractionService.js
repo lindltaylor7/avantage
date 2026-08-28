@@ -1,6 +1,17 @@
+import fs from 'fs';
+import path from 'path';
 import { db } from '../db/connection.js';
+import { socialPostImageDir } from '../middleware/upload.js';
 
 const GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v21.0';
+
+function extForMime(mime) {
+  if (!mime) return 'jpg';
+  if (mime.includes('png')) return 'png';
+  if (mime.includes('webp')) return 'webp';
+  if (mime.includes('gif')) return 'gif';
+  return 'jpg';
+}
 
 /**
  * Persistencia de las interacciones (comentarios, reacciones, publicaciones,
@@ -135,6 +146,89 @@ export class PageInteractionService {
 
   async getById(id) {
     return db('page_interactions').where({ id }).first();
+  }
+
+  /**
+   * Devuelve una copia LOCAL de la miniatura del post (la descarga la primera
+   * vez y la guarda en disco). Se usa en vez de mostrar directamente la URL
+   * firmada de Meta, que caduca a las pocas horas. Devuelve
+   * `{ filePath, mimeType }` o `null` si no se pudo obtener imagen.
+   */
+  async getCachedPostImage(postId) {
+    if (!postId) return null;
+    const post = await db('page_posts').where({ post_id: postId }).first();
+
+    if (post?.local_filename) {
+      const cached = path.join(socialPostImageDir, post.local_filename);
+      if (fs.existsSync(cached)) {
+        return { filePath: cached, mimeType: post.mime_type || 'image/jpeg' };
+      }
+    }
+
+    const sourceUrl = await this._resolveFreshImageUrl(postId, post);
+    if (!sourceUrl) return null;
+
+    let response;
+    try {
+      response = await fetch(sourceUrl);
+    } catch (error) {
+      console.error(`❌ [Social] No se pudo descargar la imagen del post ${postId}:`, error.message);
+      return null;
+    }
+    if (!response.ok) return null;
+
+    const mimeType = (response.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
+    if (!mimeType.startsWith('image/')) return null;
+
+    const filename = `${String(postId).replace(/[^A-Za-z0-9_-]/g, '_')}.${extForMime(mimeType)}`;
+    const filePath = path.join(socialPostImageDir, filename);
+    try {
+      await fs.promises.writeFile(filePath, Buffer.from(await response.arrayBuffer()));
+    } catch (error) {
+      console.error(`❌ [Social] No se pudo guardar la imagen del post ${postId}:`, error.message);
+      return null;
+    }
+
+    await db('page_posts')
+      .insert({ post_id: postId, local_filename: filename, mime_type: mimeType, fetched_at: db.fn.now() })
+      .onConflict('post_id')
+      .merge(['local_filename', 'mime_type', 'fetched_at']);
+
+    return { filePath, mimeType };
+  }
+
+  /**
+   * Pide a la Graph API una URL de imagen FRESCA para el post (las guardadas
+   * caducan). Cae de vuelta a la URL guardada si la API falla o no hay token.
+   */
+  async _resolveFreshImageUrl(postId, post) {
+    const token = process.env.META_PAGE_ACCESS_TOKEN;
+    if (!token) return post?.picture_url || null;
+
+    const interaction = await db('page_interactions').where({ post_id: postId }).first();
+    const isInstagram = interaction?.platform === 'instagram';
+    const fields = isInstagram ? 'thumbnail_url,media_url' : 'full_picture';
+
+    try {
+      const r = await fetch(
+        `https://graph.facebook.com/${GRAPH_API_VERSION}/${postId}?fields=${fields}&access_token=${encodeURIComponent(token)}`
+      );
+      const d = await r.json();
+      if (r.ok) {
+        const fresh = isInstagram ? (d.thumbnail_url || d.media_url) : d.full_picture;
+        if (fresh) {
+          await db('page_posts')
+            .insert({ post_id: postId, picture_url: fresh })
+            .onConflict('post_id')
+            .merge(['picture_url'])
+            .catch(() => {});
+          return fresh;
+        }
+      }
+    } catch (error) {
+      console.error(`❌ [Social] Error al pedir la imagen fresca del post ${postId}:`, error.message);
+    }
+    return post?.picture_url || null;
   }
 
   async getRecent({ limit = 50, itemType = null, platform = null } = {}) {

@@ -10,6 +10,11 @@ fs.mkdirSync(uploadDir, { recursive: true });
 const financeReceiptDir = path.join(__dirname, '..', '..', 'uploads', 'finance-receipts');
 fs.mkdirSync(financeReceiptDir, { recursive: true });
 
+// Copias locales de las miniaturas de posts de Facebook/Instagram (sus URLs
+// firmadas de Meta caducan a las pocas horas), descargadas bajo demanda.
+const socialPostImageDir = path.join(__dirname, '..', '..', 'uploads', 'social-posts');
+fs.mkdirSync(socialPostImageDir, { recursive: true });
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
   filename: (req, file, cb) => {
@@ -87,4 +92,4 @@ export function uploadFinanceFile(req, res, next) {
   });
 }
 
-export { financeReceiptDir };
+export { financeReceiptDir, socialPostImageDir };

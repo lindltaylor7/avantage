@@ -1054,6 +1054,24 @@ app.get('/api/social-interactions', requireAuth, requirePermission('leads.view')
 });
 
 /**
+ * Miniatura de un post de Facebook/Instagram servida desde una copia local
+ * (las URLs firmadas de Meta caducan). Responde 404 si no hay imagen — el
+ * frontend muestra un marcador en su lugar.
+ */
+app.get('/api/social-interactions/post-image/:postId', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const image = await pageInteractionService.getCachedPostImage(req.params.postId);
+    if (!image) return res.status(404).end();
+    res.type(image.mimeType);
+    res.set('Cache-Control', 'private, max-age=86400');
+    res.sendFile(image.filePath);
+  } catch (error) {
+    console.error('❌ Error al servir la miniatura del post:', error);
+    res.status(404).end();
+  }
+});
+
+/**
  * Mensajes directos (Messenger) recibidos en la bandeja de entrada de la Página.
  */
 app.get('/api/page-messages', requireAuth, requirePermission('leads.view'), async (req, res) => {
