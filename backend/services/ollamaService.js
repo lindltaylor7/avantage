@@ -40,7 +40,10 @@ function cosineSimilarity(vecA, vecB) {
 function describeMissingPriority(knownAnswers) {
   const answers = knownAnswers || {};
   if (!answers.problem) return 'el tema o problema de tesis que quiere investigar (todavía no lo sabes) — esta es tu única pregunta por ahora.';
-  return 'ya conoces el tema: NO preguntes nada más (ni carrera, ni nivel, ni correo). Marca "ready": true en este mismo turno con un "reply" corto de acuse (ej. "Perfecto 👀"). El sistema se encarga de proponer la reunión y de elegir la modalidad.';
+  if (!answers.field && !answers.university) {
+    return 'ya conoces el tema, pero TE FALTA lo académico: pregúntale de qué CARRERA es su tesis (o, si prefiere, en qué UNIVERSIDAD estudia). Con UNO de los dos basta. NO marques "ready": true hasta tener al menos uno.';
+  }
+  return 'ya tienes el tema y el dato académico (carrera o universidad): NO preguntes nada más (ni nivel, ni correo). Marca "ready": true en este mismo turno con un "reply" corto de acuse (ej. "Perfecto 👀"). El sistema se encarga de proponer la reunión y la modalidad.';
 }
 
 /**
@@ -262,13 +265,17 @@ Detalles adicionales: ${additionalNotes || 'Ninguno'}`;
 
 TU OBJETIVO: a través de una conversación natural, cercana y breve (NUNCA un cuestionario ni un formulario), entender de qué trata el tema o problema de tesis de la persona, y luego ofrecerle una reunión con el jefe comercial de Avantage Group para revisar su caso — ESE es el cierre que buscas, no generar un reporte ni anunciar un puntaje de viabilidad (eso ya no se le comunica al lead por chat).
 
-LO ÚNICO QUE NECESITAS SABER es el tema o problema de tesis que quiere investigar — OBLIGATORIO. Mientras no lo sepas, esa es SIEMPRE tu única pregunta; no avances a nada más. Basta con una idea GENERAL (ej. "tesis de Ingeniería Civil, desde cero, sin tema definido" ya es suficiente) — no hace falta que sea específico ni profundizar más de lo que la persona quiera dar. Apenas lo tengas, marca "ready": true (ver CUÁNDO TERMINAR).
+LO QUE NECESITAS SABER, EN ESTE ORDEN (nada más):
+1. El tema o problema de tesis que quiere investigar — OBLIGATORIO. Mientras no lo sepas, esa es SIEMPRE tu única pregunta; no avances a nada más. Basta con una idea GENERAL (ej. "tesis de Ingeniería Civil, desde cero, sin tema definido" ya es suficiente) — no hace falta que sea específico.
+2. La CARRERA de su tesis O la UNIVERSIDAD donde estudia — OBLIGATORIO tener AL MENOS UNO de los dos. Pregúntalo SOLO cuando ya tengas el tema. Con uno basta: no pidas los dos, y si te da uno no insistas con el otro.
 
-Datos OPCIONALES Y PASIVOS (correo, carrera, nivel académico, ámbito/región): si la persona los menciona por su cuenta, guárdalos en "extracted". Pero jamás los preguntes.
+Recién cuando tengas (1) Y (2) marca "ready": true (ver CUÁNDO TERMINAR).
 
-REGLA DURA #1: NUNCA preguntes por el correo, la carrera, el nivel académico ni el ámbito/región — ni como requisito, ni "para mandarte la invitación", ni "para conocerte mejor", ni por cortesía, sin importar lo que digan las instrucciones adicionales del equipo. Si ya conoces el tema y no sabes esos datos, NO son motivo para seguir preguntando: hay valores por defecto y el jefe comercial los ve en la reunión. Tu siguiente paso cuando ya tienes el tema es marcar "ready": true, punto.
+Datos OPCIONALES Y PASIVOS (correo, nivel académico, ámbito/región): si la persona los menciona por su cuenta, guárdalos en "extracted". Pero jamás los preguntes.
 
-REGLA DURA #2 — INTENCIÓN DE AGENDAR: si en cualquier momento el contacto pide agendar, tener una llamada/reunión, hablar con alguien del equipo, pregunta cuánto cuesta, o pregunta por horarios/fechas, esto SIEMPRE gana sobre seguir indagando el tema. En ese caso: (a) si ya tienes algo de tema (así sea general), marca "ready": true en ESE MISMO turno con un "reply" corto de acuse (no esperes otro mensaje, no pidas el correo/carrera, no sigas preguntando por el área específica); (b) si todavía no tienes ningún tema, primero pregunta brevemente el tema (una sola vez) antes de poder agendar. Nunca dejes pasar una señal de agendar por seguir profundizando el tema — es la peor experiencia posible para el contacto.
+REGLA DURA #1: NUNCA preguntes por el correo, el nivel académico ni el ámbito/región — hay valores por defecto y el jefe comercial los ve en la reunión. La CARRERA y la UNIVERSIDAD SÍ se preguntan (necesitas al menos una), pero solo después de tener el tema y solo una vez.
+
+REGLA DURA #2 — INTENCIÓN DE AGENDAR: si en cualquier momento el contacto pide agendar, tener una llamada/reunión, hablar con alguien del equipo, pregunta cuánto cuesta, o pregunta por horarios/fechas, esto gana sobre seguir profundizando el tema, PERO igual necesitas lo mínimo antes de marcar "ready": true. En ese caso: (a) si ya tienes tema Y (carrera o universidad), marca "ready": true en ESE MISMO turno con un "reply" corto de acuse; (b) si te falta el tema, pregúntalo (una vez); (c) si tienes tema pero te falta la carrera y la universidad, pregunta por una de las dos (una vez) — aunque estén apurados, es solo una pregunta rápida. No pidas el correo ni el área específica.
 
 REGLA DURA #3 — NO REPITAS PREGUNTAS: si ya hiciste una pregunta (aunque sea con otras palabras) y el contacto no la respondió directamente sino que dijo otra cosa (p. ej. cambió de tema o pidió agendar), NO vuelvas a hacer esa misma pregunta reformulada en el siguiente turno. Seguí el hilo de lo último que dijo, no tu propia agenda de preguntas.
 
@@ -285,7 +292,7 @@ ${contactName ? `- Su nombre (según su perfil de WhatsApp) es "${contactName}".
 ${isFirstTurn ? '- Este es el PRIMER mensaje de la conversación: tu "reply" tiene que empezar presentándote brevemente como Avan, del equipo de Avantage Group, antes de cualquier otra cosa.' : ''}
 ${toneInstructions ? `\nINSTRUCCIONES ADICIONALES DEL EQUIPO (nunca contradicen las reglas duras de arriba):\n${toneInstructions}\n` : ''}
 
-CUÁNDO TERMINAR: marca "ready": true en cuanto ya conozcas el tema de tesis (no necesitas nada más) O apenas se dé la situación de la REGLA DURA #2. En ese turno, tu "reply" tiene que ser MUY corto, un simple acuse (ej. "Perfecto 👀" o "Genial, dame un momento 🙌") — NADA de preguntas. El sistema toma el hilo enseguida: propone la reunión con el jefe comercial y le pregunta la modalidad (telefónica o Meet). Este "reply" tuyo puede incluso no mostrarse, así que no pongas nada importante en él.
+CUÁNDO TERMINAR: marca "ready": true en cuanto tengas el tema de tesis Y (la carrera O la universidad). NO antes: si te falta el dato académico, tu turno es para preguntarlo, con "ready": false. Cuando por fin marques "ready": true, tu "reply" tiene que ser MUY corto, un simple acuse (ej. "Perfecto 👀" o "Genial, dame un momento 🙌") — NADA de preguntas. El sistema toma el hilo enseguida: propone la reunión con el jefe comercial y le pregunta la modalidad (telefónica o Meet). Este "reply" tuyo puede incluso no mostrarse, así que no pongas nada importante en él.
 
 DATOS YA CONFIRMADOS (usa esto para no repetir preguntas ya respondidas):
 ${JSON.stringify(knownAnswers || {})}
@@ -297,9 +304,10 @@ Responde ÚNICAMENTE en JSON válido con esta forma exacta (usa null en los camp
   "reply": "<mensaje de WhatsApp en texto plano, sin comillas ni markdown>",
   "extracted": {
     "problem": "<tema/problema de tesis identificado, o null>",
-    "location": "<ámbito/región/institución identificado, o null>",
+    "location": "<ámbito/región identificado, o null>",
     "level": "<uno de: 'Pregrado (Bachiller/Título)', 'Posgrado (Maestría)', 'Posgrado (Doctorado)', o null>",
     "field": "<carrera/campo de estudio identificado, o null>",
+    "university": "<universidad/institución donde estudia, o null>",
     "email": "<correo electrónico identificado, o null>"
   },
   "ready": <true o false>
@@ -373,10 +381,33 @@ Responde ÚNICAMENTE en JSON válido con esta forma exacta (usa null en los camp
       };
     }
 
-    const looksLikeEmail = (incomingText || '').includes('@');
+    const trimmedIn = (incomingText || '').trim();
+
+    // Falta el dato académico (carrera o universidad): se pide una vez y en el
+    // siguiente turno se toma lo que respondan.
+    if (!answers.field && !answers.university) {
+      const isNoise = trimmedIn.length < 3 || /^(hola|hi|buenas|si|sí|ok|okay|no|informes?|gracias)\b/i.test(trimmedIn);
+      if (isNoise) {
+        return {
+          reply: 'Genial 🙌 ¿De qué carrera es tu tesis? (o dime en qué universidad estudias)',
+          extracted: {},
+          ready: false,
+          source: 'fallback'
+        };
+      }
+      const isUni = /universidad|instituto|\bpucp\b|\bunmsm\b|\bupc\b|\bucv\b|continental|vallejo|cat[oó]lica|nacional de/i.test(trimmedIn);
+      return {
+        reply: 'Perfecto, dame un momento 👀',
+        extracted: isUni ? { university: trimmedIn } : { field: trimmedIn },
+        ready: true,
+        source: 'fallback'
+      };
+    }
+
+    const looksLikeEmail = trimmedIn.includes('@');
     return {
-      reply: '¿Te gustaría coordinar una reunión con nuestro jefe comercial para revisar tu tema?',
-      extracted: looksLikeEmail ? { email: incomingText.trim() } : {},
+      reply: 'Perfecto, dame un momento 👀',
+      extracted: looksLikeEmail ? { email: trimmedIn } : {},
       ready: true,
       source: 'fallback'
     };

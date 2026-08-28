@@ -521,17 +521,20 @@ export class WhatsappBotService {
     if (extracted.location) answers.location = extracted.location;
     if (extracted.level) answers.level = extracted.level;
     if (extracted.field) answers.field = extracted.field;
+    if (extracted.university) answers.university = extracted.university;
     if (extracted.email && extracted.email.includes('@')) answers.email = extracted.email;
 
     await this.updateSession(waId, { answers: JSON.stringify(answers) });
 
-    // Basta con conocer el tema para pasar a la reunión con el jefe comercial.
-    // Cuando eso pasa, NO se manda `result.reply`: el LLM a veces cierra el
-    // turno con una pregunta suelta (carrera, nivel...) que no debe llegarle
-    // al contacto; offerScheduling() toma el hilo con la propuesta y la
-    // elección de modalidad.
-    if (result.ready && answers.problem) {
+    // Para pasar a la reunión hace falta: tema + (carrera o universidad, al
+    // menos uno). Cuando se cumple, NO se manda `result.reply` (el LLM a veces
+    // cierra con una pregunta suelta): offerScheduling() toma el hilo.
+    const hasAcademic = !!(answers.field || answers.university);
+    if (result.ready && answers.problem && hasAcademic) {
       await this.finalize(waId, answers);
+    } else if (result.ready && answers.problem && !hasAcademic) {
+      // El LLM quiso cerrar sin el dato académico: se pide antes de agendar.
+      await this.send(waId, 'Perfecto 🙌 Antes de coordinar la reunión, cuéntame: ¿de qué carrera es tu tesis? (o dime en qué universidad estudias)');
     } else {
       await this.send(waId, result.reply);
     }
@@ -552,10 +555,14 @@ export class WhatsappBotService {
     const location = answers.location || settings.default_location || 'Perú';
     const level = answers.level || settings.default_academic_level || 'Pregrado (Bachiller/Título)';
     const field = answers.field || settings.default_field_of_study || 'Ingeniería de Sistemas y Computación';
+    const university = answers.university || null;
     const email = answers.email || '';
 
     const synthesizedTopic = `${problem}: Caso de estudio y propuesta en ${location}`;
-    const additionalNotes = `Problema: ${problem} | Ámbito: ${location} | Origen: WhatsApp (Avan, bot automático)`;
+    const additionalNotes = `Problema: ${problem} | Ámbito: ${location}` +
+      (answers.field ? ` | Carrera: ${answers.field}` : '') +
+      (university ? ` | Universidad: ${university}` : '') +
+      ' | Origen: WhatsApp (Avan, bot automático)';
 
     // Antes había aquí un mensaje intro largo ("¡Genial! Con lo que me
     // cuentas...") que además duplicaba el "dame un momento" del LLM. Se
@@ -575,6 +582,7 @@ export class WhatsappBotService {
       additionalNotes,
       source: 'WhatsApp Directo'
     };
+    if (university) leadPayload.university = university;
 
     try {
       const reportData = await this.ollamaService.evaluateThesisViability({
