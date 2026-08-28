@@ -1,173 +1,428 @@
-﻿<template>
-  <main class="container" style="flex: 1; padding-top: 2rem; padding-bottom: 4rem;">
-    <div style="margin-bottom: 1.5rem;">
-      <h2 class="section-heading"><span>🔐</span> Roles y Permisos</h2>
-      <p class="section-subheading" style="margin-bottom: 0;">
-        Define las herramientas internas (existentes o por desarrollarse) y asígnalas por rol a cada usuario.
-      </p>
-    </div>
+<template>
+  <main class="container-fluid pf-page">
+    <header class="page-header">
+      <div class="page-header-titles">
+        <span class="page-eyebrow">Configuración</span>
+        <h2 class="section-heading"><span class="heading-icon">🔐</span> Perfiles</h2>
+        <p class="section-subheading pf-subheading">
+          El acceso a cada módulo del panel depende del rol. Cada rol desbloquea un conjunto de herramientas
+          para las personas que lo tienen.
+        </p>
+      </div>
+      <div class="page-header-actions">
+        <button type="button" class="btn-primary pf-add-btn" @click="openUserModal">+ Nuevo usuario</button>
+      </div>
+    </header>
 
-    <div v-if="loadError" class="info-box" style="border-color: rgba(200, 85, 50, 0.4); margin-bottom: 1.5rem;">
-      <h4 style="color: var(--accent-rose);">⚠️ No se pudo cargar la información</h4>
-      <p>{{ loadError }}</p>
-    </div>
+    <p v-if="loadError" class="info-box pf-alert">⚠️ {{ loadError }}</p>
 
-    <!-- Herramientas (Permisos) -->
-    <section style="margin-bottom: 2.5rem;">
-      <h3 style="font-size: 1rem; color: var(--accent-cyan); margin-bottom: 0.75rem;">🧩 Herramientas Registradas</h3>
-      <div class="glass-panel" style="padding: 1.5rem;">
-        <div style="display: flex; flex-wrap: wrap; gap: 0.6rem; margin-bottom: 1.25rem;">
-          <span v-for="p in permissions" :key="p.id" class="tool-chip">{{ p.label }} <code>{{ p.key }}</code></span>
+    <!-- ===================== Roles y accesos ===================== -->
+    <section class="pf-section">
+      <div class="pf-section-head">
+        <div>
+          <h3 class="pf-section-title">Roles y accesos</h3>
+          <p class="pf-section-note">{{ roles.length }} roles · {{ permissions.length }} herramientas en el sistema</p>
         </div>
-        <form style="display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: flex-end;" @submit.prevent="createPermission">
-          <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 160px;">
-            <label class="form-label">Clave (key)</label>
-            <input v-model="newPermission.key" type="text" class="form-input" placeholder="ej: reports.view" required />
+        <div class="pf-section-actions">
+          <button type="button" class="btn-secondary pf-mini-btn" @click="showToolsModal = true">🧩 Herramientas</button>
+          <button type="button" class="btn-secondary pf-mini-btn" @click="openRoleModal">+ Nuevo rol</button>
+        </div>
+      </div>
+
+      <div class="pf-role-grid">
+        <article
+          v-for="role in roles"
+          :key="role.id"
+          class="pf-role-card"
+          :style="{ '--role-accent': hueOf(role.name) }"
+        >
+          <div class="pf-role-card-head">
+            <span class="pf-role-dot"></span>
+            <h4 class="pf-role-name" :title="role.name">{{ role.name }}</h4>
+            <span class="pf-tool-chip">{{ role.permissions.length }} 🧩</span>
           </div>
-          <div class="form-group" style="margin-bottom: 0; flex: 2; min-width: 220px;">
-            <label class="form-label">Nombre de la herramienta</label>
-            <input v-model="newPermission.label" type="text" class="form-input" placeholder="ej: Reportes Avanzados (por desarrollar)" required />
+          <p class="pf-role-desc">{{ role.description || 'Sin descripción' }}</p>
+
+          <div class="pf-role-members">
+            <div
+              v-for="user in usersByRole(role.id).slice(0, 4)"
+              :key="user.id"
+              class="pf-member"
+            >
+              <span class="pf-avatar pf-avatar-sm" :style="{ background: hueOf(user.name) }">{{ initials(user.name) }}</span>
+              <span class="pf-member-texts">
+                <span class="pf-member-name">{{ user.name }}</span>
+                <span class="pf-member-email data-mono">{{ user.email }}</span>
+              </span>
+            </div>
+            <p v-if="usersByRole(role.id).length > 4" class="pf-member-more">
+              +{{ usersByRole(role.id).length - 4 }} más
+            </p>
+            <p v-if="usersByRole(role.id).length === 0" class="pf-member-empty">Sin usuarios asignados</p>
           </div>
-          <button type="submit" class="btn-primary" style="width: auto; padding: 0 1.25rem;">Registrar Herramienta</button>
-        </form>
+
+          <div class="pf-role-foot">
+            <div class="pf-access-meter" :title="`${role.permissions.length} de ${permissions.length} módulos`">
+              <div class="pf-access-bar">
+                <div class="pf-access-fill" :style="{ width: pct(role.permissions.length) }"></div>
+              </div>
+              <span class="pf-access-label">{{ role.permissions.length }}/{{ permissions.length }} módulos</span>
+            </div>
+            <button type="button" class="pf-manage-btn" @click="openManageRole(role)">Gestionar</button>
+          </div>
+        </article>
       </div>
     </section>
 
-    <!-- Roles -->
-    <section style="margin-bottom: 2.5rem;">
-      <h3 style="font-size: 1rem; color: var(--accent-cyan); margin-bottom: 0.75rem;">🏷️ Roles</h3>
-      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; margin-bottom: 1.25rem;">
-        <div v-for="role in roles" :key="role.id" class="glass-panel" style="padding: 1.25rem;">
-          <h4 style="color: var(--text-main); font-size: 0.95rem; margin-bottom: 0.25rem;">{{ role.name }}</h4>
-          <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.85rem;">{{ role.description || 'Sin descripción' }}</p>
-          <div style="display: flex; flex-direction: column; gap: 0.4rem;">
-            <label v-for="p in permissions" :key="p.id" style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem; color: var(--text-sub); cursor: pointer;">
+    <!-- ===================== Cuentas ===================== -->
+    <section class="pf-section">
+      <div class="pf-section-head">
+        <h3 class="pf-section-title">Cuentas <span class="pf-count-badge">{{ users.length }}</span></h3>
+        <div class="pf-section-actions">
+          <div class="pf-search">
+            <span class="pf-search-icon">🔍</span>
+            <input v-model="search" type="text" class="pf-search-input" placeholder="Buscar por nombre o correo" />
+            <button v-if="search" type="button" class="pf-search-clear" @click="search = ''">✕</button>
+          </div>
+          <select v-model="sortBy" class="form-select pf-sort">
+            <option value="name">Ordenar: nombre</option>
+            <option value="recent">Ordenar: más reciente</option>
+            <option value="role">Ordenar: rol</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="tabs pf-tabs">
+        <button
+          type="button"
+          class="tab-item"
+          :class="{ 'is-active': roleFilter === 'all' }"
+          @click="roleFilter = 'all'"
+        >Todos ({{ users.length }})</button>
+        <button
+          v-for="role in roles"
+          :key="role.id"
+          type="button"
+          class="tab-item"
+          :class="{ 'is-active': roleFilter === role.id }"
+          @click="roleFilter = role.id"
+        >{{ role.name }} ({{ usersByRole(role.id).length }})</button>
+      </div>
+
+      <div v-if="visibleUsers.length === 0" class="empty-state pf-empty">
+        <p class="empty-state-title">{{ search ? 'Sin coincidencias' : 'Aún no hay cuentas' }}</p>
+        <p class="empty-state-text">
+          {{ search ? 'Prueba con otro nombre o correo.' : 'Crea la primera cuenta con "+ Nuevo usuario".' }}
+        </p>
+      </div>
+
+      <div v-else class="data-table-wrapper pf-table-wrapper">
+        <table class="data-table pf-table">
+          <thead>
+            <tr>
+              <th>Usuario</th>
+              <th>Correo</th>
+              <th>Rol</th>
+              <th>Acceso</th>
+              <th>Registrado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="user in visibleUsers" :key="user.id">
+              <td>
+                <div class="pf-cell-user">
+                  <span class="pf-avatar" :style="{ background: hueOf(user.name) }">{{ initials(user.name) }}</span>
+                  <span class="pf-cell-user-name">{{ user.name }}</span>
+                </div>
+              </td>
+              <td class="data-mono pf-cell-email">{{ user.email }}</td>
+              <td>
+                <span class="pf-role-pill" :style="{ '--role-accent': hueOf(user.role_name) }">{{ user.role_name }}</span>
+              </td>
+              <td>
+                <div class="pf-access-meter pf-access-meter-sm">
+                  <div class="pf-access-bar">
+                    <div class="pf-access-fill" :style="{ width: pct(accessCount(user)) }"></div>
+                  </div>
+                  <span class="pf-access-label">{{ accessCount(user) }}/{{ permissions.length }}</span>
+                </div>
+              </td>
+              <td class="data-mono pf-cell-date">{{ formatDate(user.created_at) }}</td>
+              <td class="pf-cell-menu">
+                <button
+                  type="button"
+                  class="pf-menu-trigger"
+                  :aria-expanded="openMenuId === user.id"
+                  @click.stop="toggleMenu(user.id)"
+                >⋮</button>
+                <div v-if="openMenuId === user.id" class="pf-menu" @click.stop>
+                  <span class="pf-menu-label">Cambiar rol</span>
+                  <button
+                    v-for="role in roles"
+                    :key="role.id"
+                    type="button"
+                    class="pf-menu-item"
+                    :class="{ 'is-current': role.id === user.role_id }"
+                    @click="changeUserRole(user, role.id)"
+                  >
+                    <span class="pf-menu-dot" :style="{ background: hueOf(role.name) }"></span>
+                    {{ role.name }}
+                    <span v-if="role.id === user.role_id" class="pf-menu-check">✓</span>
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ===================== Modal: Gestionar rol ===================== -->
+    <div v-if="managingRole" class="modal-overlay" @click.self="managingRole = null">
+      <div class="modal-content pf-modal">
+        <div class="modal-header">
+          <div class="pf-modal-title-group">
+            <span class="pf-role-dot" :style="{ '--role-accent': hueOf(managingRole.name) }"></span>
+            <div>
+              <h3 class="pf-modal-title">{{ managingRole.name }}</h3>
+              <p class="pf-modal-sub">{{ managingRole.description || 'Sin descripción' }}</p>
+            </div>
+          </div>
+          <button type="button" class="btn-secondary pf-close-btn" @click="managingRole = null">✕ Cerrar</button>
+        </div>
+        <div class="modal-body">
+          <p class="pf-modal-note">
+            Marca las herramientas que este rol desbloquea. Los cambios se guardan al instante.
+            <span v-if="roleSaved" class="pf-saved">✓ Guardado</span>
+          </p>
+          <div class="pf-tool-list">
+            <label v-for="p in permissions" :key="p.id" class="pf-tool-row">
               <input
                 type="checkbox"
-                :checked="roleHasPermission(role, p.id)"
-                @change="togglePermission(role, p, $event.target.checked)"
+                :checked="roleHasPermission(managingRole, p.id)"
+                @change="togglePermission(managingRole, p, $event.target.checked)"
               />
-              {{ p.label }}
+              <span class="pf-tool-row-texts">
+                <span class="pf-tool-row-label">{{ p.label }}</span>
+                <span class="pf-tool-row-key data-mono">{{ p.key }}</span>
+              </span>
             </label>
           </div>
         </div>
       </div>
+    </div>
 
-      <div class="glass-panel" style="padding: 1.5rem;">
-        <h4 style="font-size: 0.9rem; color: var(--text-main); margin-bottom: 0.75rem;">➕ Crear Nuevo Rol</h4>
-        <form style="display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: flex-end;" @submit.prevent="createRole">
-          <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 160px;">
-            <label class="form-label">Nombre</label>
-            <input v-model="newRole.name" type="text" class="form-input" placeholder="ej: Soporte" required />
+    <!-- ===================== Modal: Herramientas del sistema ===================== -->
+    <div v-if="showToolsModal" class="modal-overlay" @click.self="showToolsModal = false">
+      <div class="modal-content pf-modal">
+        <div class="modal-header">
+          <h3 class="pf-modal-title">🧩 Herramientas del sistema</h3>
+          <button type="button" class="btn-secondary pf-close-btn" @click="showToolsModal = false">✕ Cerrar</button>
+        </div>
+        <div class="modal-body">
+          <p class="pf-modal-note">
+            Cada herramienta es un módulo o función interna (ya existente o por construir) que luego se asigna por rol.
+          </p>
+          <div class="pf-tool-list">
+            <div v-for="p in permissions" :key="p.id" class="pf-tool-row pf-tool-row-static">
+              <span class="pf-tool-row-texts">
+                <span class="pf-tool-row-label">{{ p.label }}</span>
+                <span class="pf-tool-row-key data-mono">{{ p.key }}</span>
+              </span>
+              <span class="pf-tool-row-count">{{ rolesUsing(p.id) }} rol(es)</span>
+            </div>
           </div>
-          <div class="form-group" style="margin-bottom: 0; flex: 2; min-width: 220px;">
+          <form class="pf-inline-form" @submit.prevent="createPermission">
+            <div class="form-group">
+              <label class="form-label">Clave</label>
+              <input v-model="newPermission.key" type="text" class="form-input" placeholder="reports.view" required />
+            </div>
+            <div class="form-group pf-inline-form-wide">
+              <label class="form-label">Nombre</label>
+              <input v-model="newPermission.label" type="text" class="form-input" placeholder="Reportes avanzados" required />
+            </div>
+            <button type="submit" class="btn-primary pf-inline-submit">Registrar</button>
+          </form>
+          <p v-if="toolError" class="pf-form-error">{{ toolError }}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================== Modal: Nuevo rol ===================== -->
+    <div v-if="showRoleModal" class="modal-overlay" @click.self="showRoleModal = false">
+      <div class="modal-content pf-modal pf-modal-narrow">
+        <div class="modal-header">
+          <h3 class="pf-modal-title">+ Nuevo rol</h3>
+          <button type="button" class="btn-secondary pf-close-btn" @click="showRoleModal = false">✕ Cerrar</button>
+        </div>
+        <form class="modal-body" @submit.prevent="createRole">
+          <div class="form-group">
+            <label class="form-label">Nombre del rol</label>
+            <input v-model="newRole.name" type="text" class="form-input" placeholder="Ej: Soporte" required autofocus />
+          </div>
+          <div class="form-group">
             <label class="form-label">Descripción (opcional)</label>
-            <input v-model="newRole.description" type="text" class="form-input" placeholder="ej: Atención de consultas de clientes" />
+            <input v-model="newRole.description" type="text" class="form-input" placeholder="Ej: Atiende consultas de clientes" />
           </div>
-          <button type="submit" class="btn-primary" style="width: auto; padding: 0 1.25rem;">Crear Rol</button>
+          <p v-if="roleError" class="pf-form-error">{{ roleError }}</p>
+          <div class="pf-modal-actions">
+            <button type="button" class="btn-secondary" @click="showRoleModal = false">Cancelar</button>
+            <button type="submit" class="btn-primary">Crear rol</button>
+          </div>
         </form>
       </div>
-    </section>
+    </div>
 
-    <!-- Usuarios -->
-    <section>
-      <h3 style="font-size: 1rem; color: var(--accent-cyan); margin-bottom: 0.75rem;">👥 Usuarios Internos</h3>
-      <div class="glass-panel" style="padding: 1.5rem; overflow-x: auto; margin-bottom: 1.25rem;">
-        <table v-if="users.length > 0" class="users-table">
-          <thead>
-            <tr>
-              <th>Nombre</th>
-              <th>Correo</th>
-              <th>Rol</th>
-              <th>Creado</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="user in users" :key="user.id">
-              <td>{{ user.name }}</td>
-              <td>{{ user.email }}</td>
-              <td>
-                <select
-                  :value="user.role_id"
-                  class="form-select"
-                  style="width: auto; padding: 0.35rem 0.6rem; font-size: 0.8rem;"
-                  @change="changeUserRole(user, $event.target.value)"
-                >
-                  <option v-for="role in roles" :key="role.id" :value="role.id">{{ role.name }}</option>
-                </select>
-              </td>
-              <td style="white-space: nowrap; color: var(--text-muted); font-size: 0.8rem;">{{ formatDate(user.created_at) }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <div v-else style="text-align: center; padding: 1.5rem; color: var(--text-muted);">No hay usuarios registrados.</div>
-      </div>
-
-      <div class="glass-panel" style="padding: 1.5rem;">
-        <h4 style="font-size: 0.9rem; color: var(--text-main); margin-bottom: 0.75rem;">➕ Crear Nuevo Usuario</h4>
-        <form style="display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: flex-end;" @submit.prevent="createUser">
-          <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 160px;">
+    <!-- ===================== Modal: Nuevo usuario ===================== -->
+    <div v-if="showUserModal" class="modal-overlay" @click.self="showUserModal = false">
+      <div class="modal-content pf-modal pf-modal-narrow">
+        <div class="modal-header">
+          <h3 class="pf-modal-title">+ Nuevo usuario</h3>
+          <button type="button" class="btn-secondary pf-close-btn" @click="showUserModal = false">✕ Cerrar</button>
+        </div>
+        <form class="modal-body" @submit.prevent="createUser">
+          <div class="form-group">
             <label class="form-label">Nombre</label>
-            <input v-model="newUser.name" type="text" class="form-input" required />
+            <input v-model="newUser.name" type="text" class="form-input" required autofocus />
           </div>
-          <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 200px;">
+          <div class="form-group">
             <label class="form-label">Correo</label>
             <input v-model="newUser.email" type="email" class="form-input" required />
           </div>
-          <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 160px;">
+          <div class="form-group">
             <label class="form-label">Contraseña</label>
             <input v-model="newUser.password" type="password" class="form-input" minlength="6" required />
           </div>
-          <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 160px;">
+          <div class="form-group">
             <label class="form-label">Rol</label>
             <select v-model="newUser.roleId" class="form-select" required>
               <option value="" disabled>Selecciona un rol</option>
               <option v-for="role in roles" :key="role.id" :value="role.id">{{ role.name }}</option>
             </select>
           </div>
-          <button type="submit" class="btn-primary" style="width: auto; padding: 0 1.25rem;">Crear Usuario</button>
+          <p v-if="userError" class="pf-form-error">{{ userError }}</p>
+          <div class="pf-modal-actions">
+            <button type="button" class="btn-secondary" @click="showUserModal = false">Cancelar</button>
+            <button type="submit" class="btn-primary" :disabled="isSavingUser">
+              {{ isSavingUser ? 'Creando…' : 'Crear usuario' }}
+            </button>
+          </div>
         </form>
-        <div v-if="userError" style="margin-top: 0.75rem; color: var(--accent-rose); font-size: 0.82rem;">{{ userError }}</div>
       </div>
-    </section>
+    </div>
   </main>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue';
 import { apiFetch } from '../apiClient.js';
+
+const AVATAR_HUES = ['#6F8125', '#2E7D46', '#DE754B', '#C85532', '#8A3F28', '#56624A', '#4B5A1C'];
 
 const roles = ref([]);
 const permissions = ref([]);
 const users = ref([]);
 const loadError = ref('');
+
+const search = ref('');
+const sortBy = ref('name');
+const roleFilter = ref('all');
+const openMenuId = ref(null);
+
+const managingRole = ref(null);
+const roleSaved = ref(false);
+const showToolsModal = ref(false);
+const showRoleModal = ref(false);
+const showUserModal = ref(false);
+
+const toolError = ref('');
+const roleError = ref('');
 const userError = ref('');
+const isSavingUser = ref(false);
 
 const newPermission = reactive({ key: '', label: '' });
 const newRole = reactive({ name: '', description: '' });
 const newUser = reactive({ name: '', email: '', password: '', roleId: '' });
 
+/* ---------- helpers ---------- */
+function initials(name) {
+  const parts = (name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  return (parts[0][0] + (parts[1]?.[0] || '')).toUpperCase();
+}
+
+function hueOf(str) {
+  let h = 0;
+  const s = String(str || '');
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return AVATAR_HUES[h % AVATAR_HUES.length];
+}
+
+function pct(count) {
+  const total = permissions.value.length || 1;
+  return `${Math.round((count / total) * 100)}%`;
+}
+
+function usersByRole(roleId) {
+  return users.value.filter((u) => u.role_id === roleId);
+}
+
+function roleById(id) {
+  return roles.value.find((r) => r.id === id);
+}
+
+function accessCount(user) {
+  return roleById(user.role_id)?.permissions.length ?? 0;
+}
+
+function rolesUsing(permissionId) {
+  return roles.value.filter((r) => r.permissions.some((p) => p.id === permissionId)).length;
+}
+
+function roleHasPermission(role, permissionId) {
+  return role.permissions.some((p) => p.id === permissionId);
+}
+
+function formatDate(isoStr) {
+  if (!isoStr) return '—';
+  return new Date(isoStr).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+/* ---------- derived ---------- */
+const visibleUsers = computed(() => {
+  const q = search.value.trim().toLowerCase();
+  let list = users.value.filter((u) => {
+    if (roleFilter.value !== 'all' && u.role_id !== roleFilter.value) return false;
+    if (!q) return true;
+    return (u.name || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q);
+  });
+  list = [...list];
+  if (sortBy.value === 'name') list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  else if (sortBy.value === 'recent') list.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  else if (sortBy.value === 'role') list.sort((a, b) => (a.role_name || '').localeCompare(b.role_name || ''));
+  return list;
+});
+
+/* ---------- fetch ---------- */
 async function fetchRoles() {
-  const response = await apiFetch('/api/roles');
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'Error al obtener los roles.');
+  const res = await apiFetch('/api/roles');
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'No se pudieron obtener los roles.');
   roles.value = data.roles || [];
 }
-
 async function fetchPermissions() {
-  const response = await apiFetch('/api/permissions');
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'Error al obtener las herramientas.');
+  const res = await apiFetch('/api/permissions');
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'No se pudieron obtener las herramientas.');
   permissions.value = data.permissions || [];
 }
-
 async function fetchUsers() {
-  const response = await apiFetch('/api/users');
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'Error al obtener los usuarios.');
+  const res = await apiFetch('/api/users');
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'No se pudieron obtener las cuentas.');
   users.value = data.users || [];
 }
-
 async function fetchAll() {
   loadError.value = '';
   try {
@@ -177,147 +432,758 @@ async function fetchAll() {
   }
 }
 
-function roleHasPermission(role, permissionId) {
-  return role.permissions.some(p => p.id === permissionId);
+/* ---------- role permissions ---------- */
+function openManageRole(role) {
+  managingRole.value = role;
+  roleSaved.value = false;
 }
 
 async function togglePermission(role, permission, checked) {
-  const currentIds = role.permissions.map(p => p.id);
-  const nextIds = checked ? [...currentIds, permission.id] : currentIds.filter(id => id !== permission.id);
-
+  const currentIds = role.permissions.map((p) => p.id);
+  const nextIds = checked ? [...currentIds, permission.id] : currentIds.filter((id) => id !== permission.id);
   try {
-    const response = await apiFetch(`/api/roles/${role.id}/permissions`, {
+    const res = await apiFetch(`/api/roles/${role.id}/permissions`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ permissionIds: nextIds })
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Error al actualizar los permisos.');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo actualizar el acceso.');
     role.permissions = data.role.permissions;
+    roleSaved.value = true;
+    setTimeout(() => { roleSaved.value = false; }, 1800);
   } catch (err) {
-    alert('No se pudo actualizar el permiso: ' + err.message);
+    alert('No se pudo actualizar el acceso: ' + err.message);
   }
 }
 
-async function createPermission() {
-  try {
-    const response = await apiFetch('/api/permissions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: newPermission.key.trim(), label: newPermission.label.trim() })
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Error al registrar la herramienta.');
-    permissions.value.push(data.permission);
-    newPermission.key = '';
-    newPermission.label = '';
-  } catch (err) {
-    alert('No se pudo registrar la herramienta: ' + err.message);
-  }
+/* ---------- create ---------- */
+function openRoleModal() {
+  roleError.value = '';
+  newRole.name = '';
+  newRole.description = '';
+  showRoleModal.value = true;
 }
 
 async function createRole() {
+  roleError.value = '';
   try {
-    const response = await apiFetch('/api/roles', {
+    const res = await apiFetch('/api/roles', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: newRole.name.trim(), description: newRole.description.trim() })
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Error al crear el rol.');
-    roles.value.push(data.role);
-    newRole.name = '';
-    newRole.description = '';
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo crear el rol.');
+    await fetchRoles();
+    showRoleModal.value = false;
   } catch (err) {
-    alert('No se pudo crear el rol: ' + err.message);
+    roleError.value = err.message;
   }
+}
+
+async function createPermission() {
+  toolError.value = '';
+  try {
+    const res = await apiFetch('/api/permissions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: newPermission.key.trim(), label: newPermission.label.trim() })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo registrar la herramienta.');
+    permissions.value.push(data.permission);
+    newPermission.key = '';
+    newPermission.label = '';
+  } catch (err) {
+    toolError.value = err.message;
+  }
+}
+
+function openUserModal() {
+  userError.value = '';
+  newUser.name = '';
+  newUser.email = '';
+  newUser.password = '';
+  newUser.roleId = roles.value[0]?.id || '';
+  showUserModal.value = true;
 }
 
 async function createUser() {
   userError.value = '';
+  isSavingUser.value = true;
   try {
-    const response = await apiFetch('/api/users', {
+    const res = await apiFetch('/api/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...newUser })
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Error al crear el usuario.');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo crear el usuario.');
     await fetchUsers();
-    newUser.name = '';
-    newUser.email = '';
-    newUser.password = '';
-    newUser.roleId = '';
+    showUserModal.value = false;
   } catch (err) {
     userError.value = err.message;
+  } finally {
+    isSavingUser.value = false;
   }
 }
 
+/* ---------- row menu ---------- */
+function toggleMenu(id) {
+  openMenuId.value = openMenuId.value === id ? null : id;
+}
+function closeMenu() {
+  openMenuId.value = null;
+}
+
 async function changeUserRole(user, roleId) {
-  const previousRoleId = user.role_id;
-  user.role_id = Number(roleId);
+  closeMenu();
+  if (user.role_id === roleId) return;
+  const prevRoleId = user.role_id;
+  const prevRoleName = user.role_name;
+  user.role_id = roleId;
+  user.role_name = roleById(roleId)?.name || user.role_name;
   try {
-    const response = await apiFetch(`/api/users/${user.id}/role`, {
+    const res = await apiFetch(`/api/users/${user.id}/role`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ roleId })
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Error al actualizar el rol del usuario.');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo cambiar el rol.');
   } catch (err) {
-    user.role_id = previousRoleId;
-    alert('No se pudo actualizar el rol: ' + err.message);
+    user.role_id = prevRoleId;
+    user.role_name = prevRoleName;
+    alert('No se pudo cambiar el rol: ' + err.message);
   }
-}
-
-function formatDate(isoStr) {
-  if (!isoStr) return '';
-  return new Date(isoStr).toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
 onMounted(() => {
   fetchAll();
+  document.addEventListener('click', closeMenu);
+});
+onBeforeUnmount(() => {
+  document.removeEventListener('click', closeMenu);
 });
 </script>
 
 <style scoped>
-.tool-chip {
+.pf-page {
+  padding: 1.75rem 2rem 3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.pf-subheading {
+  max-width: 640px;
+  margin-bottom: 0;
+}
+
+.pf-add-btn {
+  width: auto;
+  padding: 0.6rem 1.15rem;
+}
+
+.pf-alert {
+  border-color: rgba(200, 85, 50, 0.4);
+  color: var(--accent-rose);
+}
+
+/* ---------- section shell ---------- */
+.pf-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.pf-section-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.pf-section-title {
+  font-family: var(--font-heading);
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pf-section-note {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin: 0.2rem 0 0;
+}
+
+.pf-count-badge {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-sub);
   background: var(--surface-2);
   border: 1px solid var(--border-color);
-  border-radius: 9999px;
-  padding: 0.3rem 0.85rem;
-  font-size: 0.78rem;
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+}
+
+.pf-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.pf-mini-btn {
+  width: auto;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.82rem;
+}
+
+/* ---------- role cards ---------- */
+.pf-role-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.pf-role-card {
+  --role-accent: var(--primary);
+  background: var(--bg-card-solid);
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--role-accent);
+  border-radius: var(--radius-lg);
+  padding: 1.15rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.pf-role-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pf-role-dot {
+  --role-accent: var(--primary);
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--role-accent);
+  flex-shrink: 0;
+}
+
+.pf-role-name {
+  font-family: var(--font-heading);
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pf-tool-chip {
+  font-size: 0.72rem;
+  font-weight: 600;
   color: var(--text-sub);
+  background: var(--surface-2);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  flex-shrink: 0;
+}
+
+.pf-role-desc {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.45;
+  min-height: 2.3em;
+}
+
+.pf-role-members {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.65rem 0;
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+  min-height: 3rem;
+}
+
+.pf-member {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.pf-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
+  font-family: var(--font-heading);
+}
+
+.pf-avatar-sm {
+  width: 26px;
+  height: 26px;
+  font-size: 0.66rem;
+}
+
+.pf-member-texts {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.pf-member-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-main);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pf-member-email {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pf-member-more,
+.pf-member-empty {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.pf-member-more {
+  padding-left: 0.2rem;
+}
+
+.pf-role-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.pf-access-meter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.pf-access-bar {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.pf-access-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--role-accent, var(--primary));
+  transition: width 0.35s ease;
+}
+
+.pf-access-label {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.pf-manage-btn {
+  background: var(--surface-2);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  border-radius: var(--radius-md);
+  padding: 0.4rem 0.85rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.pf-manage-btn:hover {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+}
+
+/* ---------- accounts toolbar ---------- */
+.pf-search {
   display: flex;
   align-items: center;
   gap: 0.4rem;
+  background: var(--surface-1);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 0.35rem 0.6rem;
+  min-width: 230px;
 }
 
-.tool-chip code {
-  font-size: 0.7rem;
-  color: var(--accent-cyan);
+.pf-search-icon {
+  font-size: 0.8rem;
+  opacity: 0.6;
 }
 
-.users-table {
-  width: 100%;
-  border-collapse: collapse;
+.pf-search-input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-main);
   font-size: 0.85rem;
+  width: 100%;
 }
 
-.users-table th {
-  text-align: left;
+.pf-search-clear {
+  background: none;
+  border: none;
   color: var(--text-muted);
-  font-weight: 600;
+  cursor: pointer;
   font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  padding: 0.6rem 0.75rem;
-  border-bottom: 1px solid var(--border-color);
 }
 
-.users-table td {
-  padding: 0.6rem 0.75rem;
-  border-bottom: 1px solid var(--border-color);
+.pf-sort {
+  width: auto;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.82rem;
+}
+
+.pf-tabs {
+  margin-bottom: 0;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+}
+
+.pf-empty {
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-lg);
+}
+
+/* ---------- accounts table ---------- */
+.pf-table-wrapper {
+  overflow-x: auto;
+}
+
+.pf-cell-user {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.pf-cell-user-name {
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.pf-cell-email {
+  font-size: 0.8rem;
   color: var(--text-sub);
+}
+
+.pf-cell-date {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.pf-role-pill {
+  --role-accent: var(--primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-sub);
+  background: var(--surface-2);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+}
+
+.pf-role-pill::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--role-accent);
+}
+
+.pf-access-meter-sm {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 150px;
+}
+
+.pf-access-meter-sm .pf-access-bar {
+  flex: 1;
+}
+
+.pf-cell-menu {
+  position: relative;
+  text-align: right;
+  width: 40px;
+}
+
+.pf-menu-trigger {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+  border-radius: var(--radius-sm);
+}
+
+.pf-menu-trigger:hover {
+  background: var(--surface-2);
+  color: var(--text-main);
+}
+
+.pf-menu {
+  position: absolute;
+  right: 0.5rem;
+  top: 100%;
+  margin-top: 0.25rem;
+  z-index: 20;
+  min-width: 200px;
+  background: var(--bg-card-solid);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: 0.4rem;
+  text-align: left;
+}
+
+.pf-menu-label {
+  display: block;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  padding: 0.3rem 0.5rem 0.35rem;
+}
+
+.pf-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  background: none;
+  border: none;
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  color: var(--text-sub);
+  cursor: pointer;
+}
+
+.pf-menu-item:hover {
+  background: var(--surface-2);
+  color: var(--text-main);
+}
+
+.pf-menu-item.is-current {
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+.pf-menu-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.pf-menu-check {
+  margin-left: auto;
+  color: var(--primary);
+}
+
+/* ---------- modals ---------- */
+.pf-modal {
+  max-width: 560px;
+}
+
+.pf-modal-narrow {
+  max-width: 420px;
+}
+
+.pf-modal-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.pf-modal-title {
+  font-family: var(--font-heading);
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin: 0;
+}
+
+.pf-modal-sub {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin: 0.1rem 0 0;
+}
+
+.pf-close-btn {
+  padding: 0.35rem 0.8rem;
+  flex-shrink: 0;
+}
+
+.pf-modal-note {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin: 0 0 1rem;
+  line-height: 1.5;
+}
+
+.pf-saved {
+  color: var(--accent-emerald);
+  font-weight: 600;
+  margin-left: 0.4rem;
+}
+
+.pf-tool-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.pf-tool-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.55rem 0.5rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.pf-tool-row:hover {
+  background: var(--surface-1);
+}
+
+.pf-tool-row-static {
+  cursor: default;
+  justify-content: space-between;
+}
+
+.pf-tool-row input {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.pf-tool-row-texts {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.pf-tool-row-label {
+  font-size: 0.86rem;
+  color: var(--text-main);
+}
+
+.pf-tool-row-key {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.pf-tool-row-count {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.pf-inline-form {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr auto;
+  gap: 0.6rem;
+  align-items: end;
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.pf-inline-form .form-group {
+  margin-bottom: 0;
+}
+
+.pf-inline-submit {
+  width: auto;
+  padding: 0 1.1rem;
+  height: 40px;
+}
+
+.pf-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+}
+
+.pf-modal-actions .btn-primary,
+.pf-modal-actions .btn-secondary {
+  width: auto;
+  padding: 0.55rem 1.2rem;
+}
+
+.pf-form-error {
+  color: var(--accent-rose);
+  font-size: 0.82rem;
+  margin: 0.25rem 0 0;
+}
+
+@media (max-width: 768px) {
+  .pf-page {
+    padding: 1rem;
+  }
+  .pf-inline-form {
+    grid-template-columns: 1fr;
+  }
+  .pf-inline-submit {
+    width: 100%;
+  }
 }
 </style>
