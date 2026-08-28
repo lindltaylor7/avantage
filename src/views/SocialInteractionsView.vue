@@ -87,7 +87,7 @@
     </div>
 
     <section v-else class="int-grid">
-      <article v-for="item in interactions" :key="item.id" class="int-card">
+      <article v-for="item in interactions" :key="item.id" class="int-card" :class="{ 'is-removed': item.removed_at }">
         <div class="int-card-media" :class="`media-${tagKind(item.item_type)}`">
           <img
             v-if="item.post_id && imageUrls[item.post_id]"
@@ -97,7 +97,10 @@
             loading="lazy"
           />
           <span v-else class="int-card-media-icon">{{ iconFor(item.item_type) }}</span>
-          <span class="int-tag" :class="`int-tag-${tagKind(item.item_type)}`">{{ labelFor(item.item_type) }}</span>
+          <span
+            class="int-tag"
+            :class="item.removed_at ? 'int-tag-removed' : `int-tag-${tagKind(item.item_type)}`"
+          >{{ item.removed_at ? `${labelFor(item.item_type)} · eliminado` : labelFor(item.item_type) }}</span>
         </div>
 
         <div class="int-card-body">
@@ -106,11 +109,15 @@
             <span class="int-card-time">{{ formatShort(item.received_at) }}</span>
           </div>
 
-          <p v-if="item.message" class="int-card-message">{{ item.message }}</p>
+          <p v-if="item.message" class="int-card-message" :class="{ 'is-struck': item.removed_at }">{{ item.message }}</p>
           <p v-else-if="item.reaction_type" class="int-card-message int-card-message-muted">
             Reaccionó con {{ item.reaction_type }}
           </p>
           <p v-else class="int-card-message int-card-message-muted">{{ labelFor(item.item_type) }}</p>
+
+          <p v-if="item.removed_at" class="int-card-removed-note">
+            🗑️ Eliminado u oculto en Facebook · {{ formatShort(item.removed_at) }}
+          </p>
 
           <p v-if="item.post_message" class="int-card-post">
             <span class="int-card-post-icon">📄</span>{{ truncate(item.post_message, 100) }}
@@ -417,6 +424,37 @@ onBeforeUnmount(() => releaseImages());
 .int-card:hover {
   transform: translateY(-2px);
   box-shadow: var(--shadow-md);
+}
+
+.int-card.is-removed {
+  opacity: 0.72;
+  border-style: dashed;
+}
+
+.int-card.is-removed .int-card-media { filter: grayscale(0.65); }
+
+.int-tag-removed {
+  position: absolute;
+  top: 0.55rem;
+  left: 0.55rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(200, 85, 50, 0.9);
+  color: #fff;
+}
+
+.int-card-message.is-struck {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.int-card-removed-note {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--accent-rose);
+  margin: 0;
 }
 
 .int-card-media {

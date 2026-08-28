@@ -19,17 +19,48 @@ function extForMime(mime) {
  */
 export class PageInteractionService {
   async createFromFeedChange(pageId, value) {
+    const verb = (value.verb || '').toLowerCase();
+    const commentId = value.comment_id || null;
+    const postId = value.post_id || null;
+    const isRemoval = ['remove', 'hide', 'delete', 'unpublish'].includes(verb);
+
+    // Comentario / publicación eliminado u oculto: se marca la interacción
+    // original como eliminada (tachada en la tarjeta) en vez de crear otra.
+    if (isRemoval && (commentId || postId)) {
+      const match = db('page_interactions').whereNull('removed_at');
+      if (commentId) match.where('comment_id', commentId);
+      else match.where('post_id', postId).where('item_type', 'status');
+      const affected = await match.update({ removed_at: db.fn.now() });
+      if (affected > 0) {
+        console.log(`🗑️ [Meta Webhook] Interacción marcada como eliminada (${commentId || postId}).`);
+        return null;
+      }
+    }
+
+    // Comentario que se vuelve a mostrar.
+    if (verb === 'unhide' && commentId) {
+      await db('page_interactions').where('comment_id', commentId).update({ removed_at: null });
+      return null;
+    }
+
+    // Comentario editado: se actualiza el texto de la tarjeta existente.
+    if ((verb === 'edited' || verb === 'edit') && commentId && value.message) {
+      const affected = await db('page_interactions').where('comment_id', commentId).update({ message: value.message });
+      if (affected > 0) return null;
+    }
+
     const [id] = await db('page_interactions').insert({
       page_id: pageId || value.from?.id || null,
       platform: 'facebook',
       item_type: value.item || 'desconocido',
       verb: value.verb || null,
-      post_id: value.post_id || null,
-      comment_id: value.comment_id || null,
+      post_id: postId,
+      comment_id: commentId,
       sender_id: value.from?.id || null,
       sender_name: value.from?.name || null,
       message: value.message || null,
       reaction_type: value.reaction_type || null,
+      removed_at: isRemoval ? db.fn.now() : null,
       raw_value: JSON.stringify(value),
       event_time: value.created_time ? new Date(value.created_time * 1000) : null
     });
