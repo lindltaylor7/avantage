@@ -7,7 +7,8 @@
         <p class="section-subheading bot-subheading">
           Avan ya no sigue un guion de preguntas fijas: conversa libremente guiado por IA hasta reunir el tema de
           tesis y la carrera o universidad del contacto, y luego le ofrece una reunión con el jefe comercial (telefónica o por Meet).
-          Aquí ajustas su tono y los valores por defecto que usa cuando el contacto no menciona su nivel o ámbito.
+          Aquí ajustas su identidad, su objetivo, las reglas de comportamiento (que puedes agregar o quitar) y los
+          valores por defecto que usa cuando el contacto no menciona su nivel o ámbito.
         </p>
       </div>
 
@@ -31,20 +32,80 @@
 
     <template v-else>
       <section class="glass-panel bot-settings-panel">
+        <div class="bot-panel-head">
+          <h3 class="bot-info-title">🧠 Personalidad y reglas</h3>
+          <button type="button" class="btn-secondary bot-restore-btn" @click="restoreDefaults" :disabled="!promptDefaults">
+            ↩️ Restaurar textos por defecto
+          </button>
+        </div>
+
         <div class="form-group">
-          <label class="form-label">Instrucciones de tono y objetivo</label>
+          <label class="form-label">Identidad del bot</label>
+          <textarea
+            v-model="form.botIdentity"
+            class="form-textarea"
+            rows="2"
+            placeholder="Ej: Eres Avan, el asistente de Avantage Group (Perú), conversando por WhatsApp..."
+          ></textarea>
+          <p class="bot-field-hint">Quién es Avan. Primera línea del prompt. Si lo dejas vacío se usa el texto por defecto.</p>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Objetivo de la conversación</label>
+          <textarea
+            v-model="form.botObjective"
+            class="form-textarea"
+            rows="4"
+            placeholder="Ej: Entender el tema de tesis de la persona y ofrecerle una reunión con el jefe comercial..."
+          ></textarea>
+          <p class="bot-field-hint">El cierre que busca Avan. Si lo dejas vacío se usa el texto por defecto.</p>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Reglas del equipo</label>
+          <p class="bot-field-hint bot-rules-intro">
+            Se inyectan como lista numerada en cada turno del LLM. Puedes agregar, editar o quitar las que quieras.
+          </p>
+          <div class="bot-rules-list">
+            <div v-for="(rule, index) in form.promptRules" :key="index" class="bot-rule-row">
+              <span class="bot-rule-num">{{ index + 1 }}</span>
+              <textarea
+                class="form-textarea bot-rule-input"
+                rows="2"
+                v-model="form.promptRules[index]"
+                placeholder="Escribe una regla de comportamiento..."
+              ></textarea>
+              <button type="button" class="bot-rule-remove" title="Quitar esta regla" @click="removeRule(index)">✕</button>
+            </div>
+          </div>
+          <button type="button" class="btn-secondary bot-add-rule-btn" @click="addRule">＋ Agregar regla</button>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Instrucciones adicionales del equipo (opcional)</label>
           <textarea
             v-model="form.toneInstructions"
             class="form-textarea bot-tone-textarea"
-            rows="6"
+            rows="4"
             placeholder="Ej: Sé cercano y curioso, no insistas más de una vez si el contacto no da un dato opcional..."
           ></textarea>
           <p class="bot-field-hint">
-            Se agrega al prompt del LLM en cada turno, junto con las reglas base ya integradas (mensajes cortos de
-            WhatsApp, una sola pregunta a la vez, transparente si le preguntan si es un bot).
+            Texto libre que se agrega al final del prompt, después de las reglas del equipo.
           </p>
         </div>
 
+        <div class="info-box bot-fixed-rules-box">
+          <h4>🔒 Reglas fijas del sistema (no editables)</h4>
+          <p>
+            Estas son estructurales y las aplica el código, no el prompt: datos obligatorios (tema de tesis + carrera o
+            universidad), nunca pedir correo / nivel / ámbito, el formato JSON de la respuesta del LLM y el momento exacto
+            en que se pasa a proponer la reunión.
+          </p>
+        </div>
+      </section>
+
+      <section class="glass-panel bot-settings-panel">
+        <h3 class="bot-info-title">🎓 Valores por defecto</h3>
         <div class="bot-defaults-grid">
           <div class="form-group">
             <label class="form-label">Nivel académico por defecto</label>
@@ -128,9 +189,13 @@ const isSaving = ref(false);
 const errorMessage = ref('');
 const savedMessage = ref('');
 const savedSnapshot = ref('');
+const promptDefaults = ref(null);
 
 const form = reactive({
   toneInstructions: '',
+  botIdentity: '',
+  botObjective: '',
+  promptRules: [],
   defaultAcademicLevel: 'Pregrado (Bachiller/Título)',
   defaultFieldOfStudy: '',
   defaultLocation: '',
@@ -142,6 +207,9 @@ const form = reactive({
 function toForm(settings) {
   return {
     toneInstructions: settings.tone_instructions || '',
+    botIdentity: settings.bot_identity || '',
+    botObjective: settings.bot_objective || '',
+    promptRules: Array.isArray(settings.prompt_rules) ? [...settings.prompt_rules] : [],
     defaultAcademicLevel: settings.default_academic_level || 'Pregrado (Bachiller/Título)',
     defaultFieldOfStudy: settings.default_field_of_study || '',
     defaultLocation: settings.default_location || '',
@@ -149,6 +217,21 @@ function toForm(settings) {
     typingIndicatorEnabled: settings.typing_indicator_enabled == null ? true : !!settings.typing_indicator_enabled,
     messageGapSeconds: settings.message_gap_seconds == null ? 5 : Number(settings.message_gap_seconds)
   };
+}
+
+function addRule() {
+  form.promptRules.push('');
+}
+
+function removeRule(index) {
+  form.promptRules.splice(index, 1);
+}
+
+function restoreDefaults() {
+  if (!promptDefaults.value) return;
+  form.botIdentity = promptDefaults.value.identity || '';
+  form.botObjective = promptDefaults.value.objective || '';
+  form.promptRules = [...(promptDefaults.value.rules || [])];
 }
 
 const isDirty = computed(() => JSON.stringify(form) !== savedSnapshot.value);
@@ -160,6 +243,7 @@ async function fetchSettings() {
     const response = await apiFetch('/api/whatsapp/bot-settings');
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Error al obtener la configuración del bot.');
+    if (data.promptDefaults) promptDefaults.value = data.promptDefaults;
     Object.assign(form, toForm(data.settings));
     savedSnapshot.value = JSON.stringify(form);
   } catch (error) {
@@ -241,7 +325,96 @@ onMounted(fetchSettings);
 }
 
 .bot-tone-textarea {
-  min-height: 140px;
+  min-height: 110px;
+}
+
+.bot-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.bot-panel-head .bot-info-title {
+  margin-bottom: 0;
+}
+
+.bot-restore-btn {
+  width: auto;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.8rem;
+}
+
+.bot-rules-intro {
+  margin-top: 0;
+  margin-bottom: 0.6rem;
+}
+
+.bot-rules-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-bottom: 0.75rem;
+}
+
+.bot-rule-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.bot-rule-num {
+  flex-shrink: 0;
+  width: 1.6rem;
+  height: 1.6rem;
+  margin-top: 0.35rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: var(--surface-2, rgba(127, 127, 127, 0.12));
+  border-radius: 50%;
+}
+
+.bot-rule-input {
+  flex: 1;
+  min-height: 0;
+}
+
+.bot-rule-remove {
+  flex-shrink: 0;
+  margin-top: 0.35rem;
+  width: 1.9rem;
+  height: 1.9rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--accent-rose, #c85532);
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.bot-rule-remove:hover {
+  background: rgba(200, 85, 50, 0.1);
+}
+
+.bot-add-rule-btn {
+  width: auto;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.82rem;
+}
+
+.bot-fixed-rules-box {
+  margin-top: 1.5rem;
+}
+
+.bot-fixed-rules-box h4 {
+  margin-bottom: 0.35rem;
 }
 
 .bot-field-hint {

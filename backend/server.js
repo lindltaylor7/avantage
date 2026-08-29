@@ -1438,7 +1438,7 @@ app.post('/api/whatsapp/conversations/:waId/bot/reset', requireAuth, requirePerm
 app.get('/api/whatsapp/bot-settings', requireAuth, requirePermission('leads.view'), async (req, res) => {
   try {
     const settings = await whatsappBotSettingsService.get();
-    res.json({ settings });
+    res.json({ settings, promptDefaults: whatsappBotSettingsService.getPromptDefaults() });
   } catch (error) {
     console.error('❌ Error al obtener la configuración del bot:', error);
     res.status(500).json({ error: 'Error al obtener la configuración del bot.', details: error.message });
@@ -1448,11 +1448,13 @@ app.get('/api/whatsapp/bot-settings', requireAuth, requirePermission('leads.view
 app.put('/api/whatsapp/bot-settings', requireAuth, requirePermission('leads.view'), async (req, res) => {
   try {
     const {
-      toneInstructions, defaultAcademicLevel, defaultFieldOfStudy, defaultLocation,
+      toneInstructions, botIdentity, botObjective, promptRules,
+      defaultAcademicLevel, defaultFieldOfStudy, defaultLocation,
       shortRepliesEnabled, typingIndicatorEnabled, messageGapSeconds
     } = req.body || {};
     const settings = await whatsappBotSettingsService.update({
-      toneInstructions, defaultAcademicLevel, defaultFieldOfStudy, defaultLocation,
+      toneInstructions, botIdentity, botObjective, promptRules,
+      defaultAcademicLevel, defaultFieldOfStudy, defaultLocation,
       shortRepliesEnabled, typingIndicatorEnabled, messageGapSeconds
     });
     res.json({ settings });

@@ -509,6 +509,9 @@ export class WhatsappBotService {
       incomingText,
       isFirstTurn,
       toneInstructions: settings.tone_instructions,
+      botIdentity: settings.bot_identity,
+      botObjective: settings.bot_objective,
+      promptRules: settings.prompt_rules,
       shortReplies: settings.short_replies_enabled == null ? true : !!settings.short_replies_enabled,
       contactName
     });
