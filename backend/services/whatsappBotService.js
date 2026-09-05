@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { db } from '../db/connection.js';
 import { WhatsappBotSettingsService } from './whatsappBotSettingsService.js';
 import { buildKnowledgeBlock } from './whatsappBotPromptDefaults.js';
+import { MIN_BOOKING_LEAD_MINUTES } from './googleCalendarService.js';
 
 const MAX_ACTIVITY_LOG = 100;
 
@@ -37,6 +38,13 @@ const SLOTS_TO_OFFER = 3;
 // obliga a volver a proponer a ciegas. Si el día que eligió no da para tanto,
 // se completa con los bloques más cercanos de los otros días con agenda.
 const MIN_SLOTS_TO_OFFER = 2;
+
+// Cuántas respuestas seguidas que no eligen ninguna opción se toleran antes de
+// pasarle la conversación a un asesor. Con el tope alto el bot repetía dos y
+// tres veces el mismo "no reconocí esa opción", que es exactamente el bucle
+// que hace que el contacto deje de responder: si a la segunda no coincidimos,
+// lo coordina una persona.
+const MAX_SLOT_CHOICE_ATTEMPTS = 2;
 
 // Estados del flujo de agendamiento (todos "esperan respuesta del contacto").
 const SCHEDULING_STATUSES = ['scheduling_mode', 'scheduling_phone', 'scheduling_email', 'scheduling_date', 'scheduling_time'];
@@ -251,6 +259,16 @@ function slotOptionLabels(slots) {
   const list = slots || [];
   const sameDay = list.length > 0 && list.every((slot) => slot.date === list[0].date);
   return list.map((slot) => (sameDay && slot.timeLabel) ? slot.timeLabel : slot.label);
+}
+
+/**
+ * Etiquetas COMPLETAS (con su fecha) para los mensajes que no nombran el día
+ * en la frase de arriba: `slotOptionLabels` recorta la fecha cuando todos los
+ * bloques caen el mismo día, y en un "para hoy ya no alcanzamos" el contacto
+ * terminaba viendo "7:30 a.m." sin saber que era de otro día.
+ */
+function fullSlotLabels(slots) {
+  return (slots || []).map((slot) => slot.label);
 }
 
 function numberedList(items) {
@@ -1126,6 +1144,87 @@ export class WhatsappBotService {
     return this.googleCalendarService.rankFreeSlots(merged, preferredTime).slice(0, SLOTS_TO_OFFER);
   }
 
+  /**
+   * Durante la elección de horario, el contacto puede responder con un DÍA en
+   * vez de un número ("para hoy no hay?", "mejor mañana"). `parseSchedulingChoice`
+   * solo entiende horas, así que eso caía en "no reconocí esa opción" y de ahí
+   * al bucle. Aquí se interpreta el día y se le contesta de verdad: con los
+   * horarios de ese día si los hay, o diciéndole por qué no los hay.
+   * Devuelve true si ya se le respondió.
+   */
+  async _answerDayRequestWhileChoosing(waId, answers, scheduling, text) {
+    let parsed = null;
+    try {
+      parsed = await this.ollamaService.parseSchedulingDate(text, limaTodayIso(), MAX_BOOKING_DAYS_AHEAD);
+    } catch (error) {
+      this.logActivity({ type: 'day_request_parse_failed', waId, text, error: error.message });
+      return false;
+    }
+
+    const date = parsed?.date;
+    if (!date) return false;
+
+    const slots = await this.googleCalendarService.getFreeSlotsForDate(
+      BOOKING_ADVISOR_USER_ID, date, { limit: SLOTS_TO_OFFER, nearTime: parsed.preferredTime }
+    );
+
+    if (slots.length > 0) {
+      // Dijo día Y hora, y esa hora está libre: se agenda sin dar otra vuelta.
+      const exact = parsed.preferredTime ? slots.find((slot) => limaTimeOf(slot.startTime) === parsed.preferredTime) : null;
+      if (exact) {
+        await this.updateSession(waId, { answers: JSON.stringify(answers) });
+        this.logActivity({ type: 'exact_time_booked', waId, when: text, slot: exact.label });
+        await this.confirmSlot(waId, exact);
+        return true;
+      }
+
+      // Se le ofreció lo que pidió: la conversación avanzó y el contador de
+      // respuestas sin coincidencia vuelve a cero.
+      scheduling.slots = slots;
+      scheduling.attempts = 0;
+      await this.updateSession(waId, { answers: JSON.stringify(answers) });
+      await this.send(
+        waId,
+        `📅 Para ${dayLabelWithArticle(date)} tenemos:\n\n${numberedList(slotOptionLabels(slots))}\n\n` +
+        'Responde con el número que prefieras, o "no" si prefieres que te contacten después.'
+      );
+      return true;
+    }
+
+    // Ese día no da. El motivo importa: si el día SÍ tenía bloques y lo único
+    // que sobra es la anticipación mínima, decirle "no hay agenda" suena a
+    // mentira (él sabe que el asesor atiende hoy). Se distingue repitiendo la
+    // consulta sin ese margen.
+    // Si ya se le explicó que ese día no da y vuelve a pedirlo, repetir la
+    // misma negativa es el otro bucle posible. Ahí lo coordina una persona.
+    if ((scheduling.deniedDays || []).includes(date)) {
+      delete answers.__scheduling;
+      await this.updateSession(waId, { answers: JSON.stringify(answers) });
+      await this.handOffToAdvisor(waId, `El lead insiste con un día sin espacio (${date}).`);
+      return true;
+    }
+    scheduling.deniedDays = [...(scheduling.deniedDays || []), date];
+
+    const withoutLeadTime = await this.googleCalendarService.getFreeSlotsForDate(
+      BOOKING_ADVISOR_USER_ID, date, { limit: 1, minLeadTimeMinutes: 0 }
+    );
+    const blockedByLeadTime = withoutLeadTime.length > 0;
+    const hours = Math.round(MIN_BOOKING_LEAD_MINUTES / 60);
+    const dayLabel = date === limaTodayIso() ? 'hoy' : dayLabelWithArticle(date);
+
+    const reason = blockedByLeadTime
+      ? `Para ${dayLabel} ya no alcanzamos: el jefe comercial necesita al menos ${hours === 1 ? 'una hora' : `${hours} horas`} de anticipación.`
+      : `Para ${dayLabel} ya no queda espacio.`;
+
+    await this.updateSession(waId, { answers: JSON.stringify(answers) });
+    await this.send(
+      waId,
+      `${reason} Lo más cercano que tenemos:\n\n${numberedList(fullSlotLabels(scheduling.slots))}\n\n` +
+      'Responde con el número que prefieras, o "no" si prefieres que te contacten después.'
+    );
+    return true;
+  }
+
   /** Frase común que aborta el agendamiento si el lead dice "no"/"después". */
   _isSchedulingRefusal(text) {
     return ['no', 'omitir', 'despues', 'después', 'luego', 'mas tarde', 'más tarde'].includes(normalize((text || '').trim()));
@@ -1505,24 +1604,18 @@ export class WhatsappBotService {
     const slot = index !== null ? scheduling.slots[index] : null;
 
     if (!slot) {
-      // Evita el bucle de "no reconocí esa opción" repitiendo la misma
-      // lista: si el lead pidió un horario distinto al ofrecido, se busca
-      // lo más cercano a lo que realmente quiere en los próximos días. Si
-      // tras unos intentos igual no converge, se transfiere a un asesor
-      // para que coordine el horario directamente.
+      // Nada de repetir la misma lista con un "no reconocí esa opción": eso
+      // es el bucle. Primero se intenta entender qué pidió de verdad —otro
+      // día u otra hora— y solo si no se logra coincidir se pasa a un asesor.
       scheduling.attempts = (scheduling.attempts || 0) + 1;
 
-      if (scheduling.attempts >= 3) {
-        delete answers.__scheduling;
-        await this.updateSession(waId, { answers: JSON.stringify(answers) });
-        await this.handOffToAdvisor(waId, 'No se logró coincidir en un horario tras varios intentos.');
-        return;
-      }
+      if (await this._answerDayRequestWhileChoosing(waId, answers, scheduling, trimmed)) return;
 
       if (preferredTime) {
         const nearSlots = await this.googleCalendarService.getFreeSlotsNearTime(BOOKING_ADVISOR_USER_ID, preferredTime, { limit: SLOTS_TO_OFFER, days: BOOKING_WINDOW_DAYS });
         if (nearSlots.length > 0) {
           scheduling.slots = nearSlots;
+          scheduling.attempts = 0;
           await this.updateSession(waId, { answers: JSON.stringify(answers) });
           await this.send(
             waId,
@@ -1532,10 +1625,19 @@ export class WhatsappBotService {
         }
       }
 
+      // Segunda respuesta seguida que no coincide: en vez de insistir con la
+      // misma lista, lo coordina una persona.
+      if (scheduling.attempts >= MAX_SLOT_CHOICE_ATTEMPTS) {
+        delete answers.__scheduling;
+        await this.updateSession(waId, { answers: JSON.stringify(answers) });
+        await this.handOffToAdvisor(waId, 'No se logró coincidir en un horario con el lead.');
+        return;
+      }
+
       await this.updateSession(waId, { answers: JSON.stringify(answers) });
       await this.send(
         waId,
-        `⚠️ No reconocí esa opción. Responde con el número del horario, o "no" si prefieres que te contacten después:\n\n${numberedList(slotOptionLabels(scheduling.slots))}`
+        `No te entendí bien 🤔 Responde con el número del horario que prefieras, dime otro día u hora que te venga mejor, o "no" si prefieres que te contacten después:\n\n${numberedList(fullSlotLabels(scheduling.slots))}`
       );
       return;
     }

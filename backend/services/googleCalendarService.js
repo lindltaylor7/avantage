@@ -66,6 +66,14 @@ function minutesOfDayLima(date) {
  */
 const DAY_DISTANCE_PENALTY_MINUTES = 45;
 
+/**
+ * Anticipación mínima con la que se puede reservar un bloque: nada que empiece
+ * dentro de los próximos N minutos se ofrece. Es lo que decide si "hoy" todavía
+ * es posible — con 120 minutos, a las 3:42 p.m. el bloque de las 5:30 p.m. ya
+ * queda fuera por doce minutos — así que se deja configurable por entorno.
+ */
+export const MIN_BOOKING_LEAD_MINUTES = Number(process.env.WHATSAPP_BOOKING_MIN_LEAD_MINUTES) || 120;
+
 /** Instante de inicio del bloque, venga como candidato (`start`) o ya formateado. */
 function slotStartDate(slot) {
   return slot.start instanceof Date ? slot.start : new Date(slot.startTime);
@@ -411,7 +419,7 @@ export class GoogleCalendarService {
    * como respaldo cuando un día específico pedido no tiene espacio, para
    * sugerir las próximas opciones reales en vez de un simple "no hay".
    */
-  async getUpcomingFreeSlots(userId, { days = 14, limit = 3, slotMinutes = 30, minLeadTimeMinutes = 120 } = {}) {
+  async getUpcomingFreeSlots(userId, { days = 14, limit = 3, slotMinutes = 30, minLeadTimeMinutes = MIN_BOOKING_LEAD_MINUTES } = {}) {
     const availabilityRows = await db('advisor_availability').where({ user_id: userId }).select('day_of_week', 'start_time');
     if (availabilityRows.length === 0) return [];
 
@@ -427,7 +435,7 @@ export class GoogleCalendarService {
    * "YYYY-MM-DD", calendario de Lima) — usado cuando el lead ya dijo qué día
    * prefiere, en vez de mostrarle una lista genérica de próximos horarios.
    */
-  async getFreeSlotsForDate(userId, dateStr, { slotMinutes = 30, minLeadTimeMinutes = 120, limit = 3, nearTime = null } = {}) {
+  async getFreeSlotsForDate(userId, dateStr, { slotMinutes = 30, minLeadTimeMinutes = MIN_BOOKING_LEAD_MINUTES, limit = 3, nearTime = null } = {}) {
     const availabilityRows = await db('advisor_availability').where({ user_id: userId }).select('day_of_week', 'start_time');
     if (availabilityRows.length === 0) return [];
 
@@ -466,7 +474,7 @@ export class GoogleCalendarService {
    * (ej. "no tienes más de noche?"), para sugerirle lo más cercano a lo que
    * realmente quiere en vez de repetirle la misma lista que ya rechazó.
    */
-  async getFreeSlotsNearTime(userId, preferredTime, { days = 14, limit = 3, slotMinutes = 30, minLeadTimeMinutes = 120 } = {}) {
+  async getFreeSlotsNearTime(userId, preferredTime, { days = 14, limit = 3, slotMinutes = 30, minLeadTimeMinutes = MIN_BOOKING_LEAD_MINUTES } = {}) {
     const availabilityRows = await db('advisor_availability').where({ user_id: userId }).select('day_of_week', 'start_time');
     if (availabilityRows.length === 0) return [];
 
