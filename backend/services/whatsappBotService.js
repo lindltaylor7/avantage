@@ -54,6 +54,21 @@ const MESSAGE_DEBOUNCE_MS = Number(process.env.WHATSAPP_BOT_FIRST_MESSAGE_DEBOUN
 const SCHEDULING_DEBOUNCE_MS = Number(process.env.WHATSAPP_BOT_SCHEDULING_DEBOUNCE_MS) || 5000;
 const POST_BOOKING_DEBOUNCE_MS = Number(process.env.WHATSAPP_BOT_POST_BOOKING_DEBOUNCE_MS) || 5000;
 
+// Cuando lo único que llegó es un saludo suelto ("hola", "buenas tardes"), la
+// espera se amplía UNA vez por este tiempo extra. Un saludo no aporta ningún
+// dato y casi siempre viene seguido del mensaje real unos segundos después:
+// procesarlo por su cuenta gasta un turno de LLM que termina descartándose y
+// retrasa la respuesta de verdad.
+const GREETING_EXTRA_WAIT_MS = Number(process.env.WHATSAPP_BOT_GREETING_EXTRA_WAIT_MS) || 8000;
+
+const GREETING_ONLY_RE = /^(?:hola+|ola+|buenas|buenos d[ií]as|buenas tardes|buenas noches|buen d[ií]a|hi|hey|saludos|qu[eé] tal|holi+)(?:\s+(?:hola+|buenas|d[ií]as|tardes|noches|amigo|se[ñn]or(?:ita)?|buen d[ií]a))*[\s!¡.,?¿]*$/i;
+
+/** ¿El texto acumulado es solo un saludo, sin ningún contenido? */
+function isGreetingOnly(text) {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim();
+  return clean.length > 0 && clean.length <= 40 && GREETING_ONLY_RE.test(clean);
+}
+
 // Seguimiento por inactividad: si el contacto deja a Avan "en visto" 1 hora,
 // se le manda un recordatorio; si sigue una hora más sin responder, el lead
 // se mueve a "Congelado" en el Setter Funnel y el bot deja de insistir.
@@ -209,6 +224,27 @@ function isObviousStepAnswer(status, text) {
       // distinguirlo de una pregunta, así que siempre se clasifica.
       return false;
   }
+}
+
+// Formas en que el LLM pregunta por la carrera o la universidad. Se usan para
+// detectar que está preguntando por algo que la persona YA respondió.
+const ASKS_FIELD_RE = /(?:de|en)\s+qu[eé]\s+carrera|qu[eé]\s+carrera\s+(?:estudias|est[aá]s|cursas|llevas|sigues)|cu[aá]l\s+es\s+tu\s+carrera/i;
+const ASKS_UNIVERSITY_RE = /(?:de|en)\s+qu[eé]\s+universidad|qu[eé]\s+universidad\s+(?:estudias|est[aá]s|cursas)|cu[aá]l\s+es\s+tu\s+universidad|d[oó]nde\s+estudias/i;
+
+/**
+ * ¿La respuesta del LLM está preguntando por un dato que ya tenemos?
+ *
+ * Pasa porque el bloque "lo que te falta preguntar" del prompt se arma con lo
+ * que se sabía ANTES de leer el mensaje nuevo: si ese mensaje traía el dato
+ * ("sobre arquitectura de la continental"), el modelo a veces lo extrae
+ * correctamente pero igual hace la pregunta que tenía pendiente. Devuelve
+ * 'field' | 'university' | null.
+ */
+function detectRedundantAsk(reply, answers) {
+  const text = String(reply || '');
+  if (answers.field && ASKS_FIELD_RE.test(text)) return 'field';
+  if (answers.university && ASKS_UNIVERSITY_RE.test(text)) return 'university';
+  return null;
 }
 
 function normalize(text) {
@@ -541,8 +577,7 @@ export class WhatsappBotService {
       waitMs: pending.waitMs
     });
 
-    if (pending.timer) clearTimeout(pending.timer);
-    pending.timer = setTimeout(() => {
+    const fire = () => {
       this.pendingMessages.delete(waId);
       const joined = pending.messages.join('\n');
       // La marca se toma AQUÍ, no dentro del turno: entre que el temporizador
@@ -556,6 +591,20 @@ export class WhatsappBotService {
         this.logActivity({ type: 'conversation_turn_failed', waId, error: error.message });
         console.error(`❌ [WhatsApp Bot] Error en el turno de conversación con ${waId}:`, error);
       });
+    };
+
+    if (pending.timer) clearTimeout(pending.timer);
+    pending.timer = setTimeout(() => {
+      // Solo un saludo: se espera una vez más en vez de gastar un turno en
+      // responder algo que no dice nada. Si en esa prórroga llega el mensaje
+      // real, entra al mismo buffer y se responde todo junto.
+      if (!pending.extendedForGreeting && isGreetingOnly(pending.messages.join(' '))) {
+        pending.extendedForGreeting = true;
+        this.logActivity({ type: 'buffer_extended', waId, text: pending.messages.join('\n'), waitMs: GREETING_EXTRA_WAIT_MS });
+        pending.timer = setTimeout(fire, GREETING_EXTRA_WAIT_MS);
+        return;
+      }
+      fire();
     }, pending.waitMs);
 
     this.pendingMessages.set(waId, pending);
@@ -673,6 +722,29 @@ export class WhatsappBotService {
     // Para pasar a la reunión hacen falta los tres datos: tema, carrera y
     // universidad. Cuando se cumple, NO se manda `result.reply` (el LLM a
     // veces cierra con una pregunta suelta): offerScheduling() toma el hilo.
+    // Red de seguridad contra la pregunta repetida: si el LLM pidió un dato que
+    // la conversación ya tiene, se cambia su respuesta por la del dato que sí
+    // falta (o se pasa a agendar, si ya no falta ninguno).
+    const redundantAsk = detectRedundantAsk(result.reply, answers);
+    if (redundantAsk) {
+      const nextQuestion = !answers.problem
+        ? 'Cuéntame, ¿qué tema o problema te gustaría desarrollar en tu tesis?'
+        : (!answers.field
+          ? '¡Perfecto! ¿Y de qué carrera es tu tesis?'
+          : (!answers.university ? '¡Perfecto! ¿Y en qué universidad estudias?' : null));
+
+      this.logActivity({
+        type: 'redundant_question_fixed',
+        waId,
+        asked: redundantAsk,
+        original: result.reply,
+        replacement: nextQuestion
+      });
+
+      if (nextQuestion) result.reply = nextQuestion;
+      else result.ready = true;
+    }
+
     // Pedir la reunión gana sobre cualquier dato que falte: si el contacto ya
     // dijo que quiere agendar (o propuso un día y una hora), se pasa a
     // agendar de inmediato. Los datos que no dio se completan con los valores
