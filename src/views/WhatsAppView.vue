@@ -180,6 +180,14 @@
           "{{ entry.text }}"<br />
           <span class="activity-error">⚠️ {{ entry.error }} — el paso siguió su curso normal.</span>
         </p>
+        <p v-else-if="entry.type === 'scheduling_fast_track'" class="activity-text activity-hint">
+          "{{ entry.text }}"<br />
+          Pidió agendar, así que se pasa directo a proponer la reunión sin seguir preguntando datos.
+          <template v-if="entry.when"><br />🕐 Momento que indicó: "{{ entry.when }}"</template>
+        </p>
+        <p v-else-if="entry.type === 'preferred_when_failed'" class="activity-text">
+          <span class="activity-error">⚠️ No se pudo interpretar "{{ entry.when }}": {{ entry.error }}. Se le preguntó el día igual.</span>
+        </p>
         <p v-else-if="entry.type === 'turn_superseded'" class="activity-text activity-hint">
           El contacto siguió escribiendo mientras se preparaba esta respuesta, así que no se envió:
           "{{ entry.reply }}". Responde el turno siguiente, ya con todo lo que escribió.
@@ -353,7 +361,9 @@ const ACTIVITY_META = {
   reset: { icon: '🔄', label: 'Conversación reiniciada', className: 'activity-ok' },
   scheduling_aside: { icon: '🙋', label: 'Pregunta durante el agendamiento', className: 'activity-llm' },
   scheduling_aside_failed: { icon: '⚠️', label: 'No se pudo revisar si había una pregunta', className: 'activity-error-card' },
-  turn_superseded: { icon: '⏭️', label: 'Turno descartado (siguió escribiendo)', className: 'activity-buffer' }
+  turn_superseded: { icon: '⏭️', label: 'Turno descartado (siguió escribiendo)', className: 'activity-buffer' },
+  scheduling_fast_track: { icon: '⚡', label: 'Pidió agendar: se salta a la reunión', className: 'activity-ok' },
+  preferred_when_failed: { icon: '⚠️', label: 'No se pudo interpretar el día/hora que pidió', className: 'activity-error-card' }
 };
 
 function activityIcon(type) {

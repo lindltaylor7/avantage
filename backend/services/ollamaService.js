@@ -46,32 +46,6 @@ function describeMissingPriority(knownAnswers) {
   return 'ya tienes el tema, la carrera y la universidad: NO preguntes nada más (ni nivel, ni correo). Marca "ready": true en este mismo turno con un "reply" corto de acuse (ej. "Perfecto 👀"). El sistema se encarga de proponer la reunión y la modalidad.';
 }
 
-// Saludo inicial que el modelo puede haber puesto por su cuenta ("Hola
-// Edward,", "¡Buenas tardes!"), para no duplicarlo al anteponer la
-// presentación.
-const LEADING_GREETING_RE = /^\s*[¡!]*\s*(hola|buenas|buenos d[ií]as|buenas tardes|buenas noches)\b[^.!?¿\n]*?\s*[,.!¡]+\s*/i;
-
-/**
- * Red de seguridad para el primer mensaje: la instrucción de presentarse está
- * en el prompt, pero el modelo la cumplía de forma intermitente y había
- * contactos que preguntaban "¿me comunico a Avantage?" y nunca recibían la
- * confirmación. Si la respuesta del primer turno no menciona a Avan, se le
- * antepone la presentación (quitando el saludo que el modelo ya hubiera
- * puesto, para no saludar dos veces).
- */
-function ensureIntroduction(reply, contactName) {
-  const text = String(reply || '').trim();
-  if (/\bavan\b/i.test(text)) return text;
-
-  // Al quitarle el saludo, lo que queda puede empezar en minúscula ("¡sí!
-  // Cuéntame..."); se capitaliza la primera letra para que siga leyéndose
-  // como una frase y no como un pegote.
-  const rest = text.replace(LEADING_GREETING_RE, '').trim()
-    .replace(/^([^\p{L}]*)(\p{L})/u, (_, prefix, letter) => prefix + letter.toUpperCase());
-  const hello = contactName ? `¡Hola, ${contactName}!` : '¡Hola!';
-  return `${hello} Soy Avan, del equipo de Avantage Group 👋 ${rest || text}`.trim();
-}
-
 /**
  * Genera un embedding sintético determinista de 384 dimensiones para análisis semántico local
  */
@@ -300,7 +274,7 @@ Detalles adicionales: ${additionalNotes || 'Ninguno'}`;
     // es decir un interrogatorio. Ahora se conserva el límite de longitud pero
     // se le exige que la primera parte aporte algo real.
     const shortRepliesRule = shortReplies
-      ? 'LARGO MÁXIMO: 25 palabras (35 si es el primer mensaje, que lleva la presentación). En Perú nadie lee párrafos por WhatsApp: si tu respuesta ocupa más de dos renglones en un celular, es demasiado larga. Estructura: (a) responde o reconoce en POCAS palabras lo que acaba de escribir —si preguntó algo, la respuesta resumida va aquí— y (b) UNA sola pregunta. Nada de relleno corporativo ni cierres de correo ("quedo atento", "cualquier cosa me avisas"). No repitas el nombre de la empresa si ya lo dijiste: ni dos veces en el mismo mensaje, ni en mensajes siguientes. Escribe en español natural de Perú, sin calcos del inglés ("no problema", "déjame saber").'
+      ? 'LARGO MÁXIMO: 25 palabras (35 si es el primer mensaje, que lleva la presentación). En Perú nadie lee párrafos por WhatsApp: si tu respuesta ocupa más de dos renglones en un celular, es demasiado larga. Estructura: (a) responde o reconoce en POCAS palabras lo que acaba de escribir —si preguntó algo, la respuesta resumida va aquí— y (b) UNA sola pregunta. Nada de relleno corporativo ni cierres de correo ("quedo atento", "cualquier cosa me avisas"). No repitas el nombre de la empresa si ya lo dijiste: ni dos veces en el mismo mensaje, ni en mensajes siguientes. NUNCA sacrifiques la gramática por acortar: escribe frases completas y bien formadas, con sus artículos; si no te alcanza el largo, di UNA cosa menos en vez de escribir un telegrama ("10-min reunión te guía"). Escribe en español natural de Perú, sin calcos del inglés ("no problema", "déjame saber").'
       : 'LARGO MÁXIMO: 45 palabras, con la misma estructura: primero respondes o reconoces en pocas palabras lo que dijo, después UNA sola pregunta. Nada de relleno corporativo ni cierres de correo.';
 
     const rulesBlock = [shortRepliesRule, ...teamRules]
@@ -321,7 +295,13 @@ Recién cuando tengas (1), (2) Y (3) marca "ready": true (ver CUÁNDO TERMINAR).
 
 TRATO: siempre de TÚ, nunca de usted, en todos los mensajes.
 
-NO SEAS CERRADO: que te falte un dato NUNCA es excusa para ignorar lo que la persona escribió. Si te hace una pregunta ("¿qué hacen?", "¿cuánto cuesta?", "¿cuánto dura?", "necesito información"), RESPÓNDELA primero con los DATOS REALES DEL SERVICIO y recién después, en el mismo mensaje, haz tu pregunta pendiente. Alguien que pide información y solo recibe preguntas se va.
+NO TE PRESENTES: nunca abras diciendo quién eres ni nombrando a la empresa ("soy X de Y"). Entra directo a ayudar. Solo di con quién hablan si te lo preguntan explícitamente.
+
+NOMBRES: la videollamada se llama siempre "Google Meet", nunca "Meet" a secas.
+
+AGENDAR GANA SOBRE TODO: si el contacto pide una reunión/llamada, pregunta por horarios, o propone un día u hora concretos ("¿puedo el jueves?", "a las 5 hoy"), eso es lo prioritario. Marca "schedulingIntent": true y guarda en "preferredWhen" lo que dijo del cuándo, TAL CUAL. En ese caso el sistema pasa a agendar de inmediato: no sigas pidiendo tema, carrera ni universidad, y tu "reply" tiene que ser un acuse corto y SIN preguntas.
+
+NO SEAS CERRADO: que te falte un dato NUNCA es excusa para ignorar lo que la persona escribió. Si te hace una pregunta ("¿qué hacen?", "¿cuánto cuesta?", "¿cuánto dura?", "necesito información"), RESPÓNDELA primero con los DATOS REALES DEL SERVICIO y recién después, en el mismo mensaje, haz tu pregunta pendiente. Alguien que pide información y solo recibe preguntas se va. Cuando pidan información en general, empieza por QUÉ hacen (el acompañamiento de tesis), no por la logística de la reunión: la duración, la modalidad y el descuento solo se mencionan si preguntan por eso.
 
 Datos OPCIONALES Y PASIVOS (correo, nivel académico, ámbito/región): si la persona los menciona por su cuenta, guárdalos en "extracted". Pero JAMÁS los preguntes — hay valores por defecto y el jefe comercial los ve en la reunión.
 
@@ -335,9 +315,6 @@ Si el contacto hace una pregunta, RESPÓNDELA primero con estos datos y recién 
 ` : ''}
 ${toneInstructions ? `\nINSTRUCCIONES ADICIONALES DEL EQUIPO:\n${toneInstructions}\n` : ''}
 
-${isFirstTurn ? `
-PRIMER MENSAJE DE LA CONVERSACIÓN: tu "reply" TIENE que abrir presentándote — saludo + "soy Avan, del equipo de Avantage Group" — antes de cualquier otra cosa. Es obligatorio, no opcional: mucha gente escribe justamente para confirmar que llegó al lugar correcto. Y si en ese primer mensaje pidieron información ("quisiera info", "información por favor"), agrega UNA frase corta de qué hacen, sacada de los datos reales, antes de tu pregunta.
-` : ''}
 CUÁNDO TERMINAR: marca "ready": true en cuanto tengas el tema de tesis Y (la carrera O la universidad). NO antes: si te falta el dato académico, tu turno es para preguntarlo, con "ready": false. Cuando por fin marques "ready": true, tu "reply" tiene que ser MUY corto y SIN preguntas: si el contacto aprovechó ese último mensaje para preguntarte algo, respóndele ahí en una línea con los datos reales del servicio; si no preguntó nada, un simple acuse (ej. "Perfecto 👀" o "Genial, dame un momento 🙌"). El sistema toma el hilo enseguida: propone la reunión con el jefe comercial y le pregunta la modalidad (telefónica o Meet). Este "reply" tuyo puede incluso no mostrarse, así que no pongas nada importante en él.
 
 DATOS YA CONFIRMADOS (usa esto para no repetir preguntas ya respondidas):
@@ -356,7 +333,9 @@ Responde ÚNICAMENTE en JSON válido con esta forma exacta (usa null en los camp
     "university": "<universidad/institución donde estudia, o null>",
     "email": "<correo electrónico identificado, o null>"
   },
-  "ready": <true o false>
+  "ready": <true o false>,
+  "schedulingIntent": <true si pidió agendar, preguntó por horarios o propuso un día u hora; si no, false>,
+  "preferredWhen": "<lo que dijo sobre cuándo quiere la reunión, tal cual lo escribió (ej. 'a las 5 hoy', 'el lunes en la mañana'), o null>"
 }`;
 
     const transcript = (history || [])
@@ -397,9 +376,11 @@ Responde ÚNICAMENTE en JSON válido con esta forma exacta (usa null en los camp
 
       console.log(`✅ [Ollama Cloud LLM] Turno de Avan generado por ${this.chatModel}`);
       return {
-        reply: isFirstTurn ? ensureIntroduction(parsed.reply, contactName) : parsed.reply,
+        reply: parsed.reply,
         extracted: parsed.extracted || {},
         ready: !!parsed.ready,
+        schedulingIntent: !!parsed.schedulingIntent,
+        preferredWhen: typeof parsed.preferredWhen === 'string' && parsed.preferredWhen.trim() ? parsed.preferredWhen.trim() : null,
         source: 'llm'
       };
     } catch (err) {
@@ -416,7 +397,7 @@ Responde ÚNICAMENTE en JSON válido con esta forma exacta (usa null en los camp
    */
   fallbackConversationTurn(knownAnswers, incomingText, isFirstTurn) {
     const answers = knownAnswers || {};
-    const greeting = isFirstTurn ? '¡Hola! 👋 Soy Avan, del equipo de Avantage Group. ' : '';
+    const greeting = isFirstTurn ? '¡Hola! 👋 ' : '';
 
     if (!answers.problem) {
       return {

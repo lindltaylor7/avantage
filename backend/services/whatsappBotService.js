@@ -24,9 +24,9 @@ const TYPING_PAUSE_MS = 1500;
 const BOOKING_ADVISOR_USER_ID = Number(process.env.GOOGLE_BOOKING_ADVISOR_USER_ID) || 1;
 
 // Horizonte máximo de agendamiento: solo se ofrecen (y aceptan) horarios de
-// hoy hasta N días más adelante. days = N + 1 en los constructores de bloques,
+// hoy hasta N días más adelante (N = 1 → hoy y mañana). days = N + 1 en los constructores de bloques,
 // que cuentan el día 0 = hoy.
-const MAX_BOOKING_DAYS_AHEAD = Number(process.env.WHATSAPP_BOOKING_MAX_DAYS_AHEAD) || 2;
+const MAX_BOOKING_DAYS_AHEAD = Number(process.env.WHATSAPP_BOOKING_MAX_DAYS_AHEAD) || 1;
 const BOOKING_WINDOW_DAYS = MAX_BOOKING_DAYS_AHEAD + 1;
 
 // Cantidad de horarios que se le ofrecen al contacto a la vez.
@@ -635,6 +635,10 @@ export class WhatsappBotService {
     const extractedEmail = extractEmail(extracted.email);
     if (extractedEmail) answers.email = extractedEmail;
 
+    // Lo que dijo sobre cuándo quiere la reunión ("a las 5 hoy") se guarda para
+    // no volver a preguntárselo cuando toque elegir día y hora.
+    if (result.preferredWhen) answers.__when = result.preferredWhen;
+
     await this.updateSession(waId, { answers: JSON.stringify(answers) });
 
     // El contacto siguió escribiendo mientras se preparaba esta respuesta: lo
@@ -648,8 +652,17 @@ export class WhatsappBotService {
     // Para pasar a la reunión hacen falta los tres datos: tema, carrera y
     // universidad. Cuando se cumple, NO se manda `result.reply` (el LLM a
     // veces cierra con una pregunta suelta): offerScheduling() toma el hilo.
+    // Pedir la reunión gana sobre cualquier dato que falte: si el contacto ya
+    // dijo que quiere agendar (o propuso un día y una hora), se pasa a
+    // agendar de inmediato. Los datos que no dio se completan con los valores
+    // por defecto del panel y el jefe comercial los ve en la reunión;
+    // insistir con más preguntas a alguien que ya dijo "quiero reunirme" es
+    // la forma más rápida de perderlo.
     const missingAcademic = !answers.field ? 'field' : (!answers.university ? 'university' : null);
-    if (result.ready && answers.problem && !missingAcademic) {
+    if (result.schedulingIntent) {
+      this.logActivity({ type: 'scheduling_fast_track', waId, text: incomingText, when: answers.__when || null });
+      await this.finalize(waId, answers);
+    } else if (result.ready && answers.problem && !missingAcademic) {
       // Si el contacto aprovechó el mensaje que completó los datos para
       // preguntar algo ("UNMSM. ¿Cuánto dura la reunión?"), la respuesta va
       // dentro de `result.reply` y se perdería, porque offerScheduling() manda
@@ -750,7 +763,7 @@ export class WhatsappBotService {
       console.error(`❌ [WhatsApp Bot] Error al registrar el lead de ${waId}:`, error);
     }
 
-    await this.offerScheduling(waId, { topic: synthesizedTopic, email });
+    await this.offerScheduling(waId, { topic: synthesizedTopic, email, when: answers.__when || null });
   }
 
   /**
@@ -769,12 +782,12 @@ export class WhatsappBotService {
   /**
    * Tras conocer el tema, arranca el agendamiento: valida que el calendario
    * del asesor esté disponible y le pregunta al lead la MODALIDAD de la
-   * llamada (telefónica o por Meet, con descuento). Según lo que elija se le
+   * llamada (telefónica o por Google Meet, con descuento). Según lo que elija se le
    * pide su número o su correo, y recién después se pasa a elegir día y hora.
    * Si Calendar no está listo o no hay bloques libres, se transfiere a
    * seguimiento manual sin bloquear la conversación.
    */
-  async offerScheduling(waId, { topic, email }) {
+  async offerScheduling(waId, { topic, email, when = null }) {
     try {
       if (!this.googleCalendarService?.isConfigured()) throw new Error('Google Calendar no configurado en el servidor');
 
@@ -786,10 +799,10 @@ export class WhatsappBotService {
 
       const session = await this.getSession(waId);
       const answers = typeof session.answers === 'string' ? JSON.parse(session.answers) : (session.answers || {});
-      answers.__scheduling = { topic, email: email || null, mode: null, phone: null, discount: 0 };
+      answers.__scheduling = { topic, email: email || null, mode: null, phone: null, discount: 0, when: when || answers.__when || null };
       await this.updateSession(waId, { status: 'scheduling_mode', answers: JSON.stringify(answers) });
 
-      await this.send(waId, `Coordinemos una reunión con nuestro jefe comercial para revisar tu tema 🙌 ¿Cómo prefieres la llamada?\n\n1. Telefónica\n2. Vía Meet (con ${MEET_DISCOUNT_PCT}% de descuento)`);
+      await this.send(waId, `Coordinemos una reunión con nuestro jefe comercial para revisar tu tema 🙌 ¿Cómo prefieres la llamada?\n\n1. Telefónica\n2. Vía Google Meet (con ${MEET_DISCOUNT_PCT}% de descuento)`);
     } catch (error) {
       // Si la conexión de Google Calendar del asesor caducó, avisar al equipo
       // en el panel para que la reconecte — si no, todos los leads que
@@ -820,8 +833,8 @@ export class WhatsappBotService {
     switch (status) {
       case 'scheduling_mode':
         return {
-          question: `¿Cómo prefieres la llamada? 1. Telefónica / 2. Vía Meet (con ${MEET_DISCOUNT_PCT}% de descuento)`,
-          restate: `Volviendo a lo nuestro: ¿cómo prefieres la llamada?\n\n1. Telefónica\n2. Vía Meet (con ${MEET_DISCOUNT_PCT}% de descuento)`
+          question: `¿Cómo prefieres la llamada? 1. Telefónica / 2. Vía Google Meet (con ${MEET_DISCOUNT_PCT}% de descuento)`,
+          restate: `Volviendo a lo nuestro: ¿cómo prefieres la llamada?\n\n1. Telefónica\n2. Vía Google Meet (con ${MEET_DISCOUNT_PCT}% de descuento)`
         };
       case 'scheduling_phone':
         return {
@@ -830,8 +843,8 @@ export class WhatsappBotService {
         };
       case 'scheduling_email':
         return {
-          question: '¿A qué correo te envío el link de Meet?',
-          restate: 'Y para mandarte el link de Meet, ¿a qué correo te lo envío?'
+          question: '¿A qué correo te envío el link de Google Meet?',
+          restate: 'Y para mandarte el link de Google Meet, ¿a qué correo te lo envío?'
         };
       case 'scheduling_date': {
         const phrase = this._availableDaysPhrase(scheduling.availableDays || []) || 'los próximos días';
@@ -951,6 +964,39 @@ export class WhatsappBotService {
 
     if (scheduling) scheduling.availableDays = days;
 
+    // El contacto ya dijo cuándo quiere la reunión durante la conversación
+    // ("¿puedo tener la reunión a las 5 hoy?"). Volver a preguntarle el día
+    // después de eso es lo que más molesta: se interpreta lo que dijo y, si
+    // ese día tiene espacio, se salta directo a los horarios más cercanos a
+    // la hora que pidió. Se consume una sola vez.
+    if (scheduling?.when) {
+      const requested = scheduling.when;
+      delete scheduling.when;
+      try {
+        const { date, preferredTime } = await this.ollamaService.parseSchedulingDate(requested, limaTodayIso(), MAX_BOOKING_DAYS_AHEAD);
+        if (date && days.includes(date)) {
+          const slots = await this.googleCalendarService.getFreeSlotsForDate(BOOKING_ADVISOR_USER_ID, date, { limit: SLOTS_TO_OFFER, nearTime: preferredTime });
+          if (slots.length > 0) {
+            const gotExactTime = preferredTime ? slots.some((slot) => limaTimeOf(slot.startTime) === preferredTime) : true;
+            scheduling.slots = slots;
+            await this.updateSession(waId, { status: 'scheduling_time', answers: JSON.stringify(answers) });
+            await this.send(
+              waId,
+              (gotExactTime
+                ? `📅 Perfecto, para ${dayLabelWithArticle(date)} tengo:`
+                : `A las ${formatClockLabel(preferredTime)} no tengo libre ${dayLabelWithArticle(date)} 🙈 Estos son los más cercanos:`) +
+              `\n\n${numberedList(slots.map((slot) => slot.label))}\n\n` +
+              'Responde con el número que prefieras, o "no" si prefieres que te contacten después.'
+            );
+            return;
+          }
+        }
+      } catch (error) {
+        // Si no se pudo interpretar, se sigue por el camino normal.
+        this.logActivity({ type: 'preferred_when_failed', waId, when: requested, error: error.message });
+      }
+    }
+
     // Un solo día disponible → sin rodeos: se muestran los horarios de una vez.
     if (days.length === 1) {
       const day = days[0];
@@ -993,7 +1039,7 @@ export class WhatsappBotService {
 
     const mode = parseCallMode(text);
     if (!mode) {
-      await this.send(waId, `Responde *1* para llamada telefónica, o *2* para Meet (con ${MEET_DISCOUNT_PCT}% de descuento).`);
+      await this.send(waId, `Responde *1* para llamada telefónica, o *2* para Google Meet (con ${MEET_DISCOUNT_PCT}% de descuento).`);
       return;
     }
 
@@ -1018,7 +1064,7 @@ export class WhatsappBotService {
       await this.promptForDate(waId);
     } else {
       await this.updateSession(waId, { status: 'scheduling_email', answers: JSON.stringify(answers) });
-      await this.send(waId, `Perfecto, aplico el ${MEET_DISCOUNT_PCT}% de descuento ✉️ ¿A qué correo te envío el link de Meet?`);
+      await this.send(waId, `Perfecto, aplico el ${MEET_DISCOUNT_PCT}% de descuento ✉️ ¿A qué correo te envío el link de Google Meet?`);
     }
   }
 
@@ -1044,7 +1090,7 @@ export class WhatsappBotService {
     await this.promptForDate(waId);
   }
 
-  /** Captura el correo para enviar el link de Meet. */
+  /** Captura el correo para enviar el link de Google Meet. */
   async handleSchedulingEmailReply(waId, session, text) {
     const { answers, scheduling } = this._readScheduling(session);
     if (!scheduling) { await this.updateSession(waId, { status: 'completed' }); return; }
@@ -1055,7 +1101,7 @@ export class WhatsappBotService {
     if (foundEmail) {
       scheduling.email = foundEmail;
     } else if (this._isSchedulingRefusal(trimmed) || normalize(trimmed).includes('no tengo')) {
-      // Sigue sin correo: el link de Meet se le manda por acá mismo.
+      // Sigue sin correo: el link de Google Meet se le manda por acá mismo.
     } else {
       scheduling.emailAttempts = (scheduling.emailAttempts || 0) + 1;
       if (scheduling.emailAttempts < 2) {
@@ -1165,7 +1211,7 @@ export class WhatsappBotService {
 
   /**
    * Procesa la elección de horario: un número válido crea el evento real en
-   * Google Calendar (con link de Meet), lo registra en `scheduled_meetings`
+   * Google Calendar (con link de Google Meet), lo registra en `scheduled_meetings`
    * para la vista de "Próximas reuniones" del panel, y mueve el lead a "Cita
    * Agendada" (entra recién ahí al Funnel de Ventas). "no" transfiere a
    * seguimiento manual.
@@ -1294,7 +1340,7 @@ export class WhatsappBotService {
 
       await this.send(
         waId,
-        `✅ ¡Listo${name ? `, ${name}` : ''}! Tu ${isPhone ? 'llamada telefónica' : 'reunión por Meet'} con el jefe comercial quedó agendada para *${slot.label}*.` +
+        `✅ ¡Listo${name ? `, ${name}` : ''}! Tu ${isPhone ? 'llamada telefónica' : 'reunión por Google Meet'} con el jefe comercial quedó agendada para *${slot.label}*.` +
         (isPhone
           ? `\n\n📞 Te llamaremos${contactPhone ? ` al ${contactPhone}` : ''}.`
           : (event.meetLink ? `\n\n🔗 Link de Google Meet: ${event.meetLink}` : '') +
