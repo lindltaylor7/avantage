@@ -44,7 +44,7 @@ export const BOT_PROMPT_DEFAULTS = {
   // OJO: el equipo debe revisar y ajustar estos textos en el panel — son lo
   // que Avan afirma como cierto sobre el servicio.
   faq: [
-    'Te asignamos un asesor que te guía en todo el proceso de tu tesis.',
+    'Te acompañamos con un asesor durante toda tu tesis.',
     'Si no tienes tema, te ayudamos a definir uno viable para tu carrera.',
     'El jefe comercial te explica el alcance y las modalidades en la reunión.',
     'La reunión es una llamada corta con el jefe comercial para revisar tu caso y explicarte cómo trabajamos, sin compromiso.',
