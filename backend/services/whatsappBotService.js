@@ -43,14 +43,16 @@ const MEET_DISCOUNT_PCT = Number(process.env.WHATSAPP_MEET_DISCOUNT_PCT) || 10;
 // (p. ej. "Hola" y luego, unos segundos después, el tema real). En vez de
 // mandarle cada burbuja al LLM por separado, se espera este tiempo de
 // silencio para juntar todo en un solo mensaje antes de procesar el turno.
-const MESSAGE_DEBOUNCE_MS = Number(process.env.WHATSAPP_BOT_FIRST_MESSAGE_DEBOUNCE_MS) || 5000;
+// Al inicio de la conversación la espera es mayor: es cuando la gente escribe
+// más entrecortado ("hola" / "quiero info sobre el costo").
+const MESSAGE_DEBOUNCE_MS = Number(process.env.WHATSAPP_BOT_FIRST_MESSAGE_DEBOUNCE_MS) || 7000;
 
-// En los pasos de agendamiento la espera es más corta: ahí el contacto casi
-// siempre responde en una sola burbuja ("2", su correo, el número del
-// horario), y hacerlo esperar los 5 segundos completos para confirmarle algo
-// que ya eligió se siente lento. Sigue siendo suficiente para juntar las
-// burbujas encadenadas ("mi correo es x@y.com" + "pero cuánto dura?").
-const SCHEDULING_DEBOUNCE_MS = Number(process.env.WHATSAPP_BOT_SCHEDULING_DEBOUNCE_MS) || 2500;
+// En el agendamiento y después de agendar la espera es más corta: ahí el
+// contacto casi siempre responde en una sola burbuja ("2", su correo, el
+// número del horario), y hacerlo esperar lo mismo que en la conversación
+// libre para confirmarle algo que ya eligió se siente lento.
+const SCHEDULING_DEBOUNCE_MS = Number(process.env.WHATSAPP_BOT_SCHEDULING_DEBOUNCE_MS) || 5000;
+const POST_BOOKING_DEBOUNCE_MS = Number(process.env.WHATSAPP_BOT_POST_BOOKING_DEBOUNCE_MS) || 5000;
 
 // Seguimiento por inactividad: si el contacto deja a Avan "en visto" 1 hora,
 // se le manda un recordatorio; si sigue una hora más sin responder, el lead
@@ -448,7 +450,9 @@ export class WhatsappBotService {
       // igual que antes: el bot ya no vuelve a responder solo.
       const meeting = this.scheduledMeetingService ? await this.scheduledMeetingService.getLatestForContact(waId) : null;
       if (meeting) {
-        await this.runSerialized(waId, () => this.handlePostBookingMessage(waId, meeting, text));
+        // También pasan por el buffer: quien ya agendó escribe igual de
+        // entrecortado que el resto ("gracias" / "una consulta...").
+        this.bufferMessage(waId, text, this.debounceForStatus(session.status));
         return;
       }
 
@@ -468,7 +472,17 @@ export class WhatsappBotService {
     // interpretara como un dato inválido del paso. El turno que dispara el
     // buffer re-lee el estado real y enruta al handler que corresponda.
     await this.clearNudge(waId);
-    this.bufferMessage(waId, text, SCHEDULING_STATUSES.includes(session.status) ? SCHEDULING_DEBOUNCE_MS : MESSAGE_DEBOUNCE_MS);
+    this.bufferMessage(waId, text, this.debounceForStatus(session.status));
+  }
+
+  /**
+   * Espera de agrupación que corresponde al estado de la sesión, para que la
+   * bitácora y el buffer usen siempre el mismo criterio.
+   */
+  debounceForStatus(status) {
+    if (SCHEDULING_STATUSES.includes(status)) return SCHEDULING_DEBOUNCE_MS;
+    if (status === 'completed') return POST_BOOKING_DEBOUNCE_MS;
+    return MESSAGE_DEBOUNCE_MS;
   }
 
   /**
@@ -562,7 +576,14 @@ export class WhatsappBotService {
     // mensaje al handler que corresponde al estado real.
     if (session && session.status !== 'active') {
       if (SCHEDULING_STATUSES.includes(session.status)) return this.handleSchedulingTurn(waId, session, incomingText);
-      return; // 'completed' u otro: nada
+      if (session.status === 'completed') {
+        // Sesión cerrada pero con reunión agendada: el mensaje (ya agrupado)
+        // se clasifica en vez de ignorarse. Sin reunión no se responde nada,
+        // igual que antes.
+        const meeting = this.scheduledMeetingService ? await this.scheduledMeetingService.getLatestForContact(waId) : null;
+        if (meeting) return this.handlePostBookingMessage(waId, meeting, incomingText);
+      }
+      return;
     }
     if (session && !session.bot_enabled) return;
 
@@ -913,9 +934,22 @@ export class WhatsappBotService {
       status: session.status,
       isAside: aside.isAside,
       answersStep: aside.answersStep,
+      preferredWhen: aside.preferredWhen,
       answer: aside.answer,
       source: aside.source
     });
+
+    // El contacto puede decir cuándo quiere la reunión en cualquiera de los
+    // pasos previos a elegir el día ("via meet para las 3 de la tarde hoy"):
+    // se guarda para que promptForDate no se lo vuelva a preguntar. En los
+    // pasos de día y hora no hace falta, porque ahí el mensaje YA es la
+    // respuesta y lo interpretan sus propios handlers.
+    if (aside.preferredWhen && !['scheduling_date', 'scheduling_time'].includes(session.status)) {
+      const { answers } = this._readScheduling(session);
+      answers.__scheduling.when = aside.preferredWhen;
+      await this.updateSession(waId, { answers: JSON.stringify(answers) });
+      this.logActivity({ type: 'preferred_when_captured', waId, status: session.status, when: aside.preferredWhen });
+    }
 
     if (!aside.isAside) return this.dispatchByStatus(waId, text);
 

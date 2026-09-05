@@ -185,6 +185,10 @@
           Pidió agendar, así que se pasa directo a proponer la reunión sin seguir preguntando datos.
           <template v-if="entry.when"><br />🕐 Momento que indicó: "{{ entry.when }}"</template>
         </p>
+        <p v-else-if="entry.type === 'preferred_when_captured'" class="activity-text activity-hint">
+          Dijo "{{ entry.when }}" en el paso <strong>{{ entry.status }}</strong>. Se guarda para no volver a
+          preguntarle el día cuando toque elegir horario.
+        </p>
         <p v-else-if="entry.type === 'preferred_when_failed'" class="activity-text">
           <span class="activity-error">⚠️ No se pudo interpretar "{{ entry.when }}": {{ entry.error }}. Se le preguntó el día igual.</span>
         </p>
@@ -363,7 +367,8 @@ const ACTIVITY_META = {
   scheduling_aside_failed: { icon: '⚠️', label: 'No se pudo revisar si había una pregunta', className: 'activity-error-card' },
   turn_superseded: { icon: '⏭️', label: 'Turno descartado (siguió escribiendo)', className: 'activity-buffer' },
   scheduling_fast_track: { icon: '⚡', label: 'Pidió agendar: se salta a la reunión', className: 'activity-ok' },
-  preferred_when_failed: { icon: '⚠️', label: 'No se pudo interpretar el día/hora que pidió', className: 'activity-error-card' }
+  preferred_when_failed: { icon: '⚠️', label: 'No se pudo interpretar el día/hora que pidió', className: 'activity-error-card' },
+  preferred_when_captured: { icon: '🕐', label: 'Anotado el día/hora que pidió', className: 'activity-ok' }
 };
 
 function activityIcon(type) {

@@ -640,6 +640,9 @@ Responde ÚNICAMENTE en JSON válido: {"index": <número de 1 a ${optionLabels.l
    *     dura la reunión?").
    *   - `isAside` + `answer`: si además hace una pregunta APARTE, con la
    *     respuesta ya redactada usando ÚNICAMENTE la base de conocimiento.
+   *   - `preferredWhen`: si de paso dijo cuándo quiere la reunión ("via meet
+   *     para las 3 de la tarde hoy"), para no volver a preguntarle el día
+   *     dos pasos más adelante.
    *
    * Las preguntas sobre los días/horarios ofrecidos NO cuentan como pregunta
    * aparte: de eso ya se encargan parseSchedulingDate/parseSchedulingChoice.
@@ -653,7 +656,7 @@ Responde ÚNICAMENTE en JSON válido: {"index": <número de 1 a ${optionLabels.l
     if (activeHost === 'https://api.ollama.com') activeHost = 'https://ollama.com';
 
     if (!activeApiKey && !activeHost.includes('localhost') && !activeHost.includes('127.0.0.1')) {
-      return { answersStep: true, isAside: false, answer: null, source: 'fallback' };
+      return { answersStep: true, isAside: false, preferredWhen: null, answer: null, source: 'fallback' };
     }
 
     const prompt = `Eres Avan, de Avantage Group (Perú). Estás coordinando por WhatsApp una reunión con el jefe comercial y acabas de preguntarle esto al contacto${contactName ? ` (${contactName})` : ''}:
@@ -671,9 +674,10 @@ Analiza el mensaje y responde:
 - "answersStep": true si el mensaje CONTIENE la respuesta a lo que le preguntaste, aunque venga junto con otra cosa. false si no la contiene.
 - "isAside": true si además hace una PREGUNTA APARTE, sobre algo distinto de lo que le preguntaste (ej. cuánto dura la reunión, cuánto cuesta, qué incluye, con quién es, si es presencial). false si no pregunta nada aparte.
   MUY IMPORTANTE: preguntar por los días u horarios disponibles, pedir otro horario, o preguntar si hay espacio a cierta hora NO es una pregunta aparte — eso es parte del paso actual. En esos casos "isAside" debe ser false.
+- "preferredWhen": si en su mensaje dijo CUÁNDO quiere la reunión (un día, una hora, o ambos: "para las 3 de la tarde hoy", "el lunes temprano"), cópialo TAL CUAL. Si no dijo nada del cuándo, null.
 - "answer": si "isAside" es true, la respuesta a esa pregunta: 1 o 2 líneas, tono WhatsApp cercano, máximo 1 emoji, usando SOLO los datos reales de arriba. Si la pregunta no se puede responder con esos datos, dile con naturalidad que eso se lo detalla el jefe comercial en la reunión. No agregues preguntas al final (el sistema retoma el paso por su cuenta). Si "isAside" es false, deja null.
 
-Responde ÚNICAMENTE en JSON válido: {"answersStep": <true o false>, "isAside": <true o false>, "answer": "<texto o null>"}`;
+Responde ÚNICAMENTE en JSON válido: {"answersStep": <true o false>, "isAside": <true o false>, "preferredWhen": "<texto o null>", "answer": "<texto o null>"}`;
 
     try {
       const generateUrl = this.getApiUrl(activeHost, '/generate');
@@ -687,7 +691,7 @@ Responde ÚNICAMENTE en JSON válido: {"answersStep": <true o false>, "isAside":
         signal: AbortSignal.timeout(15000)
       });
 
-      if (!response.ok) return { answersStep: true, isAside: false, answer: null, source: 'fallback' };
+      if (!response.ok) return { answersStep: true, isAside: false, preferredWhen: null, answer: null, source: 'fallback' };
 
       const data = await response.json();
       const cleanResponse = (data.response || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
@@ -695,6 +699,7 @@ Responde ÚNICAMENTE en JSON válido: {"answersStep": <true o false>, "isAside":
       const answer = typeof parsed.answer === 'string' && parsed.answer.trim() ? parsed.answer.trim() : null;
       return {
         answersStep: !!parsed.answersStep,
+        preferredWhen: typeof parsed.preferredWhen === 'string' && parsed.preferredWhen.trim() ? parsed.preferredWhen.trim() : null,
         // Sin texto de respuesta no hay nada que contestar: se trata como si
         // no hubiera pregunta aparte y el paso sigue su curso normal.
         isAside: !!parsed.isAside && !!answer,
@@ -703,7 +708,7 @@ Responde ÚNICAMENTE en JSON válido: {"answersStep": <true o false>, "isAside":
       };
     } catch (err) {
       console.warn('Ollama Cloud LLM scheduling aside notice:', err.message);
-      return { answersStep: true, isAside: false, answer: null, source: 'fallback' };
+      return { answersStep: true, isAside: false, preferredWhen: null, answer: null, source: 'fallback' };
     }
   }
 
