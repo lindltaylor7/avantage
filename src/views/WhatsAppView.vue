@@ -24,6 +24,11 @@
           <span class="btn-icon">{{ autoRefresh ? '⏸️' : '▶️' }}</span>
           {{ autoRefresh ? 'Auto: ON' : 'Auto: OFF' }}
         </button>
+        <button class="btn-action-secondary" @click="openActivity" title="Ver la bitácora del bot">
+          <span class="btn-icon">📊</span>
+          Actividad del bot
+          <span v-if="botActivity.length" class="btn-count">{{ botActivity.length }}</span>
+        </button>
       </div>
     </header>
 
@@ -124,16 +129,30 @@
       </div>
     </section>
 
-    <!-- Actividad del bot: visibilidad de lo que se manda/recibe del LLM -->
-    <h3 class="subsection-title">
-      📊 Actividad del bot / LLM
-      <button type="button" class="btn-clear-activity" @click="clearActivity" title="Limpiar bitácora">🗑️ Limpiar</button>
-    </h3>
-    <section v-if="!isLoading && botActivity.length === 0" class="empty-state small">
-      <p>Sin actividad todavía. Escribe por WhatsApp o usa el simulador de arriba.</p>
-    </section>
-    <section v-else class="activity-list">
-      <article v-for="entry in botActivity" :key="entry.id" class="activity-card" :class="activityClass(entry.type)">
+    <!-- Actividad del bot: vive en un modal en vez de ocupar media página. La
+         bitácora se consulta cuando algo no cuadra, no todo el tiempo, y
+         teniéndola aquí abajo el chat quedaba fuera de pantalla. -->
+    <Teleport to="body">
+      <div v-if="isActivityOpen" class="activity-backdrop" @click.self="closeActivity">
+        <section class="activity-modal" role="dialog" aria-modal="true" aria-labelledby="activity-modal-title">
+          <header class="activity-modal-header">
+            <div class="activity-modal-titles">
+              <h3 id="activity-modal-title" class="activity-modal-title">Actividad del bot</h3>
+              <p class="activity-modal-sub">Lo que Avan recibe, le pregunta al LLM y responde, turno por turno.</p>
+            </div>
+            <label v-if="selectedWaId" class="activity-filter">
+              <input type="checkbox" v-model="activityOnlySelected" />
+              Solo {{ selectedContactName }}
+            </label>
+            <button type="button" class="btn-thread-action" @click="clearActivity">Limpiar bitácora</button>
+            <button type="button" class="btn-modal-close" @click="closeActivity" aria-label="Cerrar">✕</button>
+          </header>
+
+          <div class="activity-modal-body">
+            <p v-if="filteredActivity.length === 0" class="activity-empty">
+              Sin actividad registrada. Escríbele al número de WhatsApp conectado o usa el simulador para ver aquí cada turno.
+            </p>
+            <article v-for="entry in filteredActivity" :key="entry.id" class="activity-card" :class="activityClass(entry.type)">
         <header class="activity-card-header">
           <span class="activity-type">{{ activityIcon(entry.type) }} {{ activityLabel(entry.type) }}</span>
           <span class="activity-wa">{{ entry.waId }}</span>
@@ -213,8 +232,11 @@
         <p v-else-if="entry.type === 'reset'" class="activity-text activity-hint">
           El estado del bot para este contacto se borró; su próximo mensaje se procesará como si fuera nuevo.
         </p>
-      </article>
-    </section>
+            </article>
+          </div>
+        </section>
+      </div>
+    </Teleport>
 
     <!-- Bandeja de conversaciones -->
     <h3 class="subsection-title">Conversaciones</h3>
@@ -227,7 +249,8 @@
     </section>
 
     <section v-else class="whatsapp-inbox">
-      <div class="contacts-panel">
+      <aside class="contacts-panel">
+        <p class="contacts-count">{{ conversations.length }} {{ conversations.length === 1 ? 'conversación' : 'conversaciones' }}</p>
         <button
           v-for="c in conversations"
           :key="c.wa_id"
@@ -235,38 +258,44 @@
           :class="{ 'is-active': c.wa_id === selectedWaId }"
           @click="selectConversation(c.wa_id)"
         >
-          <span class="contact-avatar">{{ iconFor(c.message_type) }}</span>
+          <span class="contact-avatar" aria-hidden="true">{{ initialsOf(c.contact_name || c.wa_id) }}</span>
           <span class="contact-info">
             <span class="contact-name">{{ c.contact_name || c.wa_id }}</span>
-            <span class="contact-preview">{{ c.direction === 'outbound' ? 'Tú: ' : '' }}{{ truncate(c.body, 40) }}</span>
+            <span class="contact-preview">{{ c.direction === 'outbound' ? 'Tú: ' : '' }}{{ truncate(c.body, 42) }}</span>
           </span>
           <span class="contact-side">
+            <span class="contact-time">{{ formatShortTime(c.received_at) }}</span>
             <span class="channel-badge" :class="channelBadgeClass(c.origin_channel)" :title="c.origin_channel">
               {{ channelIcon(c.origin_channel) }}
             </span>
-            <span class="contact-time">{{ formatShortTime(c.received_at) }}</span>
           </span>
         </button>
-      </div>
+      </aside>
 
       <div class="thread-panel">
         <template v-if="selectedWaId">
           <header class="thread-header">
-            <strong>{{ selectedContactName }}</strong>
-            <span class="thread-phone">{{ selectedWaId }}</span>
-            <span v-if="threadOriginChannel" class="channel-badge" :class="channelBadgeClass(threadOriginChannel)">
-              {{ channelIcon(threadOriginChannel) }} {{ threadOriginChannel }}
-            </span>
-            <span class="bot-status-spacer"></span>
-            <span v-if="botSession" class="bot-status" :title="botStatusHint">
-              {{ botStatusIcon }} {{ botStatusLabel }}
-            </span>
-            <button type="button" class="btn-bot-toggle" @click="toggleBot">
-              {{ botSession?.bot_enabled ? '⏸️ Pausar bot' : '▶️ Activar bot' }}
-            </button>
-            <button type="button" class="btn-bot-toggle btn-bot-reset" @click="resetBotSession" title="Borra el estado del bot para este contacto: su próximo mensaje se procesará como si fuera nuevo.">
-              🔄 Reiniciar conversación
-            </button>
+            <span class="thread-avatar" aria-hidden="true">{{ initialsOf(selectedContactName) }}</span>
+            <div class="thread-identity">
+              <strong class="thread-name">{{ selectedContactName }}</strong>
+              <span class="thread-sub">
+                <span class="thread-phone">{{ selectedWaId }}</span>
+                <span v-if="threadOriginChannel" class="channel-badge" :class="channelBadgeClass(threadOriginChannel)">
+                  {{ channelIcon(threadOriginChannel) }} {{ threadOriginChannel }}
+                </span>
+              </span>
+            </div>
+            <div class="thread-actions">
+              <span v-if="botSession" class="bot-status" :title="botStatusHint">
+                {{ botStatusIcon }} {{ botStatusLabel }}
+              </span>
+              <button type="button" class="btn-thread-action" @click="toggleBot">
+                {{ botSession?.bot_enabled ? 'Pausar bot' : 'Activar bot' }}
+              </button>
+              <button type="button" class="btn-thread-action" @click="resetBotSession" title="Borra el estado del bot para este contacto: su próximo mensaje se procesará como si fuera nuevo.">
+                Reiniciar
+              </button>
+            </div>
           </header>
 
           <div v-if="threadReferral" class="origin-banner">
@@ -275,20 +304,42 @@
             de Meta<span v-if="threadReferral.headline">: "{{ threadReferral.headline }}"</span>.
           </div>
 
-          <div class="thread-messages" ref="threadScrollEl">
-            <div
-              v-for="msg in thread"
-              :key="msg.id"
-              class="bubble"
-              :class="msg.direction === 'outbound' ? 'outbound' : 'inbound'"
-            >
-              <p class="bubble-text">{{ msg.body }}</p>
-              <span class="bubble-meta">
-                {{ formatShortTime(msg.received_at) }}
-                <span v-if="msg.direction === 'outbound'" :title="msg.status_error || ''">{{ statusTick(msg.status) }}</span>
-              </span>
-              <p v-if="msg.status === 'failed' && msg.status_error" class="bubble-error">⚠️ {{ msg.status_error }}</p>
+          <div class="thread-body">
+            <div class="thread-messages" ref="threadScrollEl" @scroll.passive="onThreadScroll">
+              <template v-for="group in threadGroups" :key="group.key">
+                <p class="day-divider"><span class="day-chip">{{ group.label }}</span></p>
+                <div v-for="run in group.runs" :key="run.key" class="msg-run" :class="run.direction">
+                  <article
+                    v-for="(msg, i) in run.messages"
+                    :key="msg.id"
+                    class="bubble"
+                    :class="[run.direction, { 'is-last': i === run.messages.length - 1, 'is-failed': msg.status === 'failed' }]"
+                  >
+                    <p class="bubble-text">{{ msg.body }}</p>
+                    <span class="bubble-meta">
+                      <span class="bubble-time">{{ formatClock(msg.received_at) }}</span>
+                      <span
+                        v-if="msg.direction === 'outbound'"
+                        class="bubble-tick"
+                        :class="tickClass(msg.status)"
+                        :title="msg.status_error || statusLabel(msg.status)"
+                      >{{ statusTick(msg.status) }}</span>
+                    </span>
+                    <p v-if="msg.status === 'failed' && msg.status_error" class="bubble-error">⚠️ {{ msg.status_error }}</p>
+                  </article>
+                </div>
+              </template>
             </div>
+
+            <button
+              v-if="!isPinnedToBottom"
+              type="button"
+              class="jump-latest"
+              @click="scrollThreadToBottom({ smooth: true })"
+            >
+              {{ unseenCount ? `${unseenCount} ${unseenCount === 1 ? 'mensaje nuevo' : 'mensajes nuevos'}` : 'Ir al final' }}
+              <span aria-hidden="true">↓</span>
+            </button>
           </div>
 
           <form class="reply-box" @submit.prevent="sendReply">
@@ -296,20 +347,20 @@
               v-model="replyText"
               class="reply-input"
               placeholder="Escribe una respuesta..."
-              rows="2"
+              rows="1"
               @keydown.enter.exact.prevent="sendReply"
             ></textarea>
             <button type="submit" class="btn-send" :disabled="isSending || !replyText.trim()">
-              {{ isSending ? 'Enviando...' : 'Enviar' }}
+              {{ isSending ? 'Enviando…' : 'Enviar' }}
             </button>
           </form>
         </template>
 
         <div v-else class="thread-placeholder">
           <div class="thread-placeholder-card">
-            <img src="/images/empty_chat_state.jpg" alt="Chat" class="thread-placeholder-img" />
-            <h4 class="thread-placeholder-title">Bandeja de Conversación</h4>
-            <p class="thread-placeholder-desc">Selecciona un contacto del panel izquierdo para ver los mensajes en vivo o continuar la atención personalizada.</p>
+            <img src="/images/empty_chat_state.jpg" alt="" class="thread-placeholder-img" />
+            <h4 class="thread-placeholder-title">Elige una conversación</h4>
+            <p class="thread-placeholder-desc">Los mensajes aparecen aquí en vivo. Puedes responder tú o dejar que Avan siga atendiendo.</p>
           </div>
         </div>
       </div>
@@ -351,6 +402,11 @@ const replyText = ref('');
 const isSending = ref(false);
 const threadScrollEl = ref(null);
 const botSession = ref(null);
+
+const isPinnedToBottom = ref(true);
+const unseenCount = ref(0);
+const isActivityOpen = ref(false);
+const activityOnlySelected = ref(true);
 
 const configStatus = ref(null);
 const botActivity = ref([]);
@@ -477,16 +533,45 @@ async function fetchStats() {
   }
 }
 
+/**
+ * A cuántos píxeles del fondo se sigue considerando que el operador está
+ * "mirando lo último". Con margen: si se movió un poco pero sigue abajo,
+ * bajarlo solo no le quita nada de vista.
+ */
+const SCROLL_PIN_TOLERANCE_PX = 80;
+
+function onThreadScroll() {
+  const el = threadScrollEl.value;
+  if (!el) return;
+  const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+  isPinnedToBottom.value = distanceFromBottom <= SCROLL_PIN_TOLERANCE_PX;
+  if (isPinnedToBottom.value) unseenCount.value = 0;
+}
+
+async function scrollThreadToBottom({ smooth = false } = {}) {
+  await nextTick();
+  const el = threadScrollEl.value;
+  if (!el) return;
+  el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+  isPinnedToBottom.value = true;
+  unseenCount.value = 0;
+}
+
 async function fetchThread(waId, { scrollToBottom = false } = {}) {
   try {
     const response = await apiFetch(`/api/whatsapp/conversations/${encodeURIComponent(waId)}/messages`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Error al obtener el hilo.');
+
+    // El sondeo trae mensajes nuevos cada pocos segundos. Si el operador está
+    // mirando el final, la vista lo sigue sola; si subió a leer algo, no se le
+    // arrastra la pantalla: se le avisa con el botón "mensajes nuevos".
+    const previousCount = thread.value.length;
     assignIfChanged(thread, data.messages || []);
-    if (scrollToBottom) {
-      await nextTick();
-      threadScrollEl.value?.scrollTo({ top: threadScrollEl.value.scrollHeight });
-    }
+    const added = thread.value.length - previousCount;
+
+    if (scrollToBottom || isPinnedToBottom.value) await scrollThreadToBottom();
+    else if (added > 0) unseenCount.value += added;
   } catch (error) {
     errorMessage.value = error.message;
   }
@@ -541,8 +626,34 @@ async function resetBotSession() {
 function selectConversation(waId) {
   if (!waId) return;
   selectedWaId.value = waId;
+  // Al abrir un hilo siempre se entra por lo último, como cualquier chat.
+  isPinnedToBottom.value = true;
+  unseenCount.value = 0;
+  thread.value = [];
   fetchThread(waId, { scrollToBottom: true });
   fetchBotSession(waId);
+}
+
+/**
+ * La bitácora completa mezcla todos los contactos. Cuando hay uno abierto, lo
+ * normal es querer ver solo sus turnos, así que ese es el estado por defecto.
+ */
+const filteredActivity = computed(() => {
+  if (!activityOnlySelected.value || !selectedWaId.value) return botActivity.value;
+  return botActivity.value.filter((entry) => entry.waId === selectedWaId.value);
+});
+
+function openActivity() {
+  isActivityOpen.value = true;
+  fetchBotActivity();
+}
+
+function closeActivity() {
+  isActivityOpen.value = false;
+}
+
+function onActivityKeydown(event) {
+  if (event.key === 'Escape' && isActivityOpen.value) closeActivity();
 }
 
 async function sendReply() {
@@ -667,11 +778,6 @@ async function fetchAll({ silent = false, full = true } = {}) {
   if (!silent) isLoading.value = false;
 }
 
-function iconFor(type) {
-  const icons = { text: '💬', image: '🖼️', video: '🎬', audio: '🎧', document: '📄', location: '📍', sticker: '🩹', button: '🔘', interactive: '🔘' };
-  return icons[type] || '📨';
-}
-
 function channelIcon(channel) {
   const icons = { 'Facebook Ads': '📘', 'Instagram Ads': '📸', 'Anuncio de Meta': '🎯', 'Publicación de Meta': '📝' };
   return icons[channel] || '💬';
@@ -691,6 +797,79 @@ function statusTick(status) {
   if (status === 'failed') return '⚠️';
   return '';
 }
+
+/** Color del acuse: solo "leído" se destaca; lo demás queda en tinta suave. */
+function tickClass(status) {
+  if (status === 'read') return 'is-read';
+  if (status === 'failed') return 'is-failed';
+  return '';
+}
+
+function statusLabel(status) {
+  const labels = { read: 'Leído', delivered: 'Entregado', sent: 'Enviado', failed: 'No se pudo entregar' };
+  return labels[status] || 'Enviando';
+}
+
+/** Iniciales para el avatar del contacto (dos como máximo). */
+function initialsOf(name) {
+  const clean = String(name || '').trim();
+  if (!clean) return '·';
+  if (/^\+?\d+$/.test(clean)) return clean.slice(-2);
+  return clean.split(/\s+/).slice(0, 2).map((word) => word[0]).join('').toUpperCase();
+}
+
+const CLOCK_FORMATTER = new Intl.DateTimeFormat('es-PE', { hour: 'numeric', minute: '2-digit', hour12: true });
+
+/** Solo la hora, para la firma de cada burbuja: "6:30 p.m.". */
+function formatClock(isoString) {
+  if (!isoString) return '';
+  return CLOCK_FORMATTER.format(new Date(isoString)).replace(/\./g, '').replace(/\s([ap])\s?m\b/i, ' $1.m.');
+}
+
+const DAY_FORMATTER = new Intl.DateTimeFormat('es-PE', { weekday: 'long', day: 'numeric', month: 'long' });
+
+/** "Hoy" / "Ayer" / "sábado, 5 de septiembre" para el separador de día. */
+function dayLabelOf(date) {
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (date.toDateString() === today.toDateString()) return 'Hoy';
+  if (date.toDateString() === yesterday.toDateString()) return 'Ayer';
+  return DAY_FORMATTER.format(date);
+}
+
+/**
+ * El hilo plano se agrupa en días y, dentro de cada día, en tandas seguidas
+ * del mismo lado. Los días son información real (el contacto necesita ver
+ * dónde termina una jornada); las tandas solo controlan el espaciado y qué
+ * burbuja lleva la esquina marcada, para que una respuesta de cinco líneas no
+ * se lea como cinco conversaciones distintas.
+ */
+const threadGroups = computed(() => {
+  const groups = [];
+  let day = null;
+  let run = null;
+
+  for (const msg of thread.value) {
+    const at = new Date(msg.received_at);
+    const dayKey = at.toDateString();
+
+    if (!day || day.key !== dayKey) {
+      day = { key: dayKey, label: dayLabelOf(at), runs: [] };
+      groups.push(day);
+      run = null;
+    }
+
+    const direction = msg.direction === 'outbound' ? 'outbound' : 'inbound';
+    if (!run || run.direction !== direction) {
+      run = { key: `${dayKey}-${msg.id}`, direction, messages: [] };
+      day.runs.push(run);
+    }
+    run.messages.push(msg);
+  }
+
+  return groups;
+});
 
 function signatureBadgeClass(event) {
   if (!event.hasSecret) return 'badge-neutral';
@@ -734,15 +913,19 @@ let pollTick = 0;
 
 onMounted(() => {
   fetchAll();
+  window.addEventListener('keydown', onActivityKeydown);
   pollHandle = setInterval(() => {
     if (!autoRefresh.value) return;
     pollTick += 1;
-    fetchAll({ silent: true, full: pollTick % POLL_FULL_EVERY === 0 });
+    // La bitácora se refresca en cada sondeo mientras el modal está abierto:
+    // es justo cuando se está mirando lo que hace el bot en vivo.
+    fetchAll({ silent: true, full: isActivityOpen.value || pollTick % POLL_FULL_EVERY === 0 });
   }, POLL_INTERVAL_MS);
 });
 
 onUnmounted(() => {
   if (pollHandle) clearInterval(pollHandle);
+  window.removeEventListener('keydown', onActivityKeydown);
 });
 </script>
 
@@ -920,48 +1103,85 @@ onUnmounted(() => {
 }
 
 /* Inbox */
+/* La bandeja ocupa casi todo el alto útil: es la herramienta principal de la
+   página, no una tarjeta más. El tope evita que en monitores muy altos el hilo
+   quede con metros de aire entre la cabecera y el compositor. */
 .whatsapp-inbox {
   display: flex;
   gap: 1rem;
-  height: 560px;
+  height: clamp(560px, 76vh, 860px);
 }
 
 .contacts-panel {
-  width: 280px;
+  width: 320px;
   flex-shrink: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
-  padding-right: 0.25rem;
+  gap: 0.35rem;
+  padding-right: 0.3rem;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.contacts-count {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 0.1rem 0.3rem 0.45rem;
 }
 
 .contact-item {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: 0.7rem;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 0.65rem 0.75rem;
+  border-radius: var(--radius-md);
+  padding: 0.7rem 0.8rem;
   cursor: pointer;
   text-align: left;
   color: var(--text-main);
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .contact-item:hover {
   background: var(--bg-card-hover);
 }
 
+.contact-item:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* El contacto abierto se marca con una barra de tinta a la izquierda en vez de
+   teñir toda la fila: se distingue de un vistazo sin competir con el hilo. */
 .contact-item.is-active {
-  border-color: var(--primary);
-  background: rgba(111, 129, 37, 0.12);
+  border-color: var(--border-strong);
+  background: var(--bg-card-hover);
+  box-shadow: inset 3px 0 0 var(--primary);
 }
 
 .contact-avatar {
-  font-size: 1.2rem;
+  width: 38px;
+  height: 38px;
   flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--text-sub);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.contact-item.is-active .contact-avatar {
+  background: var(--primary);
+  color: #ffffff;
 }
 
 .contact-info {
@@ -1054,149 +1274,335 @@ onUnmounted(() => {
 }
 
 .thread-header {
-  padding: 0.9rem 1.1rem;
+  padding: 0.75rem 1rem;
   border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  background: var(--bg-card);
+}
+
+.thread-avatar {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #ffffff;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.thread-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.thread-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.thread-sub {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
 }
 
-.bot-status-spacer {
-  flex: 1;
+.thread-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
 }
 
 .bot-status {
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   font-weight: 600;
-  color: var(--accent-cyan);
-  background: rgba(76, 134, 255, 0.12);
+  color: var(--primary);
+  background: rgba(111, 129, 37, 0.12);
+  border: 1px solid rgba(111, 129, 37, 0.25);
   border-radius: 999px;
-  padding: 0.2rem 0.6rem;
+  padding: 0.22rem 0.65rem;
   white-space: nowrap;
 }
 
-.btn-bot-toggle {
-  background: var(--surface-2);
-  color: var(--text-main);
+.btn-thread-action {
+  background: transparent;
+  color: var(--text-sub);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 0.35rem 0.7rem;
+  font-family: var(--font-body);
   font-size: 0.75rem;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
-.btn-bot-toggle:hover {
-  background: var(--surface-3);
+.btn-thread-action:hover {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+  color: var(--text-main);
 }
 
-.btn-bot-reset {
-  border-color: rgba(111, 129, 37, 0.4);
-  color: #B3CC66;
+.btn-thread-action:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
-.btn-bot-reset:hover {
-  background: rgba(111, 129, 37, 0.12);
-}
-
+/* Los datos duros del expediente (teléfono, horas, fechas) van en mono: es la
+   convención que ya usa el resto del panel para distinguir dato de prosa. */
 .thread-phone {
-  font-size: 0.78rem;
-  color: var(--text-sub);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+/* El área de mensajes es el único lugar de la página con fondo distinto al
+   de la tarjeta: así las burbujas se leen como objetos sobre una superficie y
+   no como párrafos sueltos dentro de un panel blanco. */
+.thread-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
 }
 
 .thread-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 1rem;
+  padding: 1.1rem 1.25rem 1.4rem;
+  background: var(--bg-page-alt);
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.day-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1.1rem 0 0.85rem;
+}
+
+.day-divider::before,
+.day-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-color);
+}
+
+.day-divider:first-child {
+  margin-top: 0;
+}
+
+.day-chip {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* Una "tanda" es lo que escribió el mismo lado seguido. Se separan poco entre
+   sí y mucho de la tanda contraria: eso es lo que hace que una respuesta de
+   cuatro burbujas se lea como un solo turno. */
+.msg-run {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.2rem;
+  margin-bottom: 0.85rem;
+}
+
+.msg-run.inbound {
+  align-items: flex-start;
+}
+
+.msg-run.outbound {
+  align-items: flex-end;
 }
 
 .bubble {
-  max-width: 70%;
-  padding: 0.55rem 0.8rem;
-  border-radius: 12px;
-  font-size: 0.85rem;
+  max-width: min(62ch, 78%);
+  padding: 0.55rem 0.75rem 0.4rem;
+  border-radius: var(--radius-md);
+  font-size: 0.855rem;
+  line-height: 1.5;
+  animation: bubble-in 0.16s ease-out;
 }
 
 .bubble.inbound {
-  align-self: flex-start;
-  background: var(--surface-2);
+  background: var(--bg-card);
   color: var(--text-main);
-  border-bottom-left-radius: 3px;
+  border: 1px solid var(--border-color);
 }
 
 .bubble.outbound {
-  align-self: flex-end;
   background: var(--primary);
   color: #ffffff;
+}
+
+/* Solo la última burbuja de la tanda lleva la esquina marcada, como la cola de
+   un bocadillo: señala dónde termina el turno. */
+.bubble.inbound.is-last {
+  border-bottom-left-radius: 3px;
+}
+
+.bubble.outbound.is-last {
   border-bottom-right-radius: 3px;
 }
 
+.bubble.is-failed {
+  border: 1px solid var(--accent-rose);
+}
+
 .bubble-text {
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
 .bubble-meta {
-  display: block;
-  font-size: 0.68rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.3rem;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  margin-top: 0.2rem;
+  opacity: 0.6;
+}
+
+.bubble.outbound .bubble-meta {
   opacity: 0.75;
-  margin-top: 0.25rem;
-  text-align: right;
+}
+
+.bubble-tick.is-read {
+  color: #9CD1F0;
+  opacity: 1;
+}
+
+.bubble-tick.is-failed {
+  color: var(--accent-rose);
+  opacity: 1;
 }
 
 .bubble-error {
   font-size: 0.72rem;
-  color: #E0A362;
-  background: rgba(0, 0, 0, 0.15);
-  border-radius: 6px;
+  color: var(--accent-rose);
+  background: var(--bg-card);
+  border-radius: var(--radius-sm);
   padding: 0.3rem 0.5rem;
-  margin-top: 0.3rem;
-  overflow-wrap: break-word;
+  margin-top: 0.35rem;
+  overflow-wrap: anywhere;
+}
+
+/* Aviso de mensajes nuevos cuando el operador subió a leer historial: se le
+   avisa en vez de arrastrarle la pantalla mientras lee. */
+.jump-latest {
+  position: absolute;
+  left: 50%;
+  bottom: 0.9rem;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--cta);
+  color: #ffffff;
+  border: none;
+  border-radius: 999px;
+  padding: 0.4rem 0.9rem;
+  font-family: var(--font-body);
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  animation: jump-in 0.18s ease-out;
+}
+
+.jump-latest:hover {
+  background: var(--cta-hover);
 }
 
 .reply-box {
   display: flex;
+  align-items: flex-end;
   gap: 0.6rem;
   padding: 0.75rem;
   border-top: 1px solid var(--border-color);
+  background: var(--bg-card);
 }
 
 .reply-input {
   flex: 1;
   resize: none;
-  background: var(--surface-2);
+  min-height: 42px;
+  max-height: 140px;
+  background: var(--surface-1);
   border: 1px solid var(--border-color);
-  border-radius: 10px;
-  padding: 0.55rem 0.75rem;
+  border-radius: var(--radius-md);
+  padding: 0.65rem 0.85rem;
   color: var(--text-main);
   font-family: var(--font-body);
-  font-size: 0.85rem;
+  font-size: 0.855rem;
+  line-height: 1.5;
 }
 
 .reply-input:focus {
   outline: none;
   border-color: var(--primary);
+  background: var(--bg-card);
 }
 
 .btn-send {
-  background: linear-gradient(135deg, var(--primary), var(--primary-hover));
+  background: var(--primary);
   color: #ffffff;
   border: none;
-  border-radius: 10px;
-  padding: 0 1.2rem;
+  border-radius: var(--radius-md);
+  padding: 0 1.3rem;
+  min-height: 42px;
   font-weight: 600;
   font-family: var(--font-heading);
+  font-size: 0.85rem;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background 0.15s ease;
 }
 
 .btn-send:hover:not(:disabled) {
-  filter: brightness(1.1);
+  background: var(--primary-hover);
+}
+
+.btn-send:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@keyframes bubble-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes jump-in {
+  from { opacity: 0; transform: translate(-50%, 6px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bubble,
+  .jump-latest {
+    animation: none;
+  }
 }
 
 .btn-send:disabled {
@@ -1421,36 +1827,14 @@ onUnmounted(() => {
   font-size: 0.75rem;
 }
 
-/* Activity feed */
-.btn-clear-activity {
-  background: transparent;
-  border: 1px solid var(--border-color);
-  color: var(--text-sub);
-  border-radius: 8px;
-  padding: 0.2rem 0.6rem;
-  font-size: 0.72rem;
-  cursor: pointer;
-  margin-left: 0.75rem;
-  vertical-align: middle;
-}
-
-.btn-clear-activity:hover {
-  color: var(--text-main);
-  background: var(--surface-2);
-}
-
-.activity-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-}
-
+/* Activity feed (dentro del modal) */
 .activity-card {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-left: 3px solid var(--border-color);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   padding: 0.75rem 1rem;
+  flex-shrink: 0;
 }
 
 .activity-card.activity-buffer {
@@ -1510,6 +1894,114 @@ onUnmounted(() => {
   color: #E0717C;
 }
 
+/* ---- Modal de actividad del bot ---- */
+
+.btn-count {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  background: var(--surface-3);
+  color: var(--text-sub);
+  border-radius: 999px;
+  padding: 0.05rem 0.4rem;
+  margin-left: 0.35rem;
+}
+
+.activity-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(16, 20, 20, 0.45);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+}
+
+.activity-modal {
+  width: min(880px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.activity-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 1rem 1.1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.activity-modal-titles {
+  flex: 1;
+  min-width: 0;
+}
+
+.activity-modal-title {
+  font-family: var(--font-heading);
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.activity-modal-sub {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  margin: 0.15rem 0 0;
+}
+
+.activity-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  color: var(--text-sub);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-modal-close {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-sub);
+  width: 32px;
+  height: 32px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.btn-modal-close:hover {
+  background: var(--surface-2);
+  color: var(--text-main);
+}
+
+.activity-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem 1.1rem 1.25rem;
+  background: var(--bg-page-alt);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.activity-empty {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  text-align: center;
+  padding: 2.5rem 1rem;
+}
+
 @media (max-width: 900px) {
   .whatsapp-inbox {
     flex-direction: column;
@@ -1518,11 +2010,16 @@ onUnmounted(() => {
 
   .contacts-panel {
     width: 100%;
-    max-height: 220px;
+    max-height: 240px;
   }
 
   .thread-panel {
-    height: 480px;
+    height: 70vh;
+    min-height: 460px;
+  }
+
+  .bubble {
+    max-width: 88%;
   }
 }
 

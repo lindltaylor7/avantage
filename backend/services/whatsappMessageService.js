@@ -344,7 +344,15 @@ export class WhatsappMessageService {
   async getThread(waId, { limit = 200, since = null } = {}) {
     let query = db('whatsapp_messages').where({ wa_id: waId });
     if (since) query = query.where('received_at', '>=', since);
-    return query.orderBy('received_at', 'asc').limit(limit);
+
+    // Se piden los ÚLTIMOS `limit` mensajes y recién después se ordenan
+    // ascendente para pintarlos. Con `orderBy('asc').limit()` se devolvían los
+    // 200 mensajes MÁS ANTIGUOS del contacto: en un hilo largo lo nuevo no
+    // llegaba nunca al panel por más que se refrescara. El desempate por `id`
+    // tampoco es opcional — varias burbujas caen en el mismo segundo y sin él
+    // el orden entre ellas cambiaba de un sondeo a otro.
+    const rows = await query.orderBy('received_at', 'desc').orderBy('id', 'desc').limit(limit);
+    return rows.reverse();
   }
 
   async getStats() {
