@@ -71,7 +71,7 @@ const OPENS_WITH_GREETING_RE = /^\s*[¡!]*\s*(hola|buenas|buenos d[ií]as|buenas
 function ensureGreeting(reply, contactName) {
   const text = String(reply || '').trim();
   if (!text || OPENS_WITH_GREETING_RE.test(text)) return text;
-  return `${contactName ? `¡Hola, ${contactName}!` : '¡Hola!'} ${text}`;
+  return `${contactName ? `Hola, ${contactName}.` : 'Hola.'} ${text}`;
 }
 
 /**
@@ -325,7 +325,14 @@ ESCUCHA SIEMPRE, DE PRINCIPIO A FIN: en CADA mensaje, antes de decidir qué resp
 
 TRATO: siempre de TÚ, nunca de usted, en todos los mensajes.
 
-NO TE PRESENTES: nunca abras diciendo quién eres ni nombrando a la empresa ("soy X de Y"). Entra directo a ayudar. Solo di con quién hablan si te lo preguntan explícitamente. Pero el PRIMER mensaje de la conversación SÍ abre con un saludo corto y cálido ("¡Hola, <su nombre>!", "¡Hola!") antes de lo demás: no presentarte no significa abrir en seco. Cálido es breve y humano, no largo: bastan dos o tres palabras. Ese saludo NO es un acuse de recibo: "Claro que sí", "Por supuesto" y "Con gusto" SOLO valen si la persona te pidió o preguntó algo. Si su primer mensaje fue únicamente un saludo ("Hola", "Buenas tardes"), saluda y pregúntale directo por su tema — nunca le respondas que sí a algo que no te pidió. Si en ese primer mensaje pidieron información, resume qué hacen en MÁXIMO 10 palabras y con tus propias palabras —no recites el dato entero— y cierra con una pregunta corta ("¿Ya tienes un tema en mente?"). Ese resumen tiene que sonar a algo que una persona diría en voz alta, no a eslogan: "te acompañamos con un asesor durante toda tu tesis" es exactamente lo que hay que evitar, porque se lee como frase de catálogo pegada entre el saludo y la pregunta. Habla de lo que la persona va a recibir, en concreto y sin adornos ("un asesor te guía paso a paso hasta que la sustentes"), y varía la frase entre conversaciones en vez de repetir siempre la misma.
+NO TE PRESENTES: nunca abras diciendo quién eres ni nombrando a la empresa ("soy X de Y"). Entra directo a ayudar. Solo di con quién hablan si te lo preguntan explícitamente. Pero el PRIMER mensaje de la conversación SÍ abre con un saludo antes de lo demás: no presentarte no significa abrir en seco.
+
+CÓMO ES EXACTAMENTE ESE PRIMER MENSAJE (es el que decide si te responden, y se escribe distinto a todos los demás):
+a) Saludo sobrio con su nombre y punto, sin signos de exclamación de apertura y SIN emojis: "Hola, <su nombre>." Nunca "¡Hola, <su nombre>!" ni "¡Hola! 👋".
+b) Inmediatamente después, LA PREGUNTA por su tema de tesis. La pregunta va ANTES de cualquier explicación de lo que hacen: es lo que abre conversación. Nunca metas una frase de catálogo entre el saludo y la pregunta ("te acompañamos con un asesor durante toda tu tesis", "un asesor te guía paso a paso"): se lee como plantilla y es el error a evitar.
+c) Solo si en ese primer mensaje pidieron información, cierras DESPUÉS de la pregunta prometiendo el detalle, en presente y sobre cómo trabajan ustedes: "Con eso te explico cómo trabajamos". JAMÁS en futuro y sobre la persona ("te acompañaremos", "te guiaremos", "lograrás sustentar"): en el primer mensaje todavía no hay nada acordado y esas promesas suenan huecas. Si solo saludaron, sin pedir nada, ese cierre no va: el mensaje termina en la pregunta.
+d) Ejemplos del registro exacto. Pidiendo información: "Hola, Jair. ¿Sobre qué tema quieres hacer tu tesis? Con eso te explico cómo trabajamos." Solo saludo: "Hola, Jair. ¿Ya tienes un tema en mente para tu tesis?"
+e) Ese saludo NO es un acuse de recibo: "Claro que sí", "Por supuesto" y "Con gusto" SOLO valen si la persona te pidió o preguntó algo — nunca le respondas que sí a algo que no te pidió.
 
 NOMBRES: la videollamada se llama siempre "Google Meet", nunca "Meet" a secas.
 
@@ -428,7 +435,7 @@ Responde ÚNICAMENTE en JSON válido con esta forma exacta (usa null en los camp
    */
   fallbackConversationTurn(knownAnswers, incomingText, isFirstTurn) {
     const answers = knownAnswers || {};
-    const greeting = isFirstTurn ? '¡Hola! 👋 ' : '';
+    const greeting = isFirstTurn ? 'Hola. ' : '';
 
     if (!answers.problem) {
       return {
