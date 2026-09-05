@@ -12,7 +12,7 @@
       </div>
 
       <div class="header-actions">
-        <button class="btn-action-secondary" @click="fetchAll" :disabled="isLoading" title="Actualizar ahora">
+        <button class="btn-action-secondary" @click="fetchAll()" :disabled="isLoading" title="Actualizar ahora">
           <span :class="['btn-icon', { 'spin-animation': isLoading }]">🔄</span>
           {{ isLoading ? 'Cargando...' : 'Actualizar' }}
         </button>
@@ -445,12 +445,22 @@ const botStatusHint = computed(() => {
   return 'Avan está conversando automáticamente con este contacto.';
 });
 
+/**
+ * Asigna solo si el contenido cambió de verdad. Sin esto, cada sondeo
+ * reemplazaba los arrays enteros y Vue volvía a renderizar la bandeja y el
+ * hilo aunque no hubiera nada nuevo (parpadeo y saltos de scroll).
+ */
+function assignIfChanged(target, next) {
+  const serialized = JSON.stringify(next);
+  if (JSON.stringify(target.value) !== serialized) target.value = next;
+}
+
 async function fetchConversations() {
   try {
     const response = await apiFetch('/api/whatsapp/conversations');
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Error al obtener las conversaciones.');
-    conversations.value = data.conversations || [];
+    assignIfChanged(conversations, data.conversations || []);
   } catch (error) {
     errorMessage.value = error.message;
   }
@@ -461,7 +471,7 @@ async function fetchStats() {
     const response = await apiFetch('/api/whatsapp/messages?limit=1');
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Error al obtener las estadísticas.');
-    stats.value = data.stats || { total: 0, contacts: 0 };
+    assignIfChanged(stats, data.stats || { total: 0, contacts: 0 });
   } catch (error) {
     errorMessage.value = error.message;
   }
@@ -472,7 +482,7 @@ async function fetchThread(waId, { scrollToBottom = false } = {}) {
     const response = await apiFetch(`/api/whatsapp/conversations/${encodeURIComponent(waId)}/messages`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Error al obtener el hilo.');
-    thread.value = data.messages || [];
+    assignIfChanged(thread, data.messages || []);
     if (scrollToBottom) {
       await nextTick();
       threadScrollEl.value?.scrollTo({ top: threadScrollEl.value.scrollHeight });
@@ -487,7 +497,7 @@ async function fetchBotSession(waId) {
     const response = await apiFetch(`/api/whatsapp/conversations/${encodeURIComponent(waId)}/bot`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Error al obtener el estado del bot.');
-    botSession.value = data.session;
+    assignIfChanged(botSession, data.session);
   } catch (error) {
     errorMessage.value = error.message;
   }
@@ -567,7 +577,7 @@ async function fetchRawEvents() {
     const response = await apiFetch('/api/webhooks/whatsapp/events');
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Error al obtener los eventos.');
-    rawEvents.value = data.events || [];
+    assignIfChanged(rawEvents, data.events || []);
   } catch (error) {
     errorMessage.value = error.message;
   }
@@ -589,7 +599,7 @@ async function fetchBotActivity() {
     const response = await apiFetch('/api/whatsapp/bot-activity');
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Error al obtener la actividad del bot.');
-    botActivity.value = data.activity || [];
+    assignIfChanged(botActivity, data.activity || []);
   } catch (error) {
     errorMessage.value = error.message;
   }
@@ -635,13 +645,26 @@ async function sendSimulatedMessage() {
   }
 }
 
-async function fetchAll() {
-  isLoading.value = true;
+/**
+ * Refresco del panel.
+ *
+ * `silent` es para los sondeos automáticos: no enciende el estado de carga,
+ * que era lo que hacía parpadear el botón y los estados vacíos cada pocos
+ * segundos. `full` trae además lo que no cambia casi nunca (configuración) o
+ * es de diagnóstico (bitácora del bot, eventos crudos del webhook): eso solo
+ * se pide al entrar, al pulsar "Actualizar" y cada POLL_FULL_EVERY sondeos,
+ * en vez de en cada uno.
+ */
+async function fetchAll({ silent = false, full = true } = {}) {
+  if (!silent) isLoading.value = true;
   errorMessage.value = '';
-  const tasks = [fetchConversations(), fetchStats(), fetchRawEvents(), fetchConfigStatus(), fetchBotActivity()];
+
+  const tasks = [fetchConversations()];
   if (selectedWaId.value) tasks.push(fetchThread(selectedWaId.value), fetchBotSession(selectedWaId.value));
+  if (full) tasks.push(fetchStats(), fetchRawEvents(), fetchBotActivity(), fetchConfigStatus());
+
   await Promise.all(tasks);
-  isLoading.value = false;
+  if (!silent) isLoading.value = false;
 }
 
 function iconFor(type) {
@@ -703,11 +726,19 @@ function formatBody(body) {
   return JSON.stringify(body, null, 2);
 }
 
+// Cada cuántos sondeos se refresca también lo pesado/estático (estadísticas,
+// bitácora del bot, eventos del webhook y configuración).
+const POLL_INTERVAL_MS = 5000;
+const POLL_FULL_EVERY = 6;
+let pollTick = 0;
+
 onMounted(() => {
   fetchAll();
   pollHandle = setInterval(() => {
-    if (autoRefresh.value) fetchAll();
-  }, 4000);
+    if (!autoRefresh.value) return;
+    pollTick += 1;
+    fetchAll({ silent: true, full: pollTick % POLL_FULL_EVERY === 0 });
+  }, POLL_INTERVAL_MS);
 });
 
 onUnmounted(() => {

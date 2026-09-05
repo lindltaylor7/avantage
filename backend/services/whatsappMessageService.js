@@ -301,12 +301,37 @@ export class WhatsappMessageService {
     const rows = await db('whatsapp_messages').whereNotNull('wa_id').where('wa_id', '!=', '').orderBy('received_at', 'asc');
     const map = new Map();
     for (const row of rows) {
-      const originChannel = map.get(row.wa_id)?.origin_channel ?? row.channel;
-      map.set(row.wa_id, { ...row, origin_channel: originChannel });
+      const prev = map.get(row.wa_id);
+      map.set(row.wa_id, {
+        ...row,
+        origin_channel: prev?.origin_channel ?? row.channel,
+        // El nombre del perfil de WhatsApp solo viaja en los mensajes
+        // ENTRANTES que traen el bloque "contacts"; los salientes lo dejan en
+        // null. Como aquí gana el último mensaje del contacto, la primera
+        // respuesta del bot borraba el nombre de la bandeja y volvía a
+        // aparecer el número. Se conserva el último nombre conocido.
+        contact_name: row.contact_name || prev?.contact_name || null
+      });
     }
-    return [...map.values()]
+
+    const conversations = [...map.values()]
       .sort((a, b) => new Date(b.received_at) - new Date(a.received_at))
       .slice(0, limit);
+
+    // Respaldo para los contactos cuyos mensajes nunca trajeron el nombre
+    // (p. ej. los guardados antes de que se registrara): se usa el del lead,
+    // ignorando el placeholder que se pone cuando WhatsApp no compartió uno.
+    const sinNombre = conversations.filter((c) => !c.contact_name).map((c) => c.wa_id);
+    if (sinNombre.length > 0) {
+      const leads = await db('leads').whereIn('phone', sinNombre).select('phone', 'full_name');
+      const porTelefono = new Map(leads.map((l) => [l.phone, l.full_name]));
+      for (const conversation of conversations) {
+        const nombre = porTelefono.get(conversation.wa_id);
+        if (nombre && nombre !== 'Contacto de WhatsApp') conversation.contact_name = nombre;
+      }
+    }
+
+    return conversations;
   }
 
   /**
