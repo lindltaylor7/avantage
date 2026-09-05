@@ -1038,8 +1038,8 @@ export class WhatsappBotService {
         };
       case 'scheduling_email':
         return {
-          question: '¿A qué correo te envío el link de Google Meet?',
-          restate: 'Y para mandarte el link de Google Meet, ¿a qué correo te lo envío?'
+          question: '¿A qué correo te mando la invitación al calendario?',
+          restate: 'Y para mandarte la invitación al calendario, ¿a qué correo te la envío? Si prefieres, dime "no" y te dejo el link por aquí.'
         };
       case 'scheduling_date': {
         const phrase = scheduling.availableWindows || this._availableDaysPhrase(scheduling.availableDays || []) || 'los próximos días';
@@ -1208,7 +1208,7 @@ export class WhatsappBotService {
       if (exact) {
         await this.updateSession(waId, { answers: JSON.stringify(answers) });
         this.logActivity({ type: 'exact_time_booked', waId, when: text, slot: exact.label });
-        await this.confirmSlot(waId, exact);
+        await this.bookSlot(waId, exact);
         return true;
       }
 
@@ -1333,7 +1333,7 @@ export class WhatsappBotService {
             if (exact) {
               await this.updateSession(waId, { answers: JSON.stringify(answers) });
               this.logActivity({ type: 'exact_time_booked', waId, when: requested, slot: exact.label });
-              await this.confirmSlot(waId, exact);
+              await this.bookSlot(waId, exact);
               return;
             }
 
@@ -1435,14 +1435,13 @@ export class WhatsappBotService {
       return;
     }
 
-    // mode === 'meet'
-    if (looksLikeEmail(scheduling.email)) {
-      await this.updateSession(waId, { answers: JSON.stringify(answers) });
-      await this.promptForDate(waId);
-    } else {
-      await this.updateSession(waId, { status: 'scheduling_email', answers: JSON.stringify(answers) });
-      await this.send(waId, `Listo, queda con el ${MEET_DISCOUNT_PCT}% de descuento sobre el precio final ✉️ ¿A qué correo te envío el link de Google Meet?`);
-    }
+    // mode === 'meet'. El correo ya NO se pide aquí: escribirlo es lo más caro
+    // de todo el flujo en un celular, y pedirlo antes de saber si hay un
+    // horario que le sirva es cobrar la fricción por adelantado. Se pide al
+    // final, cuando ya eligió su horario (ver `bookSlot`).
+    await this.updateSession(waId, { answers: JSON.stringify(answers) });
+    await this.send(waId, `Listo, queda con el ${MEET_DISCOUNT_PCT}% de descuento sobre el precio final 🙌`);
+    await this.promptForDate(waId);
   }
 
   /** Captura el número de teléfono para la llamada telefónica. */
@@ -1478,7 +1477,9 @@ export class WhatsappBotService {
     if (foundEmail) {
       scheduling.email = foundEmail;
     } else if (this._isSchedulingRefusal(trimmed) || normalize(trimmed).includes('no tengo')) {
-      // Sigue sin correo: el link de Google Meet se le manda por acá mismo.
+      // Sigue sin correo: el link de Google Meet se le manda por acá mismo. Se
+      // marca para no volver a pedírselo si vuelve a pasar por este paso.
+      scheduling.emailSkipped = true;
     } else {
       scheduling.emailAttempts = (scheduling.emailAttempts || 0) + 1;
       if (scheduling.emailAttempts < 2) {
@@ -1487,6 +1488,18 @@ export class WhatsappBotService {
         return;
       }
       // Tras 2 intentos fallidos, se continúa sin correo.
+      scheduling.emailSkipped = true;
+    }
+
+    // Con el horario ya elegido, este era el último dato: se agenda. El
+    // `else` cubre las sesiones que venían del orden anterior (correo antes
+    // del día) y que siguen vivas en la base cuando se despliega este cambio.
+    const pendingSlot = scheduling.pendingSlot;
+    if (pendingSlot) {
+      delete scheduling.pendingSlot;
+      await this.updateSession(waId, { answers: JSON.stringify(answers) });
+      await this.confirmSlot(waId, pendingSlot);
+      return;
     }
 
     await this.updateSession(waId, { answers: JSON.stringify(answers) });
@@ -1608,7 +1621,7 @@ export class WhatsappBotService {
       scheduling.slots = daySlots;
       await this.updateSession(waId, { answers: JSON.stringify(answers) });
       this.logActivity({ type: 'exact_time_booked', waId, when: trimmed, slot: exact.label });
-      await this.confirmSlot(waId, exact);
+      await this.bookSlot(waId, exact);
       return;
     }
 
@@ -1697,7 +1710,7 @@ export class WhatsappBotService {
       return;
     }
 
-    return this.confirmSlot(waId, slot);
+    return this.bookSlot(waId, slot);
   }
 
   /**
@@ -1707,6 +1720,36 @@ export class WhatsappBotService {
    * confirma al contacto. Se llama tanto cuando elige un número de la lista
    * como cuando ya había dicho una hora exacta que estaba libre.
    */
+  /**
+   * Último paso antes de crear el evento. Si la reunión es por Meet y todavía
+   * no tenemos su correo, se le pide AQUÍ y no al principio: ya eligió su
+   * horario, así que la pregunta deja de ser un peaje y pasa a ser el cierre
+   * de algo que ya está hecho. El horario elegido se guarda mientras tanto.
+   *
+   * Se pide por la invitación al calendario, que es lo que el correo compra de
+   * verdad — el link de Meet le llega por WhatsApp igual—, y se le dice que
+   * puede saltarlo: el paso ya aceptaba "no", pero nada lo anunciaba.
+   */
+  async bookSlot(waId, slot) {
+    const session = await this.getSession(waId);
+    const { answers, scheduling } = this._readScheduling(session);
+    if (!scheduling) { await this.updateSession(waId, { status: 'completed' }); return; }
+
+    const needsEmail = scheduling.mode === 'meet' && !looksLikeEmail(scheduling.email) && !scheduling.emailSkipped;
+    if (!needsEmail) return this.confirmSlot(waId, slot);
+
+    scheduling.pendingSlot = slot;
+    await this.updateSession(waId, { status: 'scheduling_email', answers: JSON.stringify(answers) });
+    // "Perfecto: <horario>" y no "queda agendada": el evento todavía no existe
+    // hasta que conteste, y darlo por hecho aquí dejaría a quien no responde
+    // creyendo que tiene una reunión.
+    await this.send(
+      waId,
+      `Perfecto: *${slot.label}* ✉️ ¿A qué correo te mando la invitación al calendario? ` +
+      'Si prefieres, dime "no" y te dejo el link por aquí.'
+    );
+  }
+
   async confirmSlot(waId, slot) {
     const session = await this.getSession(waId);
     const { answers, scheduling } = this._readScheduling(session);
