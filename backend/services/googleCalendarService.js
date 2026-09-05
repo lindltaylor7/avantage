@@ -25,6 +25,16 @@ function formatSlotLabel(date) {
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
+// Solo la hora, para las listas de opciones de un mismo día: repetir "Sáb, 5
+// set" en las tres alternativas es ruido cuando el día ya se dijo arriba.
+const SLOT_TIME_FORMATTER = new Intl.DateTimeFormat('es-PE', {
+  timeZone: 'America/Lima', hour: 'numeric', minute: '2-digit', hour12: true
+});
+
+function formatSlotTime(date) {
+  return SLOT_TIME_FORMATTER.format(date).replace(/\./g, '').replace(/\s([ap])\s?m\b/, ' $1.m.');
+}
+
 const LIMA_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit'
 });
@@ -70,6 +80,7 @@ function toFreeSlot(slot) {
     startTime: slot.start.toISOString(),
     endTime: slot.end.toISOString(),
     label: formatSlotLabel(slot.start),
+    timeLabel: formatSlotTime(slot.start),
     date: limaDateOf(slot.start)
   };
 }

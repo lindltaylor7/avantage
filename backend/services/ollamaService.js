@@ -47,6 +47,34 @@ function describeMissingPriority(knownAnswers) {
 }
 
 /**
+ * "a las 5" en un contexto de reuniones comerciales son las 5 de la TARDE, no
+ * las 5 de la mañana. El LLM devuelve a veces "05:00" y el lead terminaba con
+ * horarios de madrugada. Si el texto original no dice explícitamente que es de
+ * mañana, una hora entre la 1 y las 7 se corre a la tarde.
+ */
+function normalizeBusinessHour(hhmm, sourceText) {
+  if (!hhmm) return hhmm;
+  const [h, m] = hhmm.split(':').map(Number);
+  if (!Number.isFinite(h) || h < 1 || h > 7) return hhmm;
+  if (/\b(a\.?\s?m|de la ma[nñ]ana|en la ma[nñ]ana|temprano|madrugada|amanecer)\b/i.test(String(sourceText || ''))) return hhmm;
+  return `${String(h + 12).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+const OPENS_WITH_GREETING_RE = /^\s*[¡!]*\s*(hola|buenas|buenos d[ií]as|buenas tardes|buenas noches|buen d[ií]a|qu[eé] tal)\b/i;
+
+/**
+ * El primer mensaje tiene que abrir con un saludo. La instrucción está en el
+ * prompt, pero el modelo la cumple de forma intermitente (sobre todo desde que
+ * se le prohibió presentarse), y abrir en seco con una explicación se siente
+ * brusco. Si no saluda, se le antepone el saludo — sin presentación.
+ */
+function ensureGreeting(reply, contactName) {
+  const text = String(reply || '').trim();
+  if (!text || OPENS_WITH_GREETING_RE.test(text)) return text;
+  return `${contactName ? `¡Hola, ${contactName}!` : '¡Hola!'} ${text}`;
+}
+
+/**
  * Genera un embedding sintético determinista de 384 dimensiones para análisis semántico local
  */
 function generateFallbackEmbedding(text) {
@@ -297,7 +325,7 @@ ESCUCHA SIEMPRE, DE PRINCIPIO A FIN: en CADA mensaje, antes de decidir qué resp
 
 TRATO: siempre de TÚ, nunca de usted, en todos los mensajes.
 
-NO TE PRESENTES: nunca abras diciendo quién eres ni nombrando a la empresa ("soy X de Y"). Entra directo a ayudar. Solo di con quién hablan si te lo preguntan explícitamente.
+NO TE PRESENTES: nunca abras diciendo quién eres ni nombrando a la empresa ("soy X de Y"). Entra directo a ayudar. Solo di con quién hablan si te lo preguntan explícitamente. Pero el PRIMER mensaje de la conversación SÍ empieza con un saludo breve ("¡Hola!", o "¡Hola, <su nombre>!") antes de lo demás: no presentarte no significa abrir en seco.
 
 NOMBRES: la videollamada se llama siempre "Google Meet", nunca "Meet" a secas.
 
@@ -379,7 +407,7 @@ Responde ÚNICAMENTE en JSON válido con esta forma exacta (usa null en los camp
 
       console.log(`✅ [Ollama Cloud LLM] Turno de Avan generado por ${this.chatModel}`);
       return {
-        reply: parsed.reply,
+        reply: isFirstTurn ? ensureGreeting(parsed.reply, contactName) : parsed.reply,
         extracted: parsed.extracted || {},
         ready: !!parsed.ready,
         schedulingIntent: !!parsed.schedulingIntent,
@@ -484,7 +512,7 @@ Alguien acaba de responder esto cuando le preguntaron qué día prefiere para un
 
 Interpreta a qué fecha se refiere (puede decir "hoy", "mañana", "pasado mañana", "el jueves", "el 28", una fecha explícita, etc.) y conviértela a formato YYYY-MM-DD. La fecha debe estar entre hoy (${todayIso}) y ${maxDaysAhead} días después como máximo. Si pide un día más lejano, igual devuélvelo tal cual (el sistema le explicará el límite). Si el texto NO expresa ningún día concreto (ej. "cuando puedas", "no sé", o simplemente no habla de fechas), responde null.
 
-Además, si junto con el día también dijo una HORA o un momento del día (ej. "hoy a las 6 pm", "mañana temprano", "el jueves por la tarde"), extráela en formato 24h "HH:MM" en "preferredTime" (usa una hora representativa: "temprano"/"en la mañana" ~ "09:00", "en la tarde" ~ "15:00", "de noche"/"tarde" ~ "20:00"). Si no dijo ninguna hora, deja preferredTime en null.
+Además, si junto con el día también dijo una HORA o un momento del día (ej. "hoy a las 6 pm", "mañana temprano", "el jueves por la tarde"), extráela en formato 24h "HH:MM" en "preferredTime" (usa una hora representativa: "temprano"/"en la mañana" ~ "09:00", "en la tarde" ~ "15:00", "de noche"/"tarde" ~ "20:00"). Si no dijo ninguna hora, deja preferredTime en null. Las reuniones son en horario comercial: una hora sin "am"/"pm" entre la 1 y las 7 SIEMPRE es de la tarde ("a las 5" = "17:00"), salvo que diga explícitamente que es de la mañana.
 
 Responde ÚNICAMENTE en JSON válido: {"date": "YYYY-MM-DD" o null, "preferredTime": "<HH:MM o null>"}`;
 
@@ -507,7 +535,7 @@ Responde ÚNICAMENTE en JSON válido: {"date": "YYYY-MM-DD" o null, "preferredTi
       const parsed = JSON.parse(cleanResponse);
       const date = typeof parsed.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.date) ? parsed.date : null;
       const preferredTime = typeof parsed.preferredTime === 'string' && /^\d{2}:\d{2}$/.test(parsed.preferredTime) ? parsed.preferredTime : null;
-      return { date, preferredTime, source: 'llm' };
+      return { date, preferredTime: normalizeBusinessHour(preferredTime, text), source: 'llm' };
     } catch (err) {
       console.warn('Ollama Cloud LLM date parsing notice:', err.message);
       return this.fallbackParseSchedulingDate(text, todayIso);
@@ -615,7 +643,7 @@ Responde ÚNICAMENTE en JSON válido: {"index": <número de 1 a ${optionLabels.l
       const parsed = JSON.parse(cleanResponse);
       const index = Number.isInteger(parsed.index) && parsed.index >= 1 && parsed.index <= optionLabels.length ? parsed.index - 1 : null;
       const preferredTime = typeof parsed.preferredTime === 'string' && /^\d{2}:\d{2}$/.test(parsed.preferredTime) ? parsed.preferredTime : null;
-      return { index, preferredTime, source: 'llm' };
+      return { index, preferredTime: normalizeBusinessHour(preferredTime, text), source: 'llm' };
     } catch (err) {
       console.warn('Ollama Cloud LLM scheduling choice notice:', err.message);
       return this.fallbackParseSchedulingChoice(text, optionLabels);

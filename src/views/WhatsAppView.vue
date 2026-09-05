@@ -185,6 +185,10 @@
           Pidió agendar, así que se pasa directo a proponer la reunión sin seguir preguntando datos.
           <template v-if="entry.when"><br />🕐 Momento que indicó: "{{ entry.when }}"</template>
         </p>
+        <p v-else-if="entry.type === 'exact_time_booked'" class="activity-text activity-hint">
+          Pidió "{{ entry.when }}" y ese bloque estaba libre, así que se agendó <strong>{{ entry.slot }}</strong>
+          sin ofrecerle una lista para volver a elegir.
+        </p>
         <p v-else-if="entry.type === 'buffer_extended'" class="activity-text activity-hint">
           "{{ entry.text }}" es solo un saludo, así que se esperan {{ Math.round(entry.waitMs / 1000) }} s más
           por el mensaje real en vez de gastar un turno respondiéndolo.
@@ -380,7 +384,8 @@ const ACTIVITY_META = {
   preferred_when_failed: { icon: '⚠️', label: 'No se pudo interpretar el día/hora que pidió', className: 'activity-error-card' },
   preferred_when_captured: { icon: '🕐', label: 'Anotado el día/hora que pidió', className: 'activity-ok' },
   redundant_question_fixed: { icon: '🛡️', label: 'Se corrigió una pregunta repetida', className: 'activity-ok' },
-  buffer_extended: { icon: '⏳', label: 'Solo un saludo: se espera un poco más', className: 'activity-buffer' }
+  buffer_extended: { icon: '⏳', label: 'Solo un saludo: se espera un poco más', className: 'activity-buffer' },
+  exact_time_booked: { icon: '⚡', label: 'La hora que pidió estaba libre: se agendó directo', className: 'activity-ok' }
 };
 
 function activityIcon(type) {

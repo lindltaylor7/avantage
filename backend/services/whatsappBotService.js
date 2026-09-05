@@ -196,6 +196,21 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Etiquetas para la lista numerada de horarios. Si los tres bloques caen el
+ * mismo día (el caso normal, y el día ya se nombró en la frase de arriba) se
+ * muestra solo la hora: repetir "Sáb, 5 set" tres veces es ruido. Si hay
+ * varios días, cada opción lleva su fecha para que no se confundan.
+ *
+ * `timeLabel` puede faltar en sesiones guardadas antes de este cambio; en ese
+ * caso se cae a la etiqueta completa.
+ */
+function slotOptionLabels(slots) {
+  const list = slots || [];
+  const sameDay = list.length > 0 && list.every((slot) => slot.date === list[0].date);
+  return list.map((slot) => (sameDay && slot.timeLabel) ? slot.timeLabel : slot.label);
+}
+
 function numberedList(items) {
   return items.map((item, i) => `${i + 1}. ${item}`).join('\n');
 }
@@ -947,7 +962,7 @@ export class WhatsappBotService {
         };
       }
       case 'scheduling_time': {
-        const list = numberedList((scheduling.slots || []).map((slot) => slot.label));
+        const list = numberedList(slotOptionLabels(scheduling.slots));
         return {
           question: `¿Cuál de estos horarios prefieres?\n${list}`,
           restate: `Volviendo a los horarios:\n\n${list}\n\nResponde con el número que prefieras, o "no" si prefieres que te contacten después.`
@@ -1080,18 +1095,41 @@ export class WhatsappBotService {
       delete scheduling.when;
       try {
         const { date, preferredTime } = await this.ollamaService.parseSchedulingDate(requested, limaTodayIso(), MAX_BOOKING_DAYS_AHEAD);
-        if (date && days.includes(date)) {
-          const slots = await this.googleCalendarService.getFreeSlotsForDate(BOOKING_ADVISOR_USER_ID, date, { limit: SLOTS_TO_OFFER, nearTime: preferredTime });
+
+        // Puede haber dicho el día ("hoy a las 5"), solo la hora ("a las 5
+        // porfa") o solo el día. Si solo dijo la hora, se asume el primer día
+        // con agenda —hoy, si tiene espacio—, que es lo que espera alguien
+        // que pide una reunión "a las 5" sin más.
+        const explicitDate = date && days.includes(date) ? date : null;
+        const targetDate = explicitDate || (preferredTime ? days[0] : null);
+
+        if (targetDate) {
+          const slots = await this.googleCalendarService.getFreeSlotsForDate(BOOKING_ADVISOR_USER_ID, targetDate, { limit: SLOTS_TO_OFFER, nearTime: preferredTime });
           if (slots.length > 0) {
-            const gotExactTime = preferredTime ? slots.some((slot) => limaTimeOf(slot.startTime) === preferredTime) : true;
+            // La hora exacta que pidió está libre: no tiene sentido ofrecerle
+            // una lista para que vuelva a elegir lo que ya eligió. Se agenda.
+            const exact = preferredTime ? slots.find((slot) => limaTimeOf(slot.startTime) === preferredTime) : null;
+            if (exact) {
+              await this.updateSession(waId, { answers: JSON.stringify(answers) });
+              this.logActivity({ type: 'exact_time_booked', waId, when: requested, slot: exact.label });
+              await this.confirmSlot(waId, exact);
+              return;
+            }
+
+            let intro;
+            if (!preferredTime) {
+              intro = `📅 Perfecto, para ${dayLabelWithArticle(targetDate)} tengo:`;
+            } else if (explicitDate) {
+              intro = `A las ${formatClockLabel(preferredTime)} no tengo libre ${dayLabelWithArticle(targetDate)} 🙈 Estos son los más cercanos:`;
+            } else {
+              intro = `A las ${formatClockLabel(preferredTime)} no tengo libre 🙈 Lo más cercano que tengo para ${dayLabelWithArticle(targetDate)}:`;
+            }
+
             scheduling.slots = slots;
             await this.updateSession(waId, { status: 'scheduling_time', answers: JSON.stringify(answers) });
             await this.send(
               waId,
-              (gotExactTime
-                ? `📅 Perfecto, para ${dayLabelWithArticle(date)} tengo:`
-                : `A las ${formatClockLabel(preferredTime)} no tengo libre ${dayLabelWithArticle(date)} 🙈 Estos son los más cercanos:`) +
-              `\n\n${numberedList(slots.map((slot) => slot.label))}\n\n` +
+              `${intro}\n\n${numberedList(slotOptionLabels(slots))}\n\n` +
               'Responde con el número que prefieras, o "no" si prefieres que te contacten después.'
             );
             return;
@@ -1112,7 +1150,7 @@ export class WhatsappBotService {
       await this.send(
         waId,
         `📅 Tenemos agenda para ${dayLabelWithArticle(day)}. Estos son los horarios:\n\n` +
-        `${numberedList(slots.map((s) => s.label))}\n\n` +
+        `${numberedList(slotOptionLabels(slots))}\n\n` +
         'Responde con el número que prefieras, o "no" si prefieres que te contacten después.'
       );
       return;
@@ -1301,9 +1339,20 @@ export class WhatsappBotService {
       return;
     }
 
+    // Si dijo día Y hora y esa hora está libre, se agenda directo: pedirle que
+    // elija de una lista lo que acaba de pedir es dar una vuelta de más.
+    const exact = preferredTime ? slots.find((slot) => limaTimeOf(slot.startTime) === preferredTime) : null;
+    if (exact) {
+      scheduling.slots = slots;
+      await this.updateSession(waId, { answers: JSON.stringify(answers) });
+      this.logActivity({ type: 'exact_time_booked', waId, when: trimmed, slot: exact.label });
+      await this.confirmSlot(waId, exact);
+      return;
+    }
+
     // Si pidió una hora concreta y justo esa no está libre, se dice
     // explícitamente en vez de mandarle una lista que parece ignorarlo.
-    const gotExactTime = preferredTime ? slots.some((slot) => limaTimeOf(slot.startTime) === preferredTime) : true;
+    const gotExactTime = !preferredTime;
     const intro = gotExactTime
       ? `📅 Horarios para ${dayLabelWithArticle(date)}:`
       : `A las ${formatClockLabel(preferredTime)} no tengo libre ese día 🙈 Estos son los más cercanos:`;
@@ -1311,7 +1360,7 @@ export class WhatsappBotService {
     scheduling.slots = slots;
     await this.updateSession(waId, { status: 'scheduling_time', answers: JSON.stringify(answers) });
 
-    const list = numberedList(slots.map((s) => s.label));
+    const list = numberedList(slotOptionLabels(slots));
     await this.send(waId, `${intro}\n\n${list}\n\nResponde con el número que prefieras, o "no" si prefieres que te contacten después.`);
   }
 
@@ -1339,6 +1388,8 @@ export class WhatsappBotService {
       return;
     }
 
+    // Al LLM se le pasan las etiquetas completas (con fecha) para que pueda
+    // interpretar "el de mañana"; al contacto se le muestran ya recortadas.
     const labels = scheduling.slots.map((s) => s.label);
     const { index, preferredTime } = await this.ollamaService.parseSchedulingChoice(trimmed, labels);
     const slot = index !== null ? scheduling.slots[index] : null;
@@ -1365,7 +1416,7 @@ export class WhatsappBotService {
           await this.updateSession(waId, { answers: JSON.stringify(answers) });
           await this.send(
             waId,
-            `Ese horario no lo tengo libre, pero tengo estos más cercanos a lo que buscas:\n\n${numberedList(nearSlots.map((s) => s.label))}\n\nResponde con el número que prefieras, o "no" si prefieres que te contacten después.`
+            `Ese horario no lo tengo libre, pero tengo estos más cercanos a lo que buscas:\n\n${numberedList(slotOptionLabels(nearSlots))}\n\nResponde con el número que prefieras, o "no" si prefieres que te contacten después.`
           );
           return;
         }
@@ -1374,10 +1425,25 @@ export class WhatsappBotService {
       await this.updateSession(waId, { answers: JSON.stringify(answers) });
       await this.send(
         waId,
-        `⚠️ No reconocí esa opción. Responde con el número del horario, o "no" si prefieres que te contacten después:\n\n${numberedList(labels)}`
+        `⚠️ No reconocí esa opción. Responde con el número del horario, o "no" si prefieres que te contacten después:\n\n${numberedList(slotOptionLabels(scheduling.slots))}`
       );
       return;
     }
+
+    return this.confirmSlot(waId, slot);
+  }
+
+  /**
+   * Crea la reunión real en el Google Calendar del asesor a partir de un
+   * bloque ya elegido: registra el evento (con link de Google Meet), lo
+   * guarda en `scheduled_meetings`, mueve el lead a "Cita Agendada" y le
+   * confirma al contacto. Se llama tanto cuando elige un número de la lista
+   * como cuando ya había dicho una hora exacta que estaba libre.
+   */
+  async confirmSlot(waId, slot) {
+    const session = await this.getSession(waId);
+    const { answers, scheduling } = this._readScheduling(session);
+    if (!scheduling) { await this.updateSession(waId, { status: 'completed' }); return; }
 
     const isPhone = scheduling.mode === 'phone';
     const contactPhone = scheduling.phone || (waIdIsPhone(waId) ? digitsOnly(waId) : null);
