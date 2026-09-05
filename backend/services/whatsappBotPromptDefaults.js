@@ -44,9 +44,9 @@ export const BOT_PROMPT_DEFAULTS = {
   // OJO: el equipo debe revisar y ajustar estos textos en el panel — son lo
   // que Avan afirma como cierto sobre el servicio.
   faq: [
-    'Avantage Group acompaña a estudiantes en Perú en el desarrollo de su tesis, con un asesor que los guía durante el proceso.',
-    'Si aún no tienes un tema, no es problema: parte del acompañamiento es ayudarte a definir uno viable para tu carrera.',
-    'El jefe comercial te explica en la reunión el alcance exacto del acompañamiento y las modalidades disponibles.',
+    'En Avantage Group te asignamos un asesor que te guía en todo el proceso de tu tesis.',
+    'Si no tienes tema, te ayudamos a definir uno viable para tu carrera.',
+    'El jefe comercial te explica el alcance y las modalidades en la reunión.',
     'La reunión es una llamada corta con el jefe comercial para revisar tu caso y explicarte cómo trabajamos, sin compromiso.',
     'Puede ser telefónica o por Google Meet; eligiendo Google Meet se aplica un descuento sobre el precio final.',
     'Los costos y las formas de pago los detalla el jefe comercial en la reunión: dependen de tu carrera, tu nivel académico y el alcance de la tesis.',

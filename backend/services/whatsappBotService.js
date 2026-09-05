@@ -74,6 +74,16 @@ function formatShortDayLabel(dateStr) {
   return SHORT_DAY_FORMATTER.format(new Date(Date.UTC(y, m - 1, d, 12))).replace(',', '');
 }
 
+/**
+ * El mismo día pero listo para ir detrás de una preposición: "hoy" no lleva
+ * artículo ("para hoy"), los demás sí ("para el domingo 6"). Sin esto salía
+ * "Horarios para el hoy".
+ */
+function dayLabelWithArticle(dateStr) {
+  const label = formatShortDayLabel(dateStr);
+  return label === 'hoy' ? label : `el ${label}`;
+}
+
 function limaTodayIso() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 }
@@ -642,11 +652,15 @@ export class WhatsappBotService {
     if (result.ready && answers.problem && !missingAcademic) {
       // Si el contacto aprovechó el mensaje que completó los datos para
       // preguntar algo ("UNMSM. ¿Cuánto dura la reunión?"), la respuesta va
-      // dentro de `result.reply` y se perdería. Se envía primero, pero solo
-      // si trae contenido real: un acuse suelto ("Perfecto 👀") no aporta, y
-      // una pregunta chocaría con la de modalidad que viene enseguida.
+      // dentro de `result.reply` y se perdería, porque offerScheduling() manda
+      // su propio texto. Se envía primero, pero SOLO si de verdad preguntó
+      // algo: si no, `reply` es un acuse ("Perfecto 👀") o un anuncio del tipo
+      // "vamos a agendar la reunión" que duplicaría el mensaje siguiente.
       const closingNote = (result.reply || '').trim();
-      if (closingNote.length > 30 && !/[?¿]/.test(closingNote)) await this.send(waId, closingNote);
+      const askedSomething = /[?¿]/.test(incomingText || '');
+      if (askedSomething && closingNote.length > 30 && !/[?¿]/.test(closingNote)) {
+        await this.send(waId, closingNote);
+      }
       await this.finalize(waId, answers);
     } else if (result.ready && answers.problem && missingAcademic) {
       // El LLM quiso cerrar sin todos los datos: se pide el que falte.
@@ -945,7 +959,7 @@ export class WhatsappBotService {
       await this.updateSession(waId, { status: 'scheduling_time', answers: JSON.stringify(answers) });
       await this.send(
         waId,
-        `📅 Tenemos agenda para el ${formatShortDayLabel(day)}. Estos son los horarios:\n\n` +
+        `📅 Tenemos agenda para ${dayLabelWithArticle(day)}. Estos son los horarios:\n\n` +
         `${numberedList(slots.map((s) => s.label))}\n\n` +
         'Responde con el número que prefieras, o "no" si prefieres que te contacten después.'
       );
@@ -1139,7 +1153,7 @@ export class WhatsappBotService {
     // explícitamente en vez de mandarle una lista que parece ignorarlo.
     const gotExactTime = preferredTime ? slots.some((slot) => limaTimeOf(slot.startTime) === preferredTime) : true;
     const intro = gotExactTime
-      ? `📅 Horarios para el ${formatShortDayLabel(date)}:`
+      ? `📅 Horarios para ${dayLabelWithArticle(date)}:`
       : `A las ${formatClockLabel(preferredTime)} no tengo libre ese día 🙈 Estos son los más cercanos:`;
 
     scheduling.slots = slots;
