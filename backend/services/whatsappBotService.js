@@ -235,6 +235,14 @@ export class WhatsappBotService {
     // pasa por esta cola: nunca corren dos turnos en paralelo para el mismo
     // contacto (eso duplicaba mensajes y rompía la espera entre ellos).
     this.turnChains = new Map();
+    // wa_id -> nº de mensajes entrantes recibidos de ese contacto. Un turno
+    // anota el valor al empezar y lo vuelve a mirar antes de responder: si
+    // cambió, el contacto siguió escribiendo mientras se preparaba la
+    // respuesta, así que este turno se descarta y contesta el siguiente, ya
+    // con TODO lo que escribió. Sin esto, cualquier burbuja que llegara
+    // durante el turno (el LLM + la espera anti-spam tardan 10-15 s) generaba
+    // una segunda respuesta suelta en vez de agruparse.
+    this.inboundCounter = new Map();
     // wa_id -> message_id del último mensaje entrante, necesario para mostrarle
     // el indicador de "escribiendo..." de WhatsApp antes de responder.
     this.lastInboundMessageId = new Map();
@@ -299,6 +307,7 @@ export class WhatsappBotService {
     const pending = this.pendingMessages.get(waId);
     if (pending?.timer) clearTimeout(pending.timer);
     this.pendingMessages.delete(waId);
+    this.inboundCounter.delete(waId);
 
     await db('whatsapp_bot_sessions').where({ wa_id: waId }).delete();
     this.logActivity({ type: 'reset', waId });
@@ -492,6 +501,8 @@ export class WhatsappBotService {
    * mensaje.
    */
   bufferMessage(waId, text, waitMs = MESSAGE_DEBOUNCE_MS) {
+    this.inboundCounter.set(waId, (this.inboundCounter.get(waId) || 0) + 1);
+
     const pending = this.pendingMessages.get(waId) || { messages: [], timer: null };
     if (text && text.trim()) pending.messages.push(text.trim());
     // Una burbuja que llega mientras ya hay buffer conserva la espera con la
@@ -510,10 +521,14 @@ export class WhatsappBotService {
     pending.timer = setTimeout(() => {
       this.pendingMessages.delete(waId);
       const joined = pending.messages.join('\n');
+      // La marca se toma AQUÍ, no dentro del turno: entre que el temporizador
+      // dispara y el turno lee la sesión hay consultas a la base de datos, y
+      // una burbuja que cayera justo ahí ya no se detectaría como posterior.
+      const mark = this.inboundCounter.get(waId) || 0;
       // A la cola serializada: si todavía hay un turno anterior en curso para
       // este contacto, este espera a que termine (y re-evalúa el estado)
       // en vez de correr en paralelo y duplicar mensajes.
-      this.runSerialized(waId, () => this.runConversationTurn(waId, joined)).catch((error) => {
+      this.runSerialized(waId, () => this.runConversationTurn(waId, joined, mark)).catch((error) => {
         this.logActivity({ type: 'conversation_turn_failed', waId, error: error.message });
         console.error(`❌ [WhatsApp Bot] Error en el turno de conversación con ${waId}:`, error);
       });
@@ -528,7 +543,7 @@ export class WhatsappBotService {
    * siguiente respuesta natural y los datos que pudo extraer, los guarda, y
    * si ya reunió lo mínimo (tema + correo) pasa a evaluar y ofrecer agendar.
    */
-  async runConversationTurn(waId, incomingText) {
+  async runConversationTurn(waId, incomingText, inboundMark = null) {
     let session = await this.getSession(waId);
 
     // El estado pudo cambiar mientras este turno esperaba en la cola
@@ -540,6 +555,12 @@ export class WhatsappBotService {
       return; // 'completed' u otro: nada
     }
     if (session && !session.bot_enabled) return;
+
+    // Marca del contador de entrantes (ver `inboundCounter`): si al final del
+    // turno cambió, el contacto siguió escribiendo y este turno quedó
+    // obsoleto. Normalmente llega desde el temporizador del buffer, que la
+    // toma en el instante exacto en que se cierra la agrupación.
+    const mark = inboundMark ?? (this.inboundCounter.get(waId) || 0);
 
     const isFirstTurn = !session;
 
@@ -606,15 +627,32 @@ export class WhatsappBotService {
 
     await this.updateSession(waId, { answers: JSON.stringify(answers) });
 
-    // Para pasar a la reunión hace falta: tema + (carrera o universidad, al
-    // menos uno). Cuando se cumple, NO se manda `result.reply` (el LLM a veces
-    // cierra con una pregunta suelta): offerScheduling() toma el hilo.
-    const hasAcademic = !!(answers.field || answers.university);
-    if (result.ready && answers.problem && hasAcademic) {
+    // El contacto siguió escribiendo mientras se preparaba esta respuesta: lo
+    // ya extraído queda guardado (arriba), pero no se responde. El turno que
+    // dispare el buffer nuevo contestará una sola vez, con todo el contexto.
+    if ((this.inboundCounter.get(waId) || 0) !== mark) {
+      this.logActivity({ type: 'turn_superseded', waId, text: incomingText, reply: result.reply });
+      return;
+    }
+
+    // Para pasar a la reunión hacen falta los tres datos: tema, carrera y
+    // universidad. Cuando se cumple, NO se manda `result.reply` (el LLM a
+    // veces cierra con una pregunta suelta): offerScheduling() toma el hilo.
+    const missingAcademic = !answers.field ? 'field' : (!answers.university ? 'university' : null);
+    if (result.ready && answers.problem && !missingAcademic) {
+      // Si el contacto aprovechó el mensaje que completó los datos para
+      // preguntar algo ("UNMSM. ¿Cuánto dura la reunión?"), la respuesta va
+      // dentro de `result.reply` y se perdería. Se envía primero, pero solo
+      // si trae contenido real: un acuse suelto ("Perfecto 👀") no aporta, y
+      // una pregunta chocaría con la de modalidad que viene enseguida.
+      const closingNote = (result.reply || '').trim();
+      if (closingNote.length > 30 && !/[?¿]/.test(closingNote)) await this.send(waId, closingNote);
       await this.finalize(waId, answers);
-    } else if (result.ready && answers.problem && !hasAcademic) {
-      // El LLM quiso cerrar sin el dato académico: se pide antes de agendar.
-      await this.send(waId, 'Perfecto 🙌 Antes de coordinar la reunión, cuéntame: ¿de qué carrera es tu tesis? (o dime en qué universidad estudias)');
+    } else if (result.ready && answers.problem && missingAcademic) {
+      // El LLM quiso cerrar sin todos los datos: se pide el que falte.
+      await this.send(waId, missingAcademic === 'field'
+        ? 'Perfecto 🙌 Antes de coordinar la reunión, cuéntame: ¿de qué carrera es tu tesis?'
+        : 'Perfecto 🙌 Una última cosa antes de coordinar la reunión: ¿en qué universidad estudias?');
     } else {
       await this.send(waId, result.reply);
     }

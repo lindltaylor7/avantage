@@ -180,6 +180,10 @@
           "{{ entry.text }}"<br />
           <span class="activity-error">⚠️ {{ entry.error }} — el paso siguió su curso normal.</span>
         </p>
+        <p v-else-if="entry.type === 'turn_superseded'" class="activity-text activity-hint">
+          El contacto siguió escribiendo mientras se preparaba esta respuesta, así que no se envió:
+          "{{ entry.reply }}". Responde el turno siguiente, ya con todo lo que escribió.
+        </p>
         <p v-else-if="entry.type === 'reset'" class="activity-text activity-hint">
           El estado del bot para este contacto se borró; su próximo mensaje se procesará como si fuera nuevo.
         </p>
@@ -348,7 +352,8 @@ const ACTIVITY_META = {
   skipped: { icon: '🚫', label: 'El bot ignoró el mensaje', className: 'activity-error-card' },
   reset: { icon: '🔄', label: 'Conversación reiniciada', className: 'activity-ok' },
   scheduling_aside: { icon: '🙋', label: 'Pregunta durante el agendamiento', className: 'activity-llm' },
-  scheduling_aside_failed: { icon: '⚠️', label: 'No se pudo revisar si había una pregunta', className: 'activity-error-card' }
+  scheduling_aside_failed: { icon: '⚠️', label: 'No se pudo revisar si había una pregunta', className: 'activity-error-card' },
+  turn_superseded: { icon: '⏭️', label: 'Turno descartado (siguió escribiendo)', className: 'activity-buffer' }
 };
 
 function activityIcon(type) {

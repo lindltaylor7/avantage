@@ -6,7 +6,7 @@
         <h2 class="section-heading"><span class="heading-icon">🤖</span> Personalidad y objetivo del bot</h2>
         <p class="section-subheading bot-subheading">
           Avan ya no sigue un guion de preguntas fijas: conversa libremente guiado por IA hasta reunir el tema de
-          tesis y la carrera o universidad del contacto, y luego le ofrece una reunión con el jefe comercial (telefónica o por Meet).
+          tesis, la carrera y la universidad del contacto, y luego le ofrece una reunión con el jefe comercial (telefónica o por Meet).
           Aquí ajustas su identidad, su objetivo, las reglas de comportamiento (que puedes agregar o quitar) y los
           valores por defecto que usa cuando el contacto no menciona su nivel o ámbito.
         </p>
@@ -97,9 +97,10 @@
         <div class="info-box bot-fixed-rules-box">
           <h4>🔒 Reglas fijas del sistema (no editables)</h4>
           <p>
-            Estas son estructurales y las aplica el código, no el prompt: datos obligatorios (tema de tesis + carrera o
-            universidad), nunca pedir correo / nivel / ámbito, el formato JSON de la respuesta del LLM y el momento exacto
-            en que se pasa a proponer la reunión.
+            Estas son estructurales y las aplica el código, no el prompt: los tres datos obligatorios (tema de tesis,
+            carrera y universidad, preguntados de a uno y en ese orden), la obligación de responder lo que el contacto
+            pregunte antes de seguir preguntando, la presentación garantizada en el primer mensaje, nunca pedir correo /
+            nivel / ámbito, el formato JSON de la respuesta del LLM y el momento exacto en que se pasa a proponer la reunión.
           </p>
         </div>
       </section>
@@ -112,7 +113,7 @@
           </button>
         </div>
         <p class="bot-field-hint bot-rules-intro">
-          Es lo <strong>único</strong> que Avan tiene permitido afirmar. Si el contacto pregunta algo que no está aquí,
+          <strong>Revisa estos textos:</strong> es lo <strong>único</strong> que Avan tiene permitido afirmar. Si el contacto pregunta algo que no está aquí,
           responde que el jefe comercial se lo detalla en la reunión, en vez de inventar. Se usa tanto en la conversación
           libre como cuando pregunta algo en medio del agendamiento.
         </p>
@@ -208,7 +209,7 @@
           </div>
           <div class="info-box">
             <h4>🧩 Extracción en segundo plano</h4>
-            <p>Va identificando tema, carrera, universidad, ámbito y nivel del hilo real de la conversación (y el correo solo si el contacto lo menciona), sin que note que está "llenando un formulario".</p>
+            <p>Va identificando tema, carrera, universidad, ámbito y nivel del hilo real de la conversación (y el correo solo si el contacto lo menciona), sin que note que está "llenando un formulario". Si el contacto escribe varias burbujas seguidas, las agrupa y responde una sola vez.</p>
           </div>
           <div class="info-box">
             <h4>🙋 Preguntas durante el agendamiento</h4>
@@ -216,7 +217,7 @@
           </div>
           <div class="info-box">
             <h4>📅 Cierre con agendamiento</h4>
-            <p>Con el tema y la carrera o universidad ya en mano, ofrece la reunión con el jefe comercial, pregunta si la quiere telefónica o por Meet (10% dto.), pide el número o el correo según corresponda y propone los horarios libres reales del calendario (hasta 2 días desde hoy). Si dice una hora ("hoy a las 6 pm"), le ofrece los bloques más cercanos a esa hora, no los primeros del día.</p>
+            <p>Con el tema, la carrera y la universidad ya en mano, ofrece la reunión con el jefe comercial, pregunta si la quiere telefónica o por Meet (10% dto.), pide el número o el correo según corresponda y propone los horarios libres reales del calendario (hasta 2 días desde hoy). Si dice una hora ("hoy a las 6 pm"), le ofrece los bloques más cercanos a esa hora, no los primeros del día.</p>
           </div>
         </div>
       </section>

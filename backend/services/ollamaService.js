@@ -40,11 +40,36 @@ function cosineSimilarity(vecA, vecB) {
  */
 function describeMissingPriority(knownAnswers) {
   const answers = knownAnswers || {};
-  if (!answers.problem) return 'el tema o problema de tesis que quiere investigar (todavía no lo sabes) — esta es tu única pregunta por ahora.';
-  if (!answers.field && !answers.university) {
-    return 'ya conoces el tema, pero TE FALTA lo académico: pregúntale de qué CARRERA es su tesis (o, si prefiere, en qué UNIVERSIDAD estudia). Con UNO de los dos basta. NO marques "ready": true hasta tener al menos uno.';
-  }
-  return 'ya tienes el tema y el dato académico (carrera o universidad): NO preguntes nada más (ni nivel, ni correo). Marca "ready": true en este mismo turno con un "reply" corto de acuse (ej. "Perfecto 👀"). El sistema se encarga de proponer la reunión y la modalidad.';
+  if (!answers.problem) return 'el tema o problema de tesis que quiere investigar. Si ya te dijo que no tiene tema, no lo vuelvas a preguntar: guárdalo como "Sin tema definido (desde cero)" y sigue con la carrera. NO marques "ready": true todavía.';
+  if (!answers.field) return 'ya conoces el tema; ahora te falta la CARRERA de su tesis. NO marques "ready": true todavía.';
+  if (!answers.university) return 'ya conoces el tema y la carrera; ahora te falta la UNIVERSIDAD donde estudia. NO marques "ready": true todavía.';
+  return 'ya tienes el tema, la carrera y la universidad: NO preguntes nada más (ni nivel, ni correo). Marca "ready": true en este mismo turno con un "reply" corto de acuse (ej. "Perfecto 👀"). El sistema se encarga de proponer la reunión y la modalidad.';
+}
+
+// Saludo inicial que el modelo puede haber puesto por su cuenta ("Hola
+// Edward,", "¡Buenas tardes!"), para no duplicarlo al anteponer la
+// presentación.
+const LEADING_GREETING_RE = /^\s*[¡!]*\s*(hola|buenas|buenos d[ií]as|buenas tardes|buenas noches)\b[^.!?¿\n]*?\s*[,.!¡]+\s*/i;
+
+/**
+ * Red de seguridad para el primer mensaje: la instrucción de presentarse está
+ * en el prompt, pero el modelo la cumplía de forma intermitente y había
+ * contactos que preguntaban "¿me comunico a Avantage?" y nunca recibían la
+ * confirmación. Si la respuesta del primer turno no menciona a Avan, se le
+ * antepone la presentación (quitando el saludo que el modelo ya hubiera
+ * puesto, para no saludar dos veces).
+ */
+function ensureIntroduction(reply, contactName) {
+  const text = String(reply || '').trim();
+  if (/\bavan\b/i.test(text)) return text;
+
+  // Al quitarle el saludo, lo que queda puede empezar en minúscula ("¡sí!
+  // Cuéntame..."); se capitaliza la primera letra para que siga leyéndose
+  // como una frase y no como un pegote.
+  const rest = text.replace(LEADING_GREETING_RE, '').trim()
+    .replace(/^([^\p{L}]*)(\p{L})/u, (_, prefix, letter) => prefix + letter.toUpperCase());
+  const hello = contactName ? `¡Hola, ${contactName}!` : '¡Hola!';
+  return `${hello} Soy Avan, del equipo de Avantage Group 👋 ${rest || text}`.trim();
 }
 
 /**
@@ -270,14 +295,17 @@ Detalles adicionales: ${additionalNotes || 'Ninguno'}`;
     const objective = (botObjective && botObjective.trim()) || BOT_PROMPT_DEFAULTS.objective;
     const teamRules = (Array.isArray(promptRules) && promptRules.length) ? promptRules : BOT_PROMPT_DEFAULTS.rules;
 
+    // Breve, pero no seco: el modo corto anterior prohibía toda introducción y
+    // el resultado era "[acuse de dos palabras] + [pregunta]" en cada turno,
+    // es decir un interrogatorio. Ahora se conserva el límite de longitud pero
+    // se le exige que la primera parte aporte algo real.
     const shortRepliesRule = shortReplies
-      ? 'RESPUESTAS MUY CORTAS: 1 línea, idealmente menos de 25 palabras. Una sola idea + una sola pregunta. Sin introducciones ("Entiendo que...", "Qué interesante..."), sin cierres ("quedo atento", "cualquier cosa me avisas"), sin repetir lo que ya dijiste. Ve directo al grano.'
-      : 'Máximo 2-3 líneas por mensaje.';
+      ? 'RESPUESTAS BREVES PERO CÁLIDAS: máximo 2 líneas. Estructura fija: (a) responde o reconoce algo CONCRETO de lo que la persona acaba de escribir —si preguntó algo, su respuesta va aquí—, y (b) UNA sola pregunta. Nada de relleno corporativo ni cierres de correo ("quedo atento", "cualquier cosa me avisas"), pero tampoco un acuse de dos palabras: la parte (a) tiene que aportar algo de verdad. Escribe en español natural de Perú, sin calcos del inglés ("no problema", "déjame saber").'
+      : 'Máximo 3 líneas por mensaje, con la misma estructura: primero respondes o reconoces algo concreto de lo que dijo, después UNA sola pregunta.';
 
     const rulesBlock = [shortRepliesRule, ...teamRules]
       .concat(contactName ? [`Su nombre (según su perfil de WhatsApp) es "${contactName}". Úsalo de vez en cuando para sonar más cercano, sin abusar ni repetirlo en cada mensaje.`] : [])
-      .concat(isFirstTurn ? ['Este es el PRIMER mensaje de la conversación: tu "reply" tiene que empezar presentándote brevemente como Avan, del equipo de Avantage Group, antes de cualquier otra cosa.'] : [])
-      .map((r, i) => `${i + 1}. ${r}`)
+        .map((r, i) => `${i + 1}. ${r}`)
       .join('\n');
 
     const systemPrompt = `${identity}
@@ -285,10 +313,13 @@ Detalles adicionales: ${additionalNotes || 'Ninguno'}`;
 TU OBJETIVO: ${objective}
 
 LO QUE NECESITAS SABER, EN ESTE ORDEN (esto es estructural, no cambia):
-1. El tema o problema de tesis que quiere investigar — OBLIGATORIO. Mientras no lo sepas, esa es SIEMPRE tu única pregunta; no avances a nada más. Basta con una idea GENERAL (ej. "tesis de Ingeniería Civil, desde cero, sin tema definido" ya es suficiente) — no hace falta que sea específico.
-2. La CARRERA de su tesis O la UNIVERSIDAD donde estudia — OBLIGATORIO tener AL MENOS UNO de los dos. Pregúntalo SOLO cuando ya tengas el tema. Con uno basta: no pidas los dos, y si te da uno no insistas con el otro.
+1. El tema o problema de tesis que quiere investigar — OBLIGATORIO. Basta con una idea GENERAL: no hace falta que sea específico ni que la persona lo tenga claro. Si te dice que NO tiene tema, que empieza de cero o que no sabe, ESO YA ES LA RESPUESTA: guárdala en "extracted.problem" como "Sin tema definido (desde cero)" y pasa al punto 2. Nunca vuelvas a preguntar por el tema después de eso.
+2. La CARRERA de su tesis — OBLIGATORIO. Pregúntala solo cuando ya tengas el tema.
+3. La UNIVERSIDAD donde estudia — OBLIGATORIO. Pregúntala solo cuando ya tengas la carrera.
 
-Recién cuando tengas (1) Y (2) marca "ready": true (ver CUÁNDO TERMINAR).
+Recién cuando tengas (1), (2) Y (3) marca "ready": true (ver CUÁNDO TERMINAR). Una pregunta por mensaje: nunca pidas la carrera y la universidad juntas.
+
+NO SEAS CERRADO: que te falte un dato NUNCA es excusa para ignorar lo que la persona escribió. Si te hace una pregunta ("¿qué hacen?", "¿cuánto cuesta?", "¿cuánto dura?", "necesito información"), RESPÓNDELA primero con los DATOS REALES DEL SERVICIO y recién después, en el mismo mensaje, haz tu pregunta pendiente. Alguien que pide información y solo recibe preguntas se va.
 
 Datos OPCIONALES Y PASIVOS (correo, nivel académico, ámbito/región): si la persona los menciona por su cuenta, guárdalos en "extracted". Pero JAMÁS los preguntes — hay valores por defecto y el jefe comercial los ve en la reunión.
 
@@ -302,7 +333,10 @@ Si el contacto hace una pregunta, RESPÓNDELA primero con estos datos y recién 
 ` : ''}
 ${toneInstructions ? `\nINSTRUCCIONES ADICIONALES DEL EQUIPO:\n${toneInstructions}\n` : ''}
 
-CUÁNDO TERMINAR: marca "ready": true en cuanto tengas el tema de tesis Y (la carrera O la universidad). NO antes: si te falta el dato académico, tu turno es para preguntarlo, con "ready": false. Cuando por fin marques "ready": true, tu "reply" tiene que ser MUY corto, un simple acuse (ej. "Perfecto 👀" o "Genial, dame un momento 🙌") — NADA de preguntas. El sistema toma el hilo enseguida: propone la reunión con el jefe comercial y le pregunta la modalidad (telefónica o Meet). Este "reply" tuyo puede incluso no mostrarse, así que no pongas nada importante en él.
+${isFirstTurn ? `
+PRIMER MENSAJE DE LA CONVERSACIÓN: tu "reply" TIENE que abrir presentándote — saludo + "soy Avan, del equipo de Avantage Group" — antes de cualquier otra cosa. Es obligatorio, no opcional: mucha gente escribe justamente para confirmar que llegó al lugar correcto.
+` : ''}
+CUÁNDO TERMINAR: marca "ready": true en cuanto tengas el tema de tesis Y (la carrera O la universidad). NO antes: si te falta el dato académico, tu turno es para preguntarlo, con "ready": false. Cuando por fin marques "ready": true, tu "reply" tiene que ser MUY corto y SIN preguntas: si el contacto aprovechó ese último mensaje para preguntarte algo, respóndele ahí en una línea con los datos reales del servicio; si no preguntó nada, un simple acuse (ej. "Perfecto 👀" o "Genial, dame un momento 🙌"). El sistema toma el hilo enseguida: propone la reunión con el jefe comercial y le pregunta la modalidad (telefónica o Meet). Este "reply" tuyo puede incluso no mostrarse, así que no pongas nada importante en él.
 
 DATOS YA CONFIRMADOS (usa esto para no repetir preguntas ya respondidas):
 ${JSON.stringify(knownAnswers || {})}
@@ -313,7 +347,7 @@ Responde ÚNICAMENTE en JSON válido con esta forma exacta (usa null en los camp
 {
   "reply": "<mensaje de WhatsApp en texto plano, sin comillas ni markdown>",
   "extracted": {
-    "problem": "<tema/problema de tesis identificado, o null>",
+    "problem": "<tema o problema de tesis identificado. Si dijo que no tiene tema o que empieza desde cero, escribe exactamente 'Sin tema definido (desde cero)'. Usa null SOLO si todavía no ha dicho nada sobre su tema>",
     "location": "<ámbito/región identificado, o null>",
     "level": "<uno de: 'Pregrado (Bachiller/Título)', 'Posgrado (Maestría)', 'Posgrado (Doctorado)', o null>",
     "field": "<carrera/campo de estudio identificado, o null>",
@@ -361,7 +395,7 @@ Responde ÚNICAMENTE en JSON válido con esta forma exacta (usa null en los camp
 
       console.log(`✅ [Ollama Cloud LLM] Turno de Avan generado por ${this.chatModel}`);
       return {
-        reply: parsed.reply,
+        reply: isFirstTurn ? ensureIntroduction(parsed.reply, contactName) : parsed.reply,
         extracted: parsed.extracted || {},
         ready: !!parsed.ready,
         source: 'llm'
@@ -393,22 +427,41 @@ Responde ÚNICAMENTE en JSON válido con esta forma exacta (usa null en los camp
 
     const trimmedIn = (incomingText || '').trim();
 
-    // Falta el dato académico (carrera o universidad): se pide una vez y en el
-    // siguiente turno se toma lo que respondan.
-    if (!answers.field && !answers.university) {
-      const isNoise = trimmedIn.length < 3 || /^(hola|hi|buenas|si|sí|ok|okay|no|informes?|gracias)\b/i.test(trimmedIn);
+    const isNoise = trimmedIn.length < 3 || /^(hola|hi|buenas|si|sí|ok|okay|no|informes?|gracias)\b/i.test(trimmedIn);
+    const looksLikeUniversity = /universidad|instituto|\bpucp\b|\bunmsm\b|\bupc\b|\bucv\b|continental|vallejo|cat[oó]lica|nacional de/i.test(trimmedIn);
+
+    // Falta la carrera: se pide, y lo que respondan en el siguiente turno se
+    // toma como carrera (salvo que claramente sea el nombre de una universidad).
+    if (!answers.field) {
+      if (isNoise || looksLikeUniversity) {
+        return {
+          reply: 'Genial 🙌 ¿De qué carrera es tu tesis?',
+          extracted: looksLikeUniversity ? { university: trimmedIn } : {},
+          ready: false,
+          source: 'fallback'
+        };
+      }
+      return {
+        reply: '¡Perfecto! ¿Y en qué universidad estudias?',
+        extracted: { field: trimmedIn },
+        ready: false,
+        source: 'fallback'
+      };
+    }
+
+    // Falta la universidad.
+    if (!answers.university) {
       if (isNoise) {
         return {
-          reply: 'Genial 🙌 ¿De qué carrera es tu tesis? (o dime en qué universidad estudias)',
+          reply: 'Cuéntame, ¿en qué universidad estudias?',
           extracted: {},
           ready: false,
           source: 'fallback'
         };
       }
-      const isUni = /universidad|instituto|\bpucp\b|\bunmsm\b|\bupc\b|\bucv\b|continental|vallejo|cat[oó]lica|nacional de/i.test(trimmedIn);
       return {
         reply: 'Perfecto, dame un momento 👀',
-        extracted: isUni ? { university: trimmedIn } : { field: trimmedIn },
+        extracted: { university: trimmedIn },
         ready: true,
         source: 'fallback'
       };
