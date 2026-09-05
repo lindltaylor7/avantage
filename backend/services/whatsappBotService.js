@@ -32,6 +32,12 @@ const BOOKING_WINDOW_DAYS = MAX_BOOKING_DAYS_AHEAD + 1;
 // Cantidad de horarios que se le ofrecen al contacto a la vez.
 const SLOTS_TO_OFFER = 3;
 
+// Nunca se le manda una lista con menos de estos horarios cuando pidió una
+// hora concreta: recibir una sola opción (y encima peor que la que pidió) lo
+// obliga a volver a proponer a ciegas. Si el día que eligió no da para tanto,
+// se completa con los bloques más cercanos de los otros días con agenda.
+const MIN_SLOTS_TO_OFFER = 2;
+
 // Estados del flujo de agendamiento (todos "esperan respuesta del contacto").
 const SCHEDULING_STATUSES = ['scheduling_mode', 'scheduling_phone', 'scheduling_email', 'scheduling_date', 'scheduling_time'];
 
@@ -74,6 +80,14 @@ function isGreetingOnly(text) {
 // se mueve a "Congelado" en el Setter Funnel y el bot deja de insistir.
 const INACTIVITY_NUDGE_MS = 60 * 60 * 1000;
 const INACTIVITY_FREEZE_MS = 60 * 60 * 1000;
+
+// Recordatorio previo a la reunión: se manda cuando faltan menos de estas dos
+// horas. `MIN_AGE` deja fuera las reuniones recién agendadas — los bloques se
+// ofrecen con dos horas de anticipación mínima, así que sin este margen quien
+// reserva para el primer hueco disponible recibiría el recordatorio a los
+// minutos de confirmar.
+const MEETING_REMINDER_LEAD_MS = 2 * 60 * 60 * 1000;
+const MEETING_REMINDER_MIN_AGE_MS = 30 * 60 * 1000;
 
 const SHORT_DAY_FORMATTER = new Intl.DateTimeFormat('es-PE', {
   timeZone: 'America/Lima', weekday: 'long', day: 'numeric'
@@ -186,6 +200,34 @@ function formatMeetingDateTimeLabel(isoStr) {
 // Placeholder que usa findOrCreateFromWhatsApp() cuando WhatsApp no compartió
 // un nombre de perfil real — no debe tratarse como el nombre del contacto.
 const GENERIC_CONTACT_NAME = 'Contacto de WhatsApp';
+
+/** "30 min" / "1 hora", para decirle al contacto cuánto dura la reunión. */
+function formatDurationLabel(startTime, endTime) {
+  const minutes = Math.round((new Date(endTime).getTime() - new Date(startTime).getTime()) / 60000);
+  if (!Number.isFinite(minutes) || minutes <= 0) return '';
+  if (minutes % 60 !== 0) return `${minutes} min`;
+  const hours = minutes / 60;
+  return hours === 1 ? '1 hora' : `${hours} horas`;
+}
+
+/**
+ * Cierra una frase con punto sin duplicar el que ya trae "p.m." al final: las
+ * franjas horarias terminan en "6:30 p.m." y quedaba "6:30 p.m.." en pantalla.
+ */
+function endSentence(text) {
+  const trimmed = String(text || '').trimEnd();
+  if (!trimmed) return '';
+  return trimmed.endsWith('.') ? trimmed : `${trimmed}.`;
+}
+
+/** "en 2 horas" / "en 45 minutos", para el recordatorio previo a la reunión. */
+function formatTimeUntil(startTime) {
+  const minutes = Math.round((new Date(startTime).getTime() - Date.now()) / 60000);
+  if (!Number.isFinite(minutes) || minutes < 1) return '';
+  if (minutes < 60) return `en ${minutes} minutos`;
+  const hours = Math.round(minutes / 60);
+  return hours === 1 ? 'en 1 hora' : `en ${hours} horas`;
+}
 
 function firstNameOf(fullName) {
   if (!fullName || fullName === GENERIC_CONTACT_NAME) return null;
@@ -955,10 +997,10 @@ export class WhatsappBotService {
           restate: 'Y para mandarte el link de Google Meet, ¿a qué correo te lo envío?'
         };
       case 'scheduling_date': {
-        const phrase = this._availableDaysPhrase(scheduling.availableDays || []) || 'los próximos días';
+        const phrase = scheduling.availableWindows || this._availableDaysPhrase(scheduling.availableDays || []) || 'los próximos días';
         return {
-          question: `¿Qué día prefieres para la llamada? Los días con agenda disponible son: ${phrase}.`,
-          restate: `Volviendo a la agenda: tenemos ${phrase}. ¿Qué día prefieres?`
+          question: `¿Qué día prefieres para la llamada? La agenda disponible es: ${endSentence(phrase)}`,
+          restate: `Volviendo a la agenda: tenemos ${endSentence(phrase)} ¿Qué día prefieres?`
         };
       }
       case 'scheduling_time': {
@@ -1058,6 +1100,32 @@ export class WhatsappBotService {
     return { answers, scheduling: answers.__scheduling || null };
   }
 
+  /**
+   * Completa los horarios de un día con los más cercanos de otros días cuando
+   * ese día no da para `MIN_SLOTS_TO_OFFER`. Solo aplica si el contacto pidió
+   * una hora concreta: ahí lo que quiere es "algo parecido a las 7", no "lo
+   * que haya el sábado", y ofrecerle una única opción peor lo deja adivinando
+   * si al día siguiente hay algo mejor. La lista final se reordena entera para
+   * que el primer número siga siendo el más parecido a lo que pidió.
+   */
+  async _fillNearbySlots(slots, preferredTime) {
+    if (!preferredTime || slots.length >= MIN_SLOTS_TO_OFFER) return slots;
+
+    const nearby = await this.googleCalendarService.getFreeSlotsNearTime(
+      BOOKING_ADVISOR_USER_ID,
+      preferredTime,
+      { limit: SLOTS_TO_OFFER, days: BOOKING_WINDOW_DAYS }
+    );
+
+    const merged = [...slots];
+    for (const slot of nearby) {
+      if (merged.length >= SLOTS_TO_OFFER) break;
+      if (!merged.some((existing) => existing.startTime === slot.startTime)) merged.push(slot);
+    }
+
+    return this.googleCalendarService.rankFreeSlots(merged, preferredTime).slice(0, SLOTS_TO_OFFER);
+  }
+
   /** Frase común que aborta el agendamiento si el lead dice "no"/"después". */
   _isSchedulingRefusal(text) {
     return ['no', 'omitir', 'despues', 'después', 'luego', 'mas tarde', 'más tarde'].includes(normalize((text || '').trim()));
@@ -1069,7 +1137,7 @@ export class WhatsappBotService {
    * a ofrecer los horarios de ese día. Si hay varios, pregunta cuál prefiere.
    */
   async promptForDate(waId) {
-    const upcoming = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID, { limit: 30, days: BOOKING_WINDOW_DAYS });
+    const upcoming = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID, { limit: 100, days: BOOKING_WINDOW_DAYS });
     const days = [...new Set(upcoming.map((s) => s.date))].sort();
 
     const { answers, scheduling } = this._readScheduling(await this.getSession(waId));
@@ -1104,11 +1172,11 @@ export class WhatsappBotService {
         const targetDate = explicitDate || (preferredTime ? days[0] : null);
 
         if (targetDate) {
-          const slots = await this.googleCalendarService.getFreeSlotsForDate(BOOKING_ADVISOR_USER_ID, targetDate, { limit: SLOTS_TO_OFFER, nearTime: preferredTime });
-          if (slots.length > 0) {
+          const daySlots = await this.googleCalendarService.getFreeSlotsForDate(BOOKING_ADVISOR_USER_ID, targetDate, { limit: SLOTS_TO_OFFER, nearTime: preferredTime });
+          if (daySlots.length > 0) {
             // La hora exacta que pidió está libre: no tiene sentido ofrecerle
             // una lista para que vuelva a elegir lo que ya eligió. Se agenda.
-            const exact = preferredTime ? slots.find((slot) => limaTimeOf(slot.startTime) === preferredTime) : null;
+            const exact = preferredTime ? daySlots.find((slot) => limaTimeOf(slot.startTime) === preferredTime) : null;
             if (exact) {
               await this.updateSession(waId, { answers: JSON.stringify(answers) });
               this.logActivity({ type: 'exact_time_booked', waId, when: requested, slot: exact.label });
@@ -1116,13 +1184,22 @@ export class WhatsappBotService {
               return;
             }
 
+            const slots = await this._fillNearbySlots(daySlots, preferredTime);
+            // Si la lista terminó mezclando días, cada opción ya lleva su
+            // fecha y nombrar un solo día en la entradilla confundiría.
+            const spansDays = new Set(slots.map((slot) => slot.date)).size > 1;
+
             let intro;
             if (!preferredTime) {
-              intro = `📅 Perfecto, para ${dayLabelWithArticle(targetDate)} tengo:`;
+              intro = `📅 Perfecto, para ${dayLabelWithArticle(targetDate)} hay estos horarios:`;
             } else if (explicitDate) {
-              intro = `A las ${formatClockLabel(preferredTime)} no tengo libre ${dayLabelWithArticle(targetDate)} 🙈 Estos son los más cercanos:`;
+              intro = `A las ${formatClockLabel(preferredTime)} el jefe comercial no tiene libre ${dayLabelWithArticle(targetDate)}. Estos son los más cercanos:`;
+            } else if (spansDays) {
+              // Solo dijo la hora y la lista salió de varios días: cada opción
+              // lleva su fecha, así que nombrar un día aquí sobra.
+              intro = `A las ${formatClockLabel(preferredTime)} el jefe comercial no tiene libre. Estos son los más cercanos:`;
             } else {
-              intro = `A las ${formatClockLabel(preferredTime)} no tengo libre 🙈 Lo más cercano que tengo para ${dayLabelWithArticle(targetDate)}:`;
+              intro = `A las ${formatClockLabel(preferredTime)} el jefe comercial no tiene libre. Lo más cercano para ${dayLabelWithArticle(targetDate)}:`;
             }
 
             scheduling.slots = slots;
@@ -1156,11 +1233,14 @@ export class WhatsappBotService {
       return;
     }
 
-    // Varios días → se pregunta cuál prefiere.
+    // Varios días → se pregunta cuál prefiere, diciéndole desde ya en qué
+    // franja de horas se mueve cada día.
+    const windowsPhrase = this._availableWindowsPhrase(upcoming);
+    if (scheduling) scheduling.availableWindows = windowsPhrase;
     await this.updateSession(waId, { status: 'scheduling_date', answers: JSON.stringify(answers) });
     await this.send(
       waId,
-      `📅 Tenemos agenda disponible: ${this._availableDaysPhrase(days)}. ¿Qué día prefieres para la llamada con el jefe comercial?`
+      `📅 Tenemos agenda ${endSentence(windowsPhrase)} ¿Qué día prefieres para la llamada con el jefe comercial?`
     );
   }
 
@@ -1260,6 +1340,34 @@ export class WhatsappBotService {
     await this.promptForDate(waId);
   }
 
+  /**
+   * Frase con los días disponibles Y su rango de horas ("hoy de 3:00 p.m. a
+   * 5:30 p.m. y el domingo 6 de 9:00 a.m. a 6:30 p.m."). Nombrar solo los días
+   * hacía que el contacto propusiera horas que no existen ("¿hoy a las 7?") y
+   * gastara dos o tres mensajes en descubrir hasta qué hora hay agenda.
+   */
+  _availableWindowsPhrase(slots) {
+    const ordered = [...(slots || [])].sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+    const byDay = new Map();
+    for (const slot of ordered) {
+      if (!byDay.has(slot.date)) byDay.set(slot.date, []);
+      byDay.get(slot.date).push(slot);
+    }
+
+    const hourOf = (slot) => slot.timeLabel || formatClockLabel(limaTimeOf(slot.startTime));
+    const parts = [...byDay.entries()].map(([date, daySlots]) => {
+      const first = daySlots[0];
+      const last = daySlots[daySlots.length - 1];
+      return daySlots.length === 1
+        ? `${dayLabelWithArticle(date)} a las ${hourOf(first)}`
+        : `${dayLabelWithArticle(date)} de ${hourOf(first)} a ${hourOf(last)}`;
+    });
+
+    if (parts.length === 0) return '';
+    if (parts.length === 1) return parts[0];
+    return `${parts.slice(0, -1).join(', ')} y ${parts[parts.length - 1]}`;
+  }
+
   /** Frase legible con los días que sí tienen espacio (ej. "hoy y el viernes 28"). */
   _availableDaysPhrase(days) {
     const labels = (days || []).map(formatShortDayLabel);
@@ -1295,7 +1403,7 @@ export class WhatsappBotService {
     // se guardan para no volver a consultar en cada intento.
     let availableDays = scheduling.availableDays;
     if (!availableDays || availableDays.length === 0) {
-      const upcoming = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID, { limit: 30, days: BOOKING_WINDOW_DAYS });
+      const upcoming = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID, { limit: 100, days: BOOKING_WINDOW_DAYS });
       availableDays = [...new Set(upcoming.map((s) => s.date))].sort();
       scheduling.availableDays = availableDays;
     }
@@ -1307,27 +1415,28 @@ export class WhatsappBotService {
       return;
     }
 
-    const daysPhrase = this._availableDaysPhrase(availableDays);
+    const daysPhrase = scheduling.availableWindows || this._availableDaysPhrase(availableDays);
     // `preferredTime` recoge la hora que el lead dijo junto con el día ("hoy
     // a las 6 pm"). Antes se descartaba y se le ofrecían siempre los primeros
     // bloques del día, aunque la hora que pidió estuviera libre.
     const { date, preferredTime } = await this.ollamaService.parseSchedulingDate(trimmed, todayIso, MAX_BOOKING_DAYS_AHEAD);
 
     if (!date) {
-      await this.send(waId, `No identifiqué el día 🤔 Tenemos agenda ${daysPhrase}. ¿Cuál prefieres?`);
+      await this.send(waId, `No identifiqué el día 🤔 Tenemos agenda ${endSentence(daysPhrase)} ¿Cuál prefieres?`);
       return;
     }
 
     if (!availableDays.includes(date)) {
-      await this.send(waId, `Ese día no hay agenda 🙈 Tenemos ${daysPhrase}. ¿Cuál te viene bien?`);
+      await this.send(waId, `Ese día no hay agenda. Tenemos ${endSentence(daysPhrase)} ¿Cuál te viene bien?`);
       return;
     }
 
-    const slots = await this.googleCalendarService.getFreeSlotsForDate(BOOKING_ADVISOR_USER_ID, date, { limit: SLOTS_TO_OFFER, nearTime: preferredTime });
-    if (slots.length === 0) {
+    const daySlots = await this.googleCalendarService.getFreeSlotsForDate(BOOKING_ADVISOR_USER_ID, date, { limit: SLOTS_TO_OFFER, nearTime: preferredTime });
+    if (daySlots.length === 0) {
       // Se ocupó la última franja de ese día entre que se propuso y ahora.
-      const fresh = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID, { limit: 30, days: BOOKING_WINDOW_DAYS });
+      const fresh = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID, { limit: 100, days: BOOKING_WINDOW_DAYS });
       scheduling.availableDays = [...new Set(fresh.map((s) => s.date))].sort();
+      scheduling.availableWindows = this._availableWindowsPhrase(fresh);
       if (scheduling.availableDays.length === 0) {
         delete answers.__scheduling;
         await this.updateSession(waId, { answers: JSON.stringify(answers) });
@@ -1335,15 +1444,15 @@ export class WhatsappBotService {
         return;
       }
       await this.updateSession(waId, { status: 'scheduling_date', answers: JSON.stringify(answers) });
-      await this.send(waId, `Justo se ocupó ese día 😅 Ahora tenemos ${this._availableDaysPhrase(scheduling.availableDays)}. ¿Cuál prefieres?`);
+      await this.send(waId, `Justo se ocupó ese día. Ahora tenemos ${endSentence(scheduling.availableWindows || this._availableDaysPhrase(scheduling.availableDays))} ¿Cuál prefieres?`);
       return;
     }
 
     // Si dijo día Y hora y esa hora está libre, se agenda directo: pedirle que
     // elija de una lista lo que acaba de pedir es dar una vuelta de más.
-    const exact = preferredTime ? slots.find((slot) => limaTimeOf(slot.startTime) === preferredTime) : null;
+    const exact = preferredTime ? daySlots.find((slot) => limaTimeOf(slot.startTime) === preferredTime) : null;
     if (exact) {
-      scheduling.slots = slots;
+      scheduling.slots = daySlots;
       await this.updateSession(waId, { answers: JSON.stringify(answers) });
       this.logActivity({ type: 'exact_time_booked', waId, when: trimmed, slot: exact.label });
       await this.confirmSlot(waId, exact);
@@ -1351,11 +1460,12 @@ export class WhatsappBotService {
     }
 
     // Si pidió una hora concreta y justo esa no está libre, se dice
-    // explícitamente en vez de mandarle una lista que parece ignorarlo.
-    const gotExactTime = !preferredTime;
-    const intro = gotExactTime
+    // explícitamente en vez de mandarle una lista que parece ignorarlo. Y si
+    // ese día apenas tiene un bloque, se completa con los de los otros días.
+    const slots = await this._fillNearbySlots(daySlots, preferredTime);
+    const intro = !preferredTime
       ? `📅 Horarios para ${dayLabelWithArticle(date)}:`
-      : `A las ${formatClockLabel(preferredTime)} no tengo libre ese día 🙈 Estos son los más cercanos:`;
+      : `A las ${formatClockLabel(preferredTime)} el jefe comercial no tiene libre ese día. Estos son los más cercanos:`;
 
     scheduling.slots = slots;
     await this.updateSession(waId, { status: 'scheduling_time', answers: JSON.stringify(answers) });
@@ -1416,7 +1526,7 @@ export class WhatsappBotService {
           await this.updateSession(waId, { answers: JSON.stringify(answers) });
           await this.send(
             waId,
-            `Ese horario no lo tengo libre, pero tengo estos más cercanos a lo que buscas:\n\n${numberedList(slotOptionLabels(nearSlots))}\n\nResponde con el número que prefieras, o "no" si prefieres que te contacten después.`
+            `Ese horario el jefe comercial no lo tiene libre, pero estos son los más cercanos a lo que buscas:\n\n${numberedList(slotOptionLabels(nearSlots))}\n\nResponde con el número que prefieras, o "no" si prefieres que te contacten después.`
           );
           return;
         }
@@ -1510,20 +1620,78 @@ export class WhatsappBotService {
         }
       }
 
+      // La confirmación es el único mensaje que el contacto va a releer antes
+      // de la reunión: lleva la hora con su zona, cuánto dura, dónde más le
+      // llegó el link y cómo avisar si no puede. Sin eso vuelve a preguntar
+      // por WhatsApp lo que ya se le dijo, o simplemente no aparece.
+      const durationLabel = formatDurationLabel(slot.startTime, slot.endTime);
+      const invitedEmail = isPhone ? null : extractEmail(scheduling.email);
+
       await this.send(
         waId,
-        `✅ ¡Listo${name ? `, ${name}` : ''}! Tu ${isPhone ? 'llamada telefónica' : 'reunión por Google Meet'} con el jefe comercial quedó agendada para *${slot.label}*.` +
+        `✅ ¡Listo${name ? `, ${name}` : ''}! Tu ${isPhone ? 'llamada telefónica' : 'reunión por Google Meet'} con el jefe comercial quedó agendada para *${slot.label}* (hora de Perú)${durationLabel ? ` y dura ${durationLabel}` : ''}.` +
         (isPhone
           ? `\n\n📞 Te llamaremos${contactPhone ? ` al ${contactPhone}` : ''}.`
           : (event.meetLink ? `\n\n🔗 Link de Google Meet: ${event.meetLink}` : '') +
-            (scheduling.discount ? `\n\n🎁 Se aplicó ${scheduling.discount}% de descuento.` : '')) +
-        '\n\nTe esperamos. ¡Gracias! 🙌'
+            (invitedEmail ? `\n📩 También te llegó la invitación a ${invitedEmail}.` : '') +
+            (scheduling.discount ? `\n🎁 Se aplicó ${scheduling.discount}% de descuento.` : '')) +
+        '\n\nSi no puedes a esa hora, escríbeme por aquí y la movemos. ¡Te esperamos! 🙌'
       );
     } catch (error) {
       console.error(`❌ [WhatsApp Bot] Error al agendar la reunión para ${waId}:`, error);
       delete answers.__scheduling;
       await this.updateSession(waId, { answers: JSON.stringify(answers) });
       await this.handOffToAdvisor(waId, `Error técnico al crear el evento: ${error.message}`);
+    }
+  }
+
+  /**
+   * Barrido periódico (server.js, mismo setInterval que el de conversaciones
+   * inactivas) del recordatorio previo: dos horas antes de la reunión se le
+   * reenvía la hora y el link. Es lo más barato que hay contra el no-show —
+   * la cita se agenda para hoy o mañana y en el medio no recibía nada.
+   */
+  async sendMeetingReminders() {
+    if (!this.scheduledMeetingService) return;
+
+    const pending = await this.scheduledMeetingService.getPendingReminders({
+      leadMs: MEETING_REMINDER_LEAD_MS,
+      minAgeMs: MEETING_REMINDER_MIN_AGE_MS
+    });
+
+    if (pending.length === 0) return;
+
+    // Mismo criterio que el barrido de inactividad: si a ese contacto le
+    // apagaron el bot (lo tomó un asesor), el recordatorio lo manda él. No se
+    // marca como enviado, por si vuelven a encenderlo antes de la reunión.
+    const disabled = new Set(
+      (await db('whatsapp_bot_sessions')
+        .whereIn('wa_id', [...new Set(pending.map((m) => m.wa_id))])
+        .where('bot_enabled', false)
+        .select('wa_id')).map((row) => row.wa_id)
+    );
+
+    for (const meeting of pending) {
+      if (disabled.has(meeting.wa_id)) continue;
+
+      const name = firstNameOf(meeting.lead_full_name);
+      const startsIn = formatTimeUntil(meeting.start_time);
+      const text =
+        `⏰ ${name ? `${name}, te` : 'Te'} recuerdo tu reunión con el jefe comercial: *${formatMeetingDateTimeLabel(meeting.start_time)}*${startsIn ? ` (${startsIn})` : ''}.` +
+        (meeting.meet_link ? `\n\n🔗 ${meeting.meet_link}` : '\n\n📞 Te llamamos a este mismo número.') +
+        '\n\nSi no puedes, escríbeme por aquí y la movemos.';
+
+      try {
+        await this.send(meeting.wa_id, text);
+        this.logActivity({ type: 'meeting_reminder_sent', waId: meeting.wa_id, meetingId: meeting.id });
+      } catch (error) {
+        // Se marca igual que si hubiera salido: reintentar en cada barrido
+        // repetiría el mismo error (típicamente la ventana de 24 h de
+        // WhatsApp ya cerrada) y el aviso tampoco llegaría a tiempo.
+        console.error(`❌ [WhatsApp Bot] Error al mandar el recordatorio de la reunión ${meeting.id} a ${meeting.wa_id}:`, error);
+      }
+
+      await this.scheduledMeetingService.markReminderSent(meeting.id);
     }
   }
 

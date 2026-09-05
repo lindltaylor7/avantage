@@ -57,21 +57,47 @@ function minutesOfDayLima(date) {
 }
 
 /**
+ * Cuánto "cuesta" cada día de distancia al comparar bloques de días distintos,
+ * expresado en los mismos minutos con los que se mide la cercanía a la hora
+ * pedida. Sin esta penalización el orden salía solo por hora del día y un
+ * bloque de mañana a las 6:30 p.m. le ganaba a uno de hoy a las 6:00 p.m.:
+ * a quien pide "hoy a las 7" hay que ofrecerle primero lo de hoy, salvo que
+ * lo de otro día se acerque bastante más a la hora que quiere.
+ */
+const DAY_DISTANCE_PENALTY_MINUTES = 45;
+
+/** Instante de inicio del bloque, venga como candidato (`start`) o ya formateado. */
+function slotStartDate(slot) {
+  return slot.start instanceof Date ? slot.start : new Date(slot.startTime);
+}
+
+/** Día del bloque (calendario de Lima) como número entero, para restar días. */
+function limaDayIndex(date) {
+  const [y, m, d] = limaDateOf(date).split('-').map(Number);
+  return Math.floor(Date.UTC(y, m - 1, d) / 86400000);
+}
+
+/**
  * Reordena bloques libres por cercanía a una hora del día ("HH:MM", 24h, hora
- * de Lima), empatando por el más próximo en el tiempo. Se usa cuando el lead
+ * de Lima), penalizando además cada día de distancia. Se usa cuando el lead
  * dijo a qué hora le viene bien: sin esto se le ofrecen siempre los primeros
- * bloques del día, aunque haya pedido explícitamente otra hora.
+ * bloques del día, aunque haya pedido explícitamente otra hora. Acepta tanto
+ * candidatos internos como bloques ya formateados por `toFreeSlot`.
  */
 function rankByProximityToTime(slots, preferredTime) {
   const [ph, pm] = String(preferredTime || '').split(':').map(Number);
   if (!Number.isFinite(ph) || !Number.isFinite(pm)) return slots;
   const preferredMinutes = ph * 60 + pm;
+  if (slots.length === 0) return slots;
 
-  return [...slots].sort((a, b) => {
-    const diffA = Math.abs(minutesOfDayLima(a.start) - preferredMinutes);
-    const diffB = Math.abs(minutesOfDayLima(b.start) - preferredMinutes);
-    return diffA - diffB || (a.start - b.start);
-  });
+  const baseDay = Math.min(...slots.map((slot) => limaDayIndex(slotStartDate(slot))));
+  const score = (slot) => {
+    const start = slotStartDate(slot);
+    const daysAway = limaDayIndex(start) - baseDay;
+    return Math.abs(minutesOfDayLima(start) - preferredMinutes) + daysAway * DAY_DISTANCE_PENALTY_MINUTES;
+  };
+
+  return [...slots].sort((a, b) => (score(a) - score(b)) || (slotStartDate(a) - slotStartDate(b)));
 }
 
 /** Da forma uniforme a un bloque libre para devolverlo a los llamadores. */
@@ -451,5 +477,15 @@ export class GoogleCalendarService {
     if (freeSlots.length === 0) return [];
 
     return rankByProximityToTime(freeSlots, preferredTime).slice(0, limit).map(toFreeSlot);
+  }
+
+  /**
+   * Reordena por cercanía a una hora bloques que YA vienen formateados (los
+   * que devuelven los métodos de arriba). Lo usa el bot cuando junta los
+   * horarios de un día con los de otros días y necesita que la lista final
+   * salga en un solo orden coherente.
+   */
+  rankFreeSlots(freeSlots, preferredTime) {
+    return rankByProximityToTime(freeSlots || [], preferredTime);
   }
 }

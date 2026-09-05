@@ -2095,5 +2095,10 @@ app.listen(PORT, () => {
     whatsappBotService.checkStaleConversations().catch((error) => {
       console.error('❌ [WhatsApp Bot] Error en el barrido de conversaciones inactivas:', error);
     });
+    // Mismo intervalo: el recordatorio se manda cuando faltan menos de dos
+    // horas para la reunión, así que basta con revisar cada diez minutos.
+    whatsappBotService.sendMeetingReminders().catch((error) => {
+      console.error('❌ [WhatsApp Bot] Error en el barrido de recordatorios de reuniones:', error);
+    });
   }, STALE_CONVERSATION_SWEEP_INTERVAL_MS);
 });
