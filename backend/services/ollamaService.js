@@ -75,6 +75,33 @@ function ensureGreeting(reply, contactName) {
 }
 
 /**
+ * Palabras que delatan el nombre de una universidad dentro de una respuesta
+ * suelta. Solo la usa el camino de respaldo (sin LLM): la extracción real la
+ * hace el modelo, que reconoce muchas más.
+ */
+const UNIVERSITY_HINT_RE = /universidad|instituto|\bpucp\b|\bunmsm\b|\bupc\b|\bucv\b|\buncp\b|\bupla\b|\buni\b|\butp\b|\busmp\b|continental|vallejo|cat[oó]lica|nacional de/i;
+
+/**
+ * Parte "Ingeniería de sistemas, UNCP" en carrera + universidad. Si no aparece
+ * ninguna pista de universidad, todo el texto es la carrera; si el texto
+ * ARRANCA con la universidad, no hay carrera que separar.
+ */
+function splitFieldAndUniversity(text) {
+  const clean = String(text || '').trim();
+  const match = clean.match(UNIVERSITY_HINT_RE);
+  if (!match) return { field: clean || null, university: null };
+  if (match.index === 0) return { field: null, university: clean };
+
+  // "Ingeniería civil en la Universidad Continental" deja colgando el "en la":
+  // se recortan la puntuación y las preposiciones que quedaron al final.
+  const field = clean.slice(0, match.index)
+    .replace(/[\s,;.:\-—]+$/, '')
+    .replace(/(?:\s+(?:en|de|del|la|el|los|las|y))+$/i, '')
+    .trim();
+  return { field: field || null, university: clean.slice(match.index).trim() };
+}
+
+/**
  * Genera un embedding sintético determinista de 384 dimensiones para análisis semántico local
  */
 function generateFallbackEmbedding(text) {
@@ -316,10 +343,9 @@ TU OBJETIVO: ${objective}
 
 LO QUE NECESITAS SABER, EN ESTE ORDEN (esto es estructural, no cambia):
 1. El tema o problema de tesis que quiere investigar — OBLIGATORIO. Basta con una idea GENERAL: no hace falta que sea específico ni que la persona lo tenga claro. Si te dice que NO tiene tema, que empieza de cero o que no sabe, ESO YA ES LA RESPUESTA: guárdala en "extracted.problem" como "Sin tema definido (desde cero)" y pasa al punto 2. Nunca vuelvas a preguntar por el tema después de eso.
-2. La CARRERA de su tesis — OBLIGATORIO. Pregúntala solo cuando ya tengas el tema.
-3. La UNIVERSIDAD donde estudia — OBLIGATORIO. Pregúntala solo cuando ya tengas la carrera.
+2. La CARRERA de su tesis y la UNIVERSIDAD donde estudia — OBLIGATORIAS LAS DOS, y se piden JUNTAS, en un mismo mensaje, solo cuando ya tengas el tema: "¿De qué carrera es tu tesis y en qué universidad estudias?". Para efectos del límite de una pregunta por mensaje, esas dos cuentan como UNA: son datos que la persona tiene en la punta de la lengua y separarlos gasta un turno entero sin ganar nada. Si te contesta solo uno de los dos, pides el que falta en el turno siguiente, a secas.
 
-Recién cuando tengas (1), (2) Y (3) marca "ready": true (ver CUÁNDO TERMINAR). Una pregunta por mensaje: nunca pidas la carrera y la universidad juntas.
+Recién cuando tengas (1) y (2) completo —tema, carrera Y universidad— marca "ready": true (ver CUÁNDO TERMINAR).
 
 ESCUCHA SIEMPRE, DE PRINCIPIO A FIN: en CADA mensaje, antes de decidir qué responder, revisa si la persona mencionó —aunque no se lo hayas preguntado y aunque venga mezclado en una sola frase— su TEMA, su CARRERA, su UNIVERSIDAD, su nivel académico o CUÁNDO quiere la reunión, y guárdalo todo en "extracted"/"preferredWhen" en ese mismo turno. Ejemplo: "sobre arquitectura de la continental, tesis con avance" trae carrera (Arquitectura), universidad (Universidad Continental) y tema (tesis ya iniciada, con avance). En Perú las universidades se nombran abreviadas o en minúscula: continental = Universidad Continental, upla = Universidad Peruana Los Andes, uncp = Universidad Nacional del Centro del Perú, unmsm = San Marcos, ucv = César Vallejo, y también upc, pucp, uni, utp, usmp, ulima, undac, unsa. JAMÁS preguntes por un dato que ya te dieron, ni en este mensaje ni en uno anterior.
 
@@ -330,8 +356,8 @@ NO TE PRESENTES: nunca abras diciendo quién eres ni nombrando a la empresa ("so
 CÓMO ES EXACTAMENTE ESE PRIMER MENSAJE (es el que decide si te responden, y se escribe distinto a todos los demás):
 a) Saludo sobrio con su nombre y punto, sin signos de exclamación de apertura y SIN emojis: "Hola, <su nombre>." Nunca "¡Hola, <su nombre>!" ni "¡Hola! 👋".
 b) Inmediatamente después, LA PREGUNTA por su tema de tesis. La pregunta va ANTES de cualquier explicación de lo que hacen: es lo que abre conversación. Nunca metas una frase de catálogo entre el saludo y la pregunta ("te acompañamos con un asesor durante toda tu tesis", "un asesor te guía paso a paso"): se lee como plantilla y es el error a evitar.
-c) Solo si en ese primer mensaje pidieron información, cierras DESPUÉS de la pregunta prometiendo el detalle, en presente y sobre cómo trabajan ustedes: "Con eso te explico cómo trabajamos". JAMÁS en futuro y sobre la persona ("te acompañaremos", "te guiaremos", "lograrás sustentar"): en el primer mensaje todavía no hay nada acordado y esas promesas suenan huecas. Si solo saludaron, sin pedir nada, ese cierre no va: el mensaje termina en la pregunta.
-d) Ejemplos del registro exacto. Pidiendo información: "Hola, Jair. ¿Sobre qué tema quieres hacer tu tesis? Con eso te explico cómo trabajamos." Solo saludo: "Hola, Jair. ¿Ya tienes un tema en mente para tu tesis?"
+c) El mensaje TERMINA en esa pregunta. No prometas nada para después —ni "con eso te explico cómo trabajamos", ni "ahora te cuento", ni "te explico en un momento"—: una promesa en el primer mensaje crea una deuda que el turno siguiente no paga, y el contacto la nota. Tampoco prometas en futuro sobre la persona ("te acompañaremos", "te guiaremos", "lograrás sustentar"): todavía no hay nada acordado y suena hueco. Si te preguntan algo concreto más adelante, ahí sí respondes con los datos reales del servicio.
+d) Ejemplos del registro exacto, y son el mensaje COMPLETO. Pidiendo información: "Hola, Jair. ¿Sobre qué tema quieres hacer tu tesis?" Solo saludo: "Hola, Jair. ¿Ya tienes un tema en mente para tu tesis?"
 e) Ese saludo NO es un acuse de recibo: "Claro que sí", "Por supuesto" y "Con gusto" SOLO valen si la persona te pidió o preguntó algo — nunca le respondas que sí a algo que no te pidió.
 
 NOMBRES: la videollamada se llama siempre "Google Meet", nunca "Meet" a secas.
@@ -449,22 +475,43 @@ Responde ÚNICAMENTE en JSON válido con esta forma exacta (usa null en los camp
     const trimmedIn = (incomingText || '').trim();
 
     const isNoise = trimmedIn.length < 3 || /^(hola|hi|buenas|si|sí|ok|okay|no|informes?|gracias)\b/i.test(trimmedIn);
-    const looksLikeUniversity = /universidad|instituto|\bpucp\b|\bunmsm\b|\bupc\b|\bucv\b|continental|vallejo|cat[oó]lica|nacional de/i.test(trimmedIn);
 
-    // Falta la carrera: se pide, y lo que respondan en el siguiente turno se
-    // toma como carrera (salvo que claramente sea el nombre de una universidad).
+    // Falta la carrera: se piden carrera y universidad en el mismo mensaje, y
+    // la respuesta se parte por la palabra que delata a la universidad
+    // ("Sistemas, UNCP"). Sin LLM no hay extracción real, pero como ahora se
+    // preguntan juntas la mayoría contesta las dos en una línea, y separarlas
+    // así evita volver a preguntar por algo que ya dijo.
     if (!answers.field) {
-      if (isNoise || looksLikeUniversity) {
+      if (isNoise) {
         return {
-          reply: 'Genial 🙌 ¿De qué carrera es tu tesis?',
-          extracted: looksLikeUniversity ? { university: trimmedIn } : {},
+          reply: 'Genial 🙌 ¿De qué carrera es tu tesis y en qué universidad estudias?',
+          extracted: {},
+          ready: false,
+          source: 'fallback'
+        };
+      }
+
+      const { field, university } = splitFieldAndUniversity(trimmedIn);
+
+      if (field && university) {
+        return {
+          reply: 'Perfecto, dame un momento 👀',
+          extracted: { field, university },
+          ready: true,
+          source: 'fallback'
+        };
+      }
+      if (university) {
+        return {
+          reply: 'Genial 🙌 ¿Y de qué carrera es tu tesis?',
+          extracted: { university },
           ready: false,
           source: 'fallback'
         };
       }
       return {
         reply: '¡Perfecto! ¿Y en qué universidad estudias?',
-        extracted: { field: trimmedIn },
+        extracted: { field },
         ready: false,
         source: 'fallback'
       };

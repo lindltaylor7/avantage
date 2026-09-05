@@ -271,6 +271,17 @@ function fullSlotLabels(slots) {
   return (slots || []).map((slot) => slot.label);
 }
 
+/**
+ * La cercanía a la hora que pidió el contacto decide QUÉ bloques se le
+ * ofrecen; el orden en que los lee es otra cosa. Mostrarlos rankeados salía
+ * "5:30, 6:30, 5:00", que parece una lista tirada al azar. Se muestran en
+ * orden de reloj: los tres siguen siendo los más cercanos —eso ya lo dice la
+ * frase de arriba— y así la lista se lee como una lista.
+ */
+function orderSlotsForDisplay(slots) {
+  return [...(slots || [])].sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+}
+
 function numberedList(items) {
   return items.map((item, i) => `${i + 1}. ${item}`).join('\n');
 }
@@ -802,11 +813,14 @@ export class WhatsappBotService {
     // falta (o se pasa a agendar, si ya no falta ninguno).
     const redundantAsk = detectRedundantAsk(result.reply, answers);
     if (redundantAsk) {
+      // Carrera y universidad se piden juntas: son un solo turno.
       const nextQuestion = !answers.problem
         ? 'Cuéntame, ¿qué tema o problema te gustaría desarrollar en tu tesis?'
-        : (!answers.field
-          ? '¡Perfecto! ¿Y de qué carrera es tu tesis?'
-          : (!answers.university ? '¡Perfecto! ¿Y en qué universidad estudias?' : null));
+        : (!answers.field && !answers.university
+          ? '¡Perfecto! ¿De qué carrera es tu tesis y en qué universidad estudias?'
+          : (!answers.field
+            ? '¡Perfecto! ¿Y de qué carrera es tu tesis?'
+            : (!answers.university ? '¡Perfecto! ¿Y en qué universidad estudias?' : null)));
 
       this.logActivity({
         type: 'redundant_question_fixed',
@@ -826,7 +840,10 @@ export class WhatsappBotService {
     // por defecto del panel y el jefe comercial los ve en la reunión;
     // insistir con más preguntas a alguien que ya dijo "quiero reunirme" es
     // la forma más rápida de perderlo.
-    const missingAcademic = !answers.field ? 'field' : (!answers.university ? 'university' : null);
+    // 'both' cuando no se tiene ninguno de los dos: se piden en un solo mensaje.
+    const missingAcademic = (!answers.field && !answers.university)
+      ? 'both'
+      : (!answers.field ? 'field' : (!answers.university ? 'university' : null));
     if (result.schedulingIntent) {
       this.logActivity({ type: 'scheduling_fast_track', waId, text: incomingText, when: answers.__when || null });
       await this.finalize(waId, answers);
@@ -845,9 +862,12 @@ export class WhatsappBotService {
       await this.finalize(waId, answers);
     } else if (result.ready && answers.problem && missingAcademic) {
       // El LLM quiso cerrar sin todos los datos: se pide el que falte.
-      await this.send(waId, missingAcademic === 'field'
-        ? 'Perfecto 🙌 Antes de coordinar la reunión, cuéntame: ¿de qué carrera es tu tesis?'
-        : 'Perfecto 🙌 Una última cosa antes de coordinar la reunión: ¿en qué universidad estudias?');
+      const askMissing = {
+        both: 'Perfecto 🙌 Antes de coordinar la reunión: ¿de qué carrera es tu tesis y en qué universidad estudias?',
+        field: 'Perfecto 🙌 Antes de coordinar la reunión, cuéntame: ¿de qué carrera es tu tesis?',
+        university: 'Perfecto 🙌 Una última cosa antes de coordinar la reunión: ¿en qué universidad estudias?'
+      };
+      await this.send(waId, askMissing[missingAcademic]);
     } else {
       await this.send(waId, result.reply);
     }
@@ -970,7 +990,14 @@ export class WhatsappBotService {
       answers.__scheduling = { topic, email: email || null, mode: null, phone: null, discount: 0, when: when || answers.__when || null };
       await this.updateSession(waId, { status: 'scheduling_mode', answers: JSON.stringify(answers) });
 
-      await this.send(waId, `Coordinemos una reunión con nuestro jefe comercial para revisar tu tema 🙌 ¿Cómo prefieres la llamada?\n\n1. Telefónica\n2. Vía Google Meet (con ${MEET_DISCOUNT_PCT}% de descuento)`);
+      // Devolverle lo que entendimos antes de saltar a agendar: es el único
+      // momento en que puede corregirnos si interpretamos mal su carrera o su
+      // universidad, y sin eso el salto de "¿en qué universidad estudias?" a
+      // "coordinemos una reunión" se siente como si nadie hubiera leído nada.
+      const understood = [answers.field, answers.university].filter(Boolean).join(' en ');
+      const opener = understood ? `Perfecto: ${understood}. ` : '';
+
+      await this.send(waId, `${opener}Coordinemos una reunión con nuestro jefe comercial para revisar tu tema 🙌 ¿Cómo prefieres la reunión?\n\n1. Telefónica\n2. Por Google Meet (con ${MEET_DISCOUNT_PCT}% de descuento sobre el precio final)`);
     } catch (error) {
       // Si la conexión de Google Calendar del asesor caducó, avisar al equipo
       // en el panel para que la reconecte — si no, todos los leads que
@@ -1001,8 +1028,8 @@ export class WhatsappBotService {
     switch (status) {
       case 'scheduling_mode':
         return {
-          question: `¿Cómo prefieres la llamada? 1. Telefónica / 2. Vía Google Meet (con ${MEET_DISCOUNT_PCT}% de descuento)`,
-          restate: `Volviendo a lo nuestro: ¿cómo prefieres la llamada?\n\n1. Telefónica\n2. Vía Google Meet (con ${MEET_DISCOUNT_PCT}% de descuento)`
+          question: `¿Cómo prefieres la reunión? 1. Telefónica / 2. Por Google Meet (con ${MEET_DISCOUNT_PCT}% de descuento sobre el precio final)`,
+          restate: `Volviendo a lo nuestro: ¿cómo prefieres la reunión?\n\n1. Telefónica\n2. Por Google Meet (con ${MEET_DISCOUNT_PCT}% de descuento sobre el precio final)`
         };
       case 'scheduling_phone':
         return {
@@ -1127,7 +1154,8 @@ export class WhatsappBotService {
    * que el primer número siga siendo el más parecido a lo que pidió.
    */
   async _fillNearbySlots(slots, preferredTime) {
-    if (!preferredTime || slots.length >= MIN_SLOTS_TO_OFFER) return slots;
+    if (!preferredTime) return slots;
+    if (slots.length >= MIN_SLOTS_TO_OFFER) return orderSlotsForDisplay(slots);
 
     const nearby = await this.googleCalendarService.getFreeSlotsNearTime(
       BOOKING_ADVISOR_USER_ID,
@@ -1141,7 +1169,8 @@ export class WhatsappBotService {
       if (!merged.some((existing) => existing.startTime === slot.startTime)) merged.push(slot);
     }
 
-    return this.googleCalendarService.rankFreeSlots(merged, preferredTime).slice(0, SLOTS_TO_OFFER);
+    const ranked = this.googleCalendarService.rankFreeSlots(merged, preferredTime).slice(0, SLOTS_TO_OFFER);
+    return orderSlotsForDisplay(ranked);
   }
 
   /**
@@ -1164,6 +1193,11 @@ export class WhatsappBotService {
     const date = parsed?.date;
     if (!date) return false;
 
+    // Lo que se le había ofrecido antes, para saber si está repreguntando por
+    // el mismo día. Se guarda ahora porque `scheduling.slots` se reemplaza más
+    // abajo con la lista nueva.
+    const previousSlots = scheduling.slots;
+
     const slots = await this.googleCalendarService.getFreeSlotsForDate(
       BOOKING_ADVISOR_USER_ID, date, { limit: SLOTS_TO_OFFER, nearTime: parsed.preferredTime }
     );
@@ -1180,23 +1214,39 @@ export class WhatsappBotService {
 
       // Se le ofreció lo que pidió: la conversación avanzó y el contador de
       // respuestas sin coincidencia vuelve a cero.
-      scheduling.slots = slots;
+      const offered = orderSlotsForDisplay(slots);
+      scheduling.slots = offered;
       scheduling.attempts = 0;
       await this.updateSession(waId, { answers: JSON.stringify(answers) });
+
+      // Preguntó por el mismo día que ya se le había propuesto ("¿puede ser
+      // mañana?" cuando lo ofrecido era justo mañana). Repetirle la lista tal
+      // cual parece que no lo leímos: primero se le contesta que sí.
+      const sameDayAsOffered = (previousSlots || []).length > 0
+        && (previousSlots || []).every((slot) => slot.date === date);
+
+      // Si nombró una hora y esa no está en la lista, se dice antes de
+      // enseñarle otras. Recibir horarios sin el que pediste, y sin una
+      // palabra al respecto, se lee como que nadie te escuchó.
+      let intro;
+      if (parsed.preferredTime) {
+        intro = `A las ${formatClockLabel(parsed.preferredTime)} el jefe comercial no tiene libre ${dayLabelWithArticle(date)}. Estos son los más cercanos:`;
+      } else if (sameDayAsOffered) {
+        intro = `Sí, esos horarios son justo ${dayLabelWithArticle(date)}:`;
+      } else {
+        intro = `📅 Para ${dayLabelWithArticle(date)} tenemos:`;
+      }
+
       await this.send(
         waId,
-        `📅 Para ${dayLabelWithArticle(date)} tenemos:\n\n${numberedList(slotOptionLabels(slots))}\n\n` +
+        `${intro}\n\n${numberedList(slotOptionLabels(offered))}\n\n` +
         'Responde con el número que prefieras, o "no" si prefieres que te contacten después.'
       );
       return true;
     }
 
-    // Ese día no da. El motivo importa: si el día SÍ tenía bloques y lo único
-    // que sobra es la anticipación mínima, decirle "no hay agenda" suena a
-    // mentira (él sabe que el asesor atiende hoy). Se distingue repitiendo la
-    // consulta sin ese margen.
-    // Si ya se le explicó que ese día no da y vuelve a pedirlo, repetir la
-    // misma negativa es el otro bucle posible. Ahí lo coordina una persona.
+    // Ese día no da. Si ya se le explicó una vez y vuelve a pedirlo, repetir
+    // la misma negativa es el otro bucle posible: ahí lo coordina una persona.
     if ((scheduling.deniedDays || []).includes(date)) {
       delete answers.__scheduling;
       await this.updateSession(waId, { answers: JSON.stringify(answers) });
@@ -1205,6 +1255,10 @@ export class WhatsappBotService {
     }
     scheduling.deniedDays = [...(scheduling.deniedDays || []), date];
 
+    // El motivo importa: si el día SÍ tenía bloques y lo único que sobra es la
+    // anticipación mínima, decirle "no hay agenda" suena a mentira (él sabe
+    // que el asesor atiende hoy). Se distingue repitiendo la consulta sin ese
+    // margen.
     const withoutLeadTime = await this.googleCalendarService.getFreeSlotsForDate(
       BOOKING_ADVISOR_USER_ID, date, { limit: 1, minLeadTimeMinutes: 0 }
     );
@@ -1387,7 +1441,7 @@ export class WhatsappBotService {
       await this.promptForDate(waId);
     } else {
       await this.updateSession(waId, { status: 'scheduling_email', answers: JSON.stringify(answers) });
-      await this.send(waId, `Perfecto, aplico el ${MEET_DISCOUNT_PCT}% de descuento ✉️ ¿A qué correo te envío el link de Google Meet?`);
+      await this.send(waId, `Listo, queda con el ${MEET_DISCOUNT_PCT}% de descuento sobre el precio final ✉️ ¿A qué correo te envío el link de Google Meet?`);
     }
   }
 
@@ -1612,7 +1666,8 @@ export class WhatsappBotService {
       if (await this._answerDayRequestWhileChoosing(waId, answers, scheduling, trimmed)) return;
 
       if (preferredTime) {
-        const nearSlots = await this.googleCalendarService.getFreeSlotsNearTime(BOOKING_ADVISOR_USER_ID, preferredTime, { limit: SLOTS_TO_OFFER, days: BOOKING_WINDOW_DAYS });
+        const ranked = await this.googleCalendarService.getFreeSlotsNearTime(BOOKING_ADVISOR_USER_ID, preferredTime, { limit: SLOTS_TO_OFFER, days: BOOKING_WINDOW_DAYS });
+        const nearSlots = orderSlotsForDisplay(ranked);
         if (nearSlots.length > 0) {
           scheduling.slots = nearSlots;
           scheduling.attempts = 0;
@@ -1736,7 +1791,7 @@ export class WhatsappBotService {
           ? `\n\n📞 Te llamaremos${contactPhone ? ` al ${contactPhone}` : ''}.`
           : (event.meetLink ? `\n\n🔗 Link de Google Meet: ${event.meetLink}` : '') +
             (invitedEmail ? `\n📩 También te llegó la invitación a ${invitedEmail}.` : '') +
-            (scheduling.discount ? `\n🎁 Se aplicó ${scheduling.discount}% de descuento.` : '')) +
+            (scheduling.discount ? `\n🎁 Se aplicó el ${scheduling.discount}% de descuento sobre el precio final.` : '')) +
         '\n\nSi no puedes a esa hora, escríbeme por aquí y la movemos. ¡Te esperamos! 🙌'
       );
     } catch (error) {
