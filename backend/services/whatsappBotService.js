@@ -46,11 +46,25 @@ const MIN_SLOTS_TO_OFFER = 2;
 // lo coordina una persona.
 const MAX_SLOT_CHOICE_ATTEMPTS = 2;
 
+// El mismo tope, pero para el resto de pasos del agendamiento (modalidad,
+// teléfono, día): cuántas respuestas seguidas que no se pueden leer como el
+// dato del paso se toleran antes de pasarle la conversación a un asesor.
+// Sin esto, elegir modalidad repetía "Responde *1* ... o *2*" sin límite ante
+// cualquier cosa que no fuera un número ("👍🏼", "hasta la vista baby"): el
+// contacto ya no estaba respondiendo al menú y el bot seguía insistiendo.
+const MAX_STEP_MISSES = 2;
+
+// Tope aparte para los turnos que SÍ se atendieron dentro de un mismo paso
+// (preguntas sueltas respondidas y el paso retomado). Responderlas está bien,
+// pero quien lleva cuatro mensajes preguntando cosas sin elegir opción quiere
+// hablar con una persona, no recibir el mismo menú una quinta vez.
+const MAX_STEP_TURNS = 4;
+
 // Estados del flujo de agendamiento (todos "esperan respuesta del contacto").
 const SCHEDULING_STATUSES = ['scheduling_mode', 'scheduling_phone', 'scheduling_email', 'scheduling_date', 'scheduling_time'];
 
 // Descuento que se aplica si el lead elige reunión por Google Meet en vez de
-// llamada telefónica (solo informativo: lo confirma el jefe comercial).
+// llamada telefónica (solo informativo: lo confirma el ).
 const MEET_DISCOUNT_PCT = Number(process.env.WHATSAPP_MEET_DISCOUNT_PCT) || 10;
 
 // Los mensajes de un contacto suelen llegar en varias burbujas seguidas
@@ -76,6 +90,27 @@ const POST_BOOKING_DEBOUNCE_MS = Number(process.env.WHATSAPP_BOT_POST_BOOKING_DE
 const GREETING_EXTRA_WAIT_MS = Number(process.env.WHATSAPP_BOT_GREETING_EXTRA_WAIT_MS) || 8000;
 
 const GREETING_ONLY_RE = /^(?:hola+|ola+|buenas|buenos d[ií]as|buenas tardes|buenas noches|buen d[ií]a|hi|hey|saludos|qu[eé] tal|holi+)(?:\s+(?:hola+|buenas|d[ií]as|tardes|noches|amigo|se[ñn]or(?:ita)?|buen d[ií]a))*[\s!¡.,?¿]*$/i;
+
+// Saludo de APERTURA al principio de una respuesta del bot: la palabra de
+// saludo, opcionalmente el nombre del contacto, y su punto de cierre. Exigir
+// ese punto (o el signo de admiración) es lo que evita que se coma frases que
+// solo empiezan parecido ("Buenas noticias: hay agenda hoy").
+const OPENING_GREETING_RE = /^\s*¡?\s*(?:hola+|buenas(?:\s+(?:tardes|noches))?|buenos\s+d[ií]as|buen\s+d[ií]a|qu[eé]\s+tal)(?:\s*,?\s*\p{L}+)?\s*[.!]+\s*/iu;
+
+/**
+ * Quita el saludo de apertura de una respuesta que NO es la primera de la
+ * conversación. El prompt trae los ejemplos del primer mensaje escritos
+ * literalmente ("Hola, Jair. ¿Ya tienes un tema en mente para tu tesis?") y el
+ * modelo los copiaba tal cual en un turno posterior: el contacto recibía dos
+ * aperturas seguidas, como si nadie hubiera leído la conversación. Si el
+ * mensaje era SOLO el saludo se devuelve intacto, para no dejarlo vacío.
+ */
+function stripOpeningGreeting(reply) {
+  const text = String(reply || '');
+  const stripped = text.replace(OPENING_GREETING_RE, '').trimStart();
+  if (!stripped || stripped === text) return text;
+  return stripped.charAt(0).toUpperCase() + stripped.slice(1);
+}
 
 /** ¿El texto acumulado es solo un saludo, sin ningún contenido? */
 function isGreetingOnly(text) {
@@ -664,34 +699,66 @@ export class WhatsappBotService {
     });
 
     const fire = () => {
-      this.pendingMessages.delete(waId);
       const joined = pending.messages.join('\n');
       // La marca se toma AQUÍ, no dentro del turno: entre que el temporizador
       // dispara y el turno lee la sesión hay consultas a la base de datos, y
       // una burbuja que cayera justo ahí ya no se detectaría como posterior.
       const mark = this.inboundCounter.get(waId) || 0;
+
+      // El buffer NO se borra al disparar: el turno tarda lo que tarde el LLM
+      // más la espera del gap de envío (juntos, más de diez segundos), y en
+      // todo ese rato este sigue siendo el punto de entrada del contacto. Si
+      // se borrara, la burbuja que llegue mientras el bot está respondiendo
+      // abriría su propio turno y saldrían dos respuestas encimadas — que es
+      // como el contacto recibía dos saludos de apertura seguidos.
+      pending.messages = [];
+      pending.running = true;
+      // Tras el primer turno ya no se prorroga por saludo: la prórroga existe
+      // para no gastar el turno de apertura, no para retrasar un "gracias".
+      pending.extendedForGreeting = true;
+
+      const done = () => {
+        if (this.pendingMessages.get(waId) !== pending) return;
+        pending.running = false;
+        if (pending.messages.length === 0) {
+          this.pendingMessages.delete(waId);
+          return;
+        }
+        // Llegó algo mientras respondíamos: se reabre la espera de silencio
+        // con lo acumulado, en un solo turno más.
+        this.logActivity({ type: 'buffer_reopened', waId, bufferSize: pending.messages.length, waitMs: pending.waitMs });
+        if (pending.timer) clearTimeout(pending.timer);
+        pending.timer = setTimeout(fire, pending.waitMs);
+      };
+
       // A la cola serializada: si todavía hay un turno anterior en curso para
       // este contacto, este espera a que termine (y re-evalúa el estado)
       // en vez de correr en paralelo y duplicar mensajes.
-      this.runSerialized(waId, () => this.runConversationTurn(waId, joined, mark)).catch((error) => {
+      this.runSerialized(waId, () => this.runConversationTurn(waId, joined, mark)).then(done, (error) => {
         this.logActivity({ type: 'conversation_turn_failed', waId, error: error.message });
         console.error(`❌ [WhatsApp Bot] Error en el turno de conversación con ${waId}:`, error);
+        done();
       });
     };
 
-    if (pending.timer) clearTimeout(pending.timer);
-    pending.timer = setTimeout(() => {
-      // Solo un saludo: se espera una vez más en vez de gastar un turno en
-      // responder algo que no dice nada. Si en esa prórroga llega el mensaje
-      // real, entra al mismo buffer y se responde todo junto.
-      if (!pending.extendedForGreeting && isGreetingOnly(pending.messages.join(' '))) {
-        pending.extendedForGreeting = true;
-        this.logActivity({ type: 'buffer_extended', waId, text: pending.messages.join('\n'), waitMs: GREETING_EXTRA_WAIT_MS });
-        pending.timer = setTimeout(fire, GREETING_EXTRA_WAIT_MS);
-        return;
-      }
-      fire();
-    }, pending.waitMs);
+    // Con un turno en curso no se arma temporizador: la espera de silencio la
+    // reabre `done()` cuando ese turno termina. Armarlo aquí haría que la
+    // burbuja disparara un segundo turno antes de que el primero acabara.
+    if (!pending.running) {
+      if (pending.timer) clearTimeout(pending.timer);
+      pending.timer = setTimeout(() => {
+        // Solo un saludo: se espera una vez más en vez de gastar un turno en
+        // responder algo que no dice nada. Si en esa prórroga llega el mensaje
+        // real, entra al mismo buffer y se responde todo junto.
+        if (!pending.extendedForGreeting && isGreetingOnly(pending.messages.join(' '))) {
+          pending.extendedForGreeting = true;
+          this.logActivity({ type: 'buffer_extended', waId, text: pending.messages.join('\n'), waitMs: GREETING_EXTRA_WAIT_MS });
+          pending.timer = setTimeout(fire, GREETING_EXTRA_WAIT_MS);
+          return;
+        }
+        fire();
+      }, pending.waitMs);
+    }
 
     this.pendingMessages.set(waId, pending);
   }
@@ -781,6 +848,10 @@ export class WhatsappBotService {
       latencyMs: Date.now() - startedAt
     });
 
+    // Red de seguridad contra la segunda apertura: la conversación ya estaba
+    // abierta, así que un "Hola, <nombre>." al inicio de la respuesta sobra.
+    if (!isFirstTurn && result.reply) result.reply = stripOpeningGreeting(result.reply);
+
     const extracted = result.extracted || {};
     if (extracted.problem) answers.problem = extracted.problem;
     if (extracted.location) answers.location = extracted.location;
@@ -837,7 +908,7 @@ export class WhatsappBotService {
     // Pedir la reunión gana sobre cualquier dato que falte: si el contacto ya
     // dijo que quiere agendar (o propuso un día y una hora), se pasa a
     // agendar de inmediato. Los datos que no dio se completan con los valores
-    // por defecto del panel y el jefe comercial los ve en la reunión;
+    // por defecto del panel y el  los ve en la reunión;
     // insistir con más preguntas a alguien que ya dijo "quiero reunirme" es
     // la forma más rápida de perderlo.
     // 'both' cuando no se tiene ninguno de los dos: se piden en un solo mensaje.
@@ -964,7 +1035,7 @@ export class WhatsappBotService {
     this.logActivity({ type: 'scheduling_offer_skipped', waId, reason });
     await this.updateSession(waId, { status: 'completed' });
     await this.moveFunnelStage(waId, 'transferido_closer');
-    await this.send(waId, 'El jefe comercial se pondrá en contacto contigo pronto para coordinar la reunión. ¡Gracias! 🙌');
+    await this.send(waId, 'El  se pondrá en contacto contigo pronto para coordinar la reunión. ¡Gracias! 🙌');
   }
 
   /**
@@ -997,7 +1068,7 @@ export class WhatsappBotService {
       const understood = [answers.field, answers.university].filter(Boolean).join(' en ');
       const opener = understood ? `Perfecto: ${understood}. ` : '';
 
-      await this.send(waId, `${opener}Coordinemos una reunión con nuestro jefe comercial para revisar tu tema 🙌 ¿Cómo prefieres la reunión?\n\n1. Telefónica\n2. Por Google Meet (con ${MEET_DISCOUNT_PCT}% de descuento sobre el precio final)`);
+      await this.send(waId, `${opener}Coordinemos una reunión con nuestro  para revisar tu tema 🙌 ¿Cómo prefieres la reunión?\n\n1. Telefónica\n2. Por Google Meet (con ${MEET_DISCOUNT_PCT}% de descuento sobre el precio final)`);
     } catch (error) {
       // Si la conexión de Google Calendar del asesor caducó, avisar al equipo
       // en el panel para que la reconecte — si no, todos los leads que
@@ -1029,34 +1100,39 @@ export class WhatsappBotService {
       case 'scheduling_mode':
         return {
           question: `¿Cómo prefieres la reunión? 1. Telefónica / 2. Por Google Meet (con ${MEET_DISCOUNT_PCT}% de descuento sobre el precio final)`,
-          restate: `Volviendo a lo nuestro: ¿cómo prefieres la reunión?\n\n1. Telefónica\n2. Por Google Meet (con ${MEET_DISCOUNT_PCT}% de descuento sobre el precio final)`
+          restate: `Volviendo a lo nuestro: ¿cómo prefieres la reunión?\n\n1. Telefónica\n2. Por Google Meet (con ${MEET_DISCOUNT_PCT}% de descuento sobre el precio final)`,
+          restateShort: '¿La hacemos por teléfono (*1*) o por Google Meet (*2*)?'
         };
       case 'scheduling_phone':
         return {
           question: '¿A qué número te llamamos, con código de país?',
-          restate: 'Y volviendo a la llamada: ¿a qué número te marcamos? (con código de país, ej: 51987654321)'
+          restate: 'Y volviendo a la llamada: ¿a qué número te marcamos? (con código de país, ej: 51987654321)',
+          restateShort: '¿A qué número te marcamos?'
         };
       case 'scheduling_email':
         return {
           question: '¿A qué correo te mando la invitación al calendario?',
-          restate: 'Y para mandarte la invitación al calendario, ¿a qué correo te la envío? Si prefieres, dime "no" y te dejo el link por aquí.'
+          restate: 'Y para mandarte la invitación al calendario, ¿a qué correo te la envío? Si prefieres, dime "no" y te dejo el link por aquí.',
+          restateShort: '¿A qué correo te mando la invitación?'
         };
       case 'scheduling_date': {
         const phrase = scheduling.availableWindows || this._availableDaysPhrase(scheduling.availableDays || []) || 'los próximos días';
         return {
           question: `¿Qué día prefieres para la llamada? La agenda disponible es: ${endSentence(phrase)}`,
-          restate: `Volviendo a la agenda: tenemos ${endSentence(phrase)} ¿Qué día prefieres?`
+          restate: `Volviendo a la agenda: tenemos ${endSentence(phrase)} ¿Qué día prefieres?`,
+          restateShort: '¿Qué día te viene mejor?'
         };
       }
       case 'scheduling_time': {
         const list = numberedList(slotOptionLabels(scheduling.slots));
         return {
           question: `¿Cuál de estos horarios prefieres?\n${list}`,
-          restate: `Volviendo a los horarios:\n\n${list}\n\nResponde con el número que prefieras, o "no" si prefieres que te contacten después.`
+          restate: `Volviendo a los horarios:\n\n${list}\n\nResponde con el número que prefieras, o "no" si prefieres que te contacten después.`,
+          restateShort: '¿Con cuál de esos horarios te quedas? Responde con su número.'
         };
       }
       default:
-        return { question: '', restate: '' };
+        return { question: '', restate: '', restateShort: '' };
     }
   }
 
@@ -1134,14 +1210,66 @@ export class WhatsappBotService {
       return this.dispatchByStatus(waId, text);
     }
 
-    // Solo preguntó: respuesta + el paso retomado en un único mensaje, para
-    // no partir en dos burbujas algo que en una conversación real va junto.
-    await this.send(waId, step.restate ? `${aside.answer}\n\n${step.restate}` : aside.answer);
+    // Solo preguntó. Responder está bien, pero si ya lleva varias preguntas
+    // sin elegir nada, lo que quiere es hablar con alguien: se le contesta
+    // esta última y la coordinación pasa a un asesor, en vez de devolverle el
+    // mismo menú una vez más.
+    const { answers: current, scheduling: live } = this._readScheduling(await this.getSession(waId));
+    if (live) {
+      live.stepTurns = (live.stepTurns || 0) + 1;
+      if (live.stepTurns >= MAX_STEP_TURNS) {
+        await this.send(waId, aside.answer);
+        delete current.__scheduling;
+        await this.updateSession(waId, { answers: JSON.stringify(current) });
+        await this.handOffToAdvisor(waId, 'El lead siguió preguntando sin elegir una opción del agendamiento.');
+        return;
+      }
+    }
+
+    // Repetir el bloque completo de opciones en cada respuesta se lee como un
+    // contestador: la primera vez va entero, de ahí en adelante una línea.
+    const restated = live ? (live.restated || 0) : 0;
+    const restate = restated >= 1 ? (step.restateShort || step.restate) : step.restate;
+    if (live) {
+      live.restated = restated + 1;
+      await this.updateSession(waId, { answers: JSON.stringify(current) });
+    }
+
+    await this.send(waId, restate ? `${aside.answer}\n\n${restate}` : aside.answer);
+  }
+
+  /**
+   * Registra que el contacto respondió algo que NO es el dato que pide el paso
+   * actual. Devuelve true si con esta ya se agotó la insistencia y la
+   * conversación pasó a un asesor — quien llama debe cortar ahí sin mandar
+   * nada más.
+   */
+  async _registerStepMiss(waId, answers, scheduling, reason) {
+    scheduling.misses = (scheduling.misses || 0) + 1;
+    this.logActivity({ type: 'step_miss', waId, status: reason, misses: scheduling.misses });
+
+    if (scheduling.misses >= MAX_STEP_MISSES) {
+      delete answers.__scheduling;
+      await this.updateSession(waId, { answers: JSON.stringify(answers) });
+      await this.handOffToAdvisor(waId, reason);
+      return true;
+    }
+
+    await this.updateSession(waId, { answers: JSON.stringify(answers) });
+    return false;
+  }
+
+  /** El paso avanzó de verdad: se reinicia todo lo que cuenta insistencia. */
+  _clearStepMisses(scheduling) {
+    if (!scheduling) return;
+    scheduling.misses = 0;
+    scheduling.stepTurns = 0;
+    scheduling.restated = 0;
   }
 
   /** Utilidad: lee `answers.__scheduling` de la sesión (o null si no existe). */
   _readScheduling(session) {
-    const answers = typeof session.answers === 'string' ? JSON.parse(session.answers) : (session.answers || {});
+    const answers = typeof session?.answers === 'string' ? JSON.parse(session.answers) : (session?.answers || {});
     return { answers, scheduling: answers.__scheduling || null };
   }
 
@@ -1230,7 +1358,7 @@ export class WhatsappBotService {
       // palabra al respecto, se lee como que nadie te escuchó.
       let intro;
       if (parsed.preferredTime) {
-        intro = `A las ${formatClockLabel(parsed.preferredTime)} el jefe comercial no tiene libre ${dayLabelWithArticle(date)}. Estos son los más cercanos:`;
+        intro = `A las ${formatClockLabel(parsed.preferredTime)} el  no tiene libre ${dayLabelWithArticle(date)}. Estos son los más cercanos:`;
       } else if (sameDayAsOffered) {
         intro = `Sí, esos horarios son justo ${dayLabelWithArticle(date)}:`;
       } else {
@@ -1267,7 +1395,7 @@ export class WhatsappBotService {
     const dayLabel = date === limaTodayIso() ? 'hoy' : dayLabelWithArticle(date);
 
     const reason = blockedByLeadTime
-      ? `Para ${dayLabel} ya no alcanzamos: el jefe comercial necesita al menos ${hours === 1 ? 'una hora' : `${hours} horas`} de anticipación.`
+      ? `Para ${dayLabel} ya no alcanzamos: el  necesita al menos ${hours === 1 ? 'una hora' : `${hours} horas`} de anticipación.`
       : `Para ${dayLabel} ya no queda espacio.`;
 
     await this.updateSession(waId, { answers: JSON.stringify(answers) });
@@ -1346,13 +1474,13 @@ export class WhatsappBotService {
             if (!preferredTime) {
               intro = `📅 Perfecto, para ${dayLabelWithArticle(targetDate)} hay estos horarios:`;
             } else if (explicitDate) {
-              intro = `A las ${formatClockLabel(preferredTime)} el jefe comercial no tiene libre ${dayLabelWithArticle(targetDate)}. Estos son los más cercanos:`;
+              intro = `A las ${formatClockLabel(preferredTime)} el  no tiene libre ${dayLabelWithArticle(targetDate)}. Estos son los más cercanos:`;
             } else if (spansDays) {
               // Solo dijo la hora y la lista salió de varios días: cada opción
               // lleva su fecha, así que nombrar un día aquí sobra.
-              intro = `A las ${formatClockLabel(preferredTime)} el jefe comercial no tiene libre. Estos son los más cercanos:`;
+              intro = `A las ${formatClockLabel(preferredTime)} el  no tiene libre. Estos son los más cercanos:`;
             } else {
-              intro = `A las ${formatClockLabel(preferredTime)} el jefe comercial no tiene libre. Lo más cercano para ${dayLabelWithArticle(targetDate)}:`;
+              intro = `A las ${formatClockLabel(preferredTime)} el  no tiene libre. Lo más cercano para ${dayLabelWithArticle(targetDate)}:`;
             }
 
             scheduling.slots = slots;
@@ -1393,7 +1521,7 @@ export class WhatsappBotService {
     await this.updateSession(waId, { status: 'scheduling_date', answers: JSON.stringify(answers) });
     await this.send(
       waId,
-      `📅 Tenemos agenda ${endSentence(windowsPhrase)} ¿Qué día prefieres para la llamada con el jefe comercial?`
+      `📅 Tenemos agenda ${endSentence(windowsPhrase)} ¿Qué día prefieres para la llamada con el ?`
     );
   }
 
@@ -1416,10 +1544,15 @@ export class WhatsappBotService {
 
     const mode = parseCallMode(text);
     if (!mode) {
+      // Se pregunta de nuevo UNA vez; a la siguiente lo coordina una persona.
+      // Repetir el mismo "responde 1 o 2" ante un emoji o una despedida es el
+      // bucle que hace que el contacto deje de responder.
+      if (await this._registerStepMiss(waId, answers, scheduling, 'El lead no eligió modalidad de reunión.')) return;
       await this.send(waId, `Responde *1* para llamada telefónica, o *2* para Google Meet (con ${MEET_DISCOUNT_PCT}% de descuento).`);
       return;
     }
 
+    this._clearStepMisses(scheduling);
     scheduling.mode = mode;
     scheduling.discount = mode === 'meet' ? MEET_DISCOUNT_PCT : 0;
 
@@ -1457,10 +1590,12 @@ export class WhatsappBotService {
     }
 
     if (!looksLikePhone(text)) {
+      if (await this._registerStepMiss(waId, answers, scheduling, 'El lead no dejó un número de contacto válido.')) return;
       await this.send(waId, 'No reconocí el número 🤔 Pásamelo con el código de país (ej: 51987654321).');
       return;
     }
 
+    this._clearStepMisses(scheduling);
     scheduling.phone = digitsOnly(text);
     await this.updateSession(waId, { answers: JSON.stringify(answers) });
     await this.promptForDate(waId);
@@ -1476,6 +1611,7 @@ export class WhatsappBotService {
 
     if (foundEmail) {
       scheduling.email = foundEmail;
+      this._clearStepMisses(scheduling);
     } else if (this._isSchedulingRefusal(trimmed) || normalize(trimmed).includes('no tengo')) {
       // Sigue sin correo: el link de Google Meet se le manda por acá mismo. Se
       // marca para no volver a pedírselo si vuelve a pasar por este paso.
@@ -1588,14 +1724,18 @@ export class WhatsappBotService {
     const { date, preferredTime } = await this.ollamaService.parseSchedulingDate(trimmed, todayIso, MAX_BOOKING_DAYS_AHEAD);
 
     if (!date) {
+      if (await this._registerStepMiss(waId, answers, scheduling, 'No se logró identificar el día que quería el lead.')) return;
       await this.send(waId, `No identifiqué el día 🤔 Tenemos agenda ${endSentence(daysPhrase)} ¿Cuál prefieres?`);
       return;
     }
 
     if (!availableDays.includes(date)) {
+      if (await this._registerStepMiss(waId, answers, scheduling, 'El lead insistió con días en los que no hay agenda.')) return;
       await this.send(waId, `Ese día no hay agenda. Tenemos ${endSentence(daysPhrase)} ¿Cuál te viene bien?`);
       return;
     }
+
+    this._clearStepMisses(scheduling);
 
     const daySlots = await this.googleCalendarService.getFreeSlotsForDate(BOOKING_ADVISOR_USER_ID, date, { limit: SLOTS_TO_OFFER, nearTime: preferredTime });
     if (daySlots.length === 0) {
@@ -1631,7 +1771,7 @@ export class WhatsappBotService {
     const slots = await this._fillNearbySlots(daySlots, preferredTime);
     const intro = !preferredTime
       ? `📅 Horarios para ${dayLabelWithArticle(date)}:`
-      : `A las ${formatClockLabel(preferredTime)} el jefe comercial no tiene libre ese día. Estos son los más cercanos:`;
+      : `A las ${formatClockLabel(preferredTime)} el  no tiene libre ese día. Estos son los más cercanos:`;
 
     scheduling.slots = slots;
     await this.updateSession(waId, { status: 'scheduling_time', answers: JSON.stringify(answers) });
@@ -1687,7 +1827,7 @@ export class WhatsappBotService {
           await this.updateSession(waId, { answers: JSON.stringify(answers) });
           await this.send(
             waId,
-            `Ese horario el jefe comercial no lo tiene libre, pero estos son los más cercanos a lo que buscas:\n\n${numberedList(slotOptionLabels(nearSlots))}\n\nResponde con el número que prefieras, o "no" si prefieres que te contacten después.`
+            `Ese horario el  no lo tiene libre, pero estos son los más cercanos a lo que buscas:\n\n${numberedList(slotOptionLabels(nearSlots))}\n\nResponde con el número que prefieras, o "no" si prefieres que te contacten después.`
           );
           return;
         }
@@ -1829,7 +1969,7 @@ export class WhatsappBotService {
 
       await this.send(
         waId,
-        `✅ ¡Listo${name ? `, ${name}` : ''}! Tu ${isPhone ? 'llamada telefónica' : 'reunión por Google Meet'} con el jefe comercial quedó agendada para *${slot.label}* (hora de Perú)${durationLabel ? ` y dura ${durationLabel}` : ''}.` +
+        `✅ ¡Listo${name ? `, ${name}` : ''}! Tu ${isPhone ? 'llamada telefónica' : 'reunión por Google Meet'} con el  quedó agendada para *${slot.label}* (hora de Perú)${durationLabel ? ` y dura ${durationLabel}` : ''}.` +
         (isPhone
           ? `\n\n📞 Te llamaremos${contactPhone ? ` al ${contactPhone}` : ''}.`
           : (event.meetLink ? `\n\n🔗 Link de Google Meet: ${event.meetLink}` : '') +
@@ -1877,7 +2017,7 @@ export class WhatsappBotService {
       const name = firstNameOf(meeting.lead_full_name);
       const startsIn = formatTimeUntil(meeting.start_time);
       const text =
-        `⏰ ${name ? `${name}, te` : 'Te'} recuerdo tu reunión con el jefe comercial: *${formatMeetingDateTimeLabel(meeting.start_time)}*${startsIn ? ` (${startsIn})` : ''}.` +
+        `⏰ ${name ? `${name}, te` : 'Te'} recuerdo tu reunión con el : *${formatMeetingDateTimeLabel(meeting.start_time)}*${startsIn ? ` (${startsIn})` : ''}.` +
         (meeting.meet_link ? `\n\n🔗 ${meeting.meet_link}` : '\n\n📞 Te llamamos a este mismo número.') +
         '\n\nSi no puedes, escríbeme por aquí y la movemos.';
 
