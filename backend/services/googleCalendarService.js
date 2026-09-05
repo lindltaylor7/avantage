@@ -34,6 +34,36 @@ function limaDateOf(date) {
   return LIMA_DATE_FORMATTER.format(date);
 }
 
+const LIMA_TIME_FORMATTER = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+});
+
+/** Minutos transcurridos del día (hora de Lima) para un instante dado. */
+function minutesOfDayLima(date) {
+  const parts = LIMA_TIME_FORMATTER.formatToParts(date);
+  const h = Number(parts.find((p) => p.type === 'hour').value);
+  const m = Number(parts.find((p) => p.type === 'minute').value);
+  return h * 60 + m;
+}
+
+/**
+ * Reordena bloques libres por cercanía a una hora del día ("HH:MM", 24h, hora
+ * de Lima), empatando por el más próximo en el tiempo. Se usa cuando el lead
+ * dijo a qué hora le viene bien: sin esto se le ofrecen siempre los primeros
+ * bloques del día, aunque haya pedido explícitamente otra hora.
+ */
+function rankByProximityToTime(slots, preferredTime) {
+  const [ph, pm] = String(preferredTime || '').split(':').map(Number);
+  if (!Number.isFinite(ph) || !Number.isFinite(pm)) return slots;
+  const preferredMinutes = ph * 60 + pm;
+
+  return [...slots].sort((a, b) => {
+    const diffA = Math.abs(minutesOfDayLima(a.start) - preferredMinutes);
+    const diffB = Math.abs(minutesOfDayLima(b.start) - preferredMinutes);
+    return diffA - diffB || (a.start - b.start);
+  });
+}
+
 /** Da forma uniforme a un bloque libre para devolverlo a los llamadores. */
 function toFreeSlot(slot) {
   return {
@@ -360,7 +390,7 @@ export class GoogleCalendarService {
    * "YYYY-MM-DD", calendario de Lima) — usado cuando el lead ya dijo qué día
    * prefiere, en vez de mostrarle una lista genérica de próximos horarios.
    */
-  async getFreeSlotsForDate(userId, dateStr, { slotMinutes = 30, minLeadTimeMinutes = 120, limit = 3 } = {}) {
+  async getFreeSlotsForDate(userId, dateStr, { slotMinutes = 30, minLeadTimeMinutes = 120, limit = 3, nearTime = null } = {}) {
     const availabilityRows = await db('advisor_availability').where({ user_id: userId }).select('day_of_week', 'start_time');
     if (availabilityRows.length === 0) return [];
 
@@ -386,7 +416,10 @@ export class GoogleCalendarService {
     candidates.sort((a, b) => a.start - b.start);
 
     const freeSlots = await this.filterAgainstCalendar(userId, candidates);
-    return freeSlots.slice(0, limit).map(toFreeSlot);
+    // Si el lead dijo también una hora ("hoy a las 6 pm"), se le ofrecen los
+    // bloques más cercanos a esa hora en vez de los primeros del día.
+    const ordered = nearTime ? rankByProximityToTime(freeSlots, nearTime) : freeSlots;
+    return ordered.slice(0, limit).map(toFreeSlot);
   }
 
   /**
@@ -406,21 +439,6 @@ export class GoogleCalendarService {
     const freeSlots = await this.filterAgainstCalendar(userId, candidates);
     if (freeSlots.length === 0) return [];
 
-    const [ph, pm] = preferredTime.split(':').map(Number);
-    const preferredMinutes = ph * 60 + pm;
-    const timeFormatter = new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
-
-    function minutesOfDayLima(date) {
-      const parts = timeFormatter.formatToParts(date);
-      const h = Number(parts.find((p) => p.type === 'hour').value);
-      const m = Number(parts.find((p) => p.type === 'minute').value);
-      return h * 60 + m;
-    }
-
-    const ranked = freeSlots
-      .map((slot) => ({ slot, diff: Math.abs(minutesOfDayLima(slot.start) - preferredMinutes) }))
-      .sort((a, b) => a.diff - b.diff || (a.slot.start - b.slot.start));
-
-    return ranked.slice(0, limit).map(({ slot }) => toFreeSlot(slot));
+    return rankByProximityToTime(freeSlots, preferredTime).slice(0, limit).map(toFreeSlot);
   }
 }

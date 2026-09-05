@@ -28,6 +28,23 @@ export const BOT_PROMPT_DEFAULTS = {
     'Si preguntan por precios/costos, no los inventes ni los evadas en seco: di que el jefe comercial se los detalla en la reunión, y usa eso para impulsar el agendamiento.',
     'Reconoce en tus propias palabras algo específico de lo que la persona escribió. No inventes que dijo algo que no dijo. Si el mensaje fue solo un saludo sin contenido (ej. "Hola"), no inventes que ya contó su tema: saluda y pregúntale directamente por su tema de tesis.',
     'Si preguntan si eres una IA o un bot, sé transparente. Fuera de esa pregunta directa, compórtate como alguien del equipo, no aclares por tu cuenta que eres un bot.'
+  ],
+
+  // Duración que Avan le comunica al contacto cuando pregunta cuánto dura la
+  // reunión. Es solo la respuesta del chat: el bloque que se reserva en el
+  // Google Calendar del asesor lo define su horario en `advisor_availability`.
+  meetingDurationMinutes: 10,
+
+  // Base de conocimiento: lo ÚNICO que Avan tiene permitido afirmar sobre el
+  // servicio. Cualquier pregunta que no se responda con estos hechos se
+  // deriva al jefe comercial en vez de inventar una respuesta.
+  faq: [
+    'La reunión es una llamada corta con el jefe comercial para revisar tu caso y explicarte cómo trabajamos, sin compromiso.',
+    'Puede ser telefónica o por Google Meet; eligiendo Google Meet se aplica un descuento sobre el precio final.',
+    'Los costos y las formas de pago los detalla el jefe comercial en la reunión: dependen de tu carrera, tu nivel académico y el alcance de la tesis.',
+    'Acompañamos tesis desde cero (sin tema definido) y también tesis ya empezadas u observadas.',
+    'Trabajamos con todas las carreras, tanto en pregrado como en posgrado (maestría y doctorado).',
+    'No necesitas llevar nada preparado a la reunión.'
   ]
 };
 
@@ -47,4 +64,46 @@ export function parsePromptRules(value) {
     .map((r) => r.trim())
     .filter(Boolean);
   return clean.length ? clean : [...BOT_PROMPT_DEFAULTS.rules];
+}
+
+/**
+ * Igual que parsePromptRules pero para `whatsapp_bot_settings.faq_knowledge`:
+ * normaliza (texto JSON, array ya parseado o null) a un array de hechos
+ * limpio, cayendo a los hechos por defecto si no hay nada usable.
+ */
+export function parseFaqFacts(value) {
+  let arr = value;
+  if (typeof value === 'string') {
+    try { arr = JSON.parse(value); } catch { arr = null; }
+  }
+  if (!Array.isArray(arr)) return [...BOT_PROMPT_DEFAULTS.faq];
+  const clean = arr
+    .filter((f) => typeof f === 'string')
+    .map((f) => f.trim())
+    .filter(Boolean);
+  return clean.length ? clean : [...BOT_PROMPT_DEFAULTS.faq];
+}
+
+/**
+ * Arma el bloque de "datos reales del servicio" que se inyecta en los prompts
+ * del LLM (turno conversacional, preguntas sueltas durante el agendamiento y
+ * mensajes posteriores a la reunión). La duración va primero y se compone a
+ * partir del número configurado, para que cambiarlo en el panel actualice la
+ * respuesta sin tener que editar el texto del hecho a mano.
+ *
+ * Recibe la fila de `whatsapp_bot_settings` tal como la devuelve
+ * `WhatsappBotSettingsService.get()`.
+ */
+export function buildKnowledgeBlock(settings = {}) {
+  const parsed = Number(settings.meeting_duration_minutes);
+  const minutes = Number.isFinite(parsed) && parsed > 0
+    ? Math.round(parsed)
+    : BOT_PROMPT_DEFAULTS.meetingDurationMinutes;
+
+  const facts = [
+    `La reunión con el jefe comercial dura aproximadamente ${minutes} minutos.`,
+    ...parseFaqFacts(settings.faq_knowledge)
+  ];
+
+  return facts.map((f) => `- ${f}`).join('\n');
 }

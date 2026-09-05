@@ -1449,11 +1449,13 @@ app.put('/api/whatsapp/bot-settings', requireAuth, requirePermission('leads.view
   try {
     const {
       toneInstructions, botIdentity, botObjective, promptRules,
+      faqKnowledge, meetingDurationMinutes,
       defaultAcademicLevel, defaultFieldOfStudy, defaultLocation,
       shortRepliesEnabled, typingIndicatorEnabled, messageGapSeconds
     } = req.body || {};
     const settings = await whatsappBotSettingsService.update({
       toneInstructions, botIdentity, botObjective, promptRules,
+      faqKnowledge, meetingDurationMinutes,
       defaultAcademicLevel, defaultFieldOfStudy, defaultLocation,
       shortRepliesEnabled, typingIndicatorEnabled, messageGapSeconds
     });

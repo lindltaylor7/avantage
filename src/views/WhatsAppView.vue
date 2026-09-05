@@ -168,6 +168,18 @@
           "{{ entry.text }}"<br />
           <span class="activity-error">🚫 {{ entry.reason }}</span>
         </p>
+        <p v-else-if="entry.type === 'scheduling_aside'" class="activity-text">
+          "{{ entry.text }}"<br />
+          <span class="activity-hint">
+            Paso: {{ entry.status }} · ¿trae el dato del paso?: {{ entry.answersStep ? 'sí' : 'no' }} ·
+            ¿pregunta aparte?: {{ entry.isAside ? 'sí' : 'no' }}
+          </span>
+          <template v-if="entry.answer"><br />💬 "{{ entry.answer }}"</template>
+        </p>
+        <p v-else-if="entry.type === 'scheduling_aside_failed'" class="activity-text">
+          "{{ entry.text }}"<br />
+          <span class="activity-error">⚠️ {{ entry.error }} — el paso siguió su curso normal.</span>
+        </p>
         <p v-else-if="entry.type === 'reset'" class="activity-text activity-hint">
           El estado del bot para este contacto se borró; su próximo mensaje se procesará como si fuera nuevo.
         </p>
@@ -334,7 +346,9 @@ const ACTIVITY_META = {
   conversation_turn_failed: { icon: '⚠️', label: 'Error en el turno de conversación', className: 'activity-error-card' },
   scheduling_offer_skipped: { icon: '📅', label: 'No se ofreció agendar', className: 'activity-error-card' },
   skipped: { icon: '🚫', label: 'El bot ignoró el mensaje', className: 'activity-error-card' },
-  reset: { icon: '🔄', label: 'Conversación reiniciada', className: 'activity-ok' }
+  reset: { icon: '🔄', label: 'Conversación reiniciada', className: 'activity-ok' },
+  scheduling_aside: { icon: '🙋', label: 'Pregunta durante el agendamiento', className: 'activity-llm' },
+  scheduling_aside_failed: { icon: '⚠️', label: 'No se pudo revisar si había una pregunta', className: 'activity-error-card' }
 };
 
 function activityIcon(type) {

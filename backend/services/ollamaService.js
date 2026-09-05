@@ -253,7 +253,7 @@ Detalles adicionales: ${additionalNotes || 'Ninguno'}`;
    * no hay conexión a Ollama Cloud (sin API key, o la llamada falla), se usa
    * una lógica de respaldo mínima basada en reglas.
    */
-  async converseAsAvan({ history, knownAnswers, incomingText, isFirstTurn, toneInstructions, contactName, shortReplies = true, botIdentity, botObjective, promptRules }) {
+  async converseAsAvan({ history, knownAnswers, incomingText, isFirstTurn, toneInstructions, contactName, shortReplies = true, botIdentity, botObjective, promptRules, knowledgeBlock }) {
     const activeApiKey = this.apiKey || process.env.OLLAMA_API_KEY || '';
     let activeHost = this.host || 'https://ollama.com';
     if (activeHost === 'https://api.ollama.com') activeHost = 'https://ollama.com';
@@ -294,6 +294,12 @@ Datos OPCIONALES Y PASIVOS (correo, nivel académico, ámbito/región): si la pe
 
 REGLAS DEL EQUIPO (respétalas siempre; nunca contradicen lo estructural de arriba):
 ${rulesBlock}
+${knowledgeBlock ? `
+DATOS REALES DEL SERVICIO (lo ÚNICO que puedes afirmar; si la persona pregunta algo que NO está en esta lista, dile con naturalidad que el jefe comercial se lo detalla en la reunión — NUNCA inventes precios, plazos, cifras ni promesas):
+${knowledgeBlock}
+
+Si el contacto hace una pregunta, RESPÓNDELA primero con estos datos y recién después sigue con lo que te falta preguntar. Nunca ignores su pregunta ni la dejes para más adelante.
+` : ''}
 ${toneInstructions ? `\nINSTRUCCIONES ADICIONALES DEL EQUIPO:\n${toneInstructions}\n` : ''}
 
 CUÁNDO TERMINAR: marca "ready": true en cuanto tengas el tema de tesis Y (la carrera O la universidad). NO antes: si te falta el dato académico, tu turno es para preguntarlo, con "ready": false. Cuando por fin marques "ready": true, tu "reply" tiene que ser MUY corto, un simple acuse (ej. "Perfecto 👀" o "Genial, dame un momento 🙌") — NADA de preguntas. El sistema toma el hilo enseguida: propone la reunión con el jefe comercial y le pregunta la modalidad (telefónica o Meet). Este "reply" tuyo puede incluso no mostrarse, así que no pongas nada importante en él.
@@ -439,7 +445,9 @@ Alguien acaba de responder esto cuando le preguntaron qué día prefiere para un
 
 Interpreta a qué fecha se refiere (puede decir "hoy", "mañana", "pasado mañana", "el jueves", "el 28", una fecha explícita, etc.) y conviértela a formato YYYY-MM-DD. La fecha debe estar entre hoy (${todayIso}) y ${maxDaysAhead} días después como máximo. Si pide un día más lejano, igual devuélvelo tal cual (el sistema le explicará el límite). Si el texto NO expresa ningún día concreto (ej. "cuando puedas", "no sé", o simplemente no habla de fechas), responde null.
 
-Responde ÚNICAMENTE en JSON válido: {"date": "YYYY-MM-DD" o null}`;
+Además, si junto con el día también dijo una HORA o un momento del día (ej. "hoy a las 6 pm", "mañana temprano", "el jueves por la tarde"), extráela en formato 24h "HH:MM" en "preferredTime" (usa una hora representativa: "temprano"/"en la mañana" ~ "09:00", "en la tarde" ~ "15:00", "de noche"/"tarde" ~ "20:00"). Si no dijo ninguna hora, deja preferredTime en null.
+
+Responde ÚNICAMENTE en JSON válido: {"date": "YYYY-MM-DD" o null, "preferredTime": "<HH:MM o null>"}`;
 
     try {
       const generateUrl = this.getApiUrl(activeHost, '/generate');
@@ -459,7 +467,8 @@ Responde ÚNICAMENTE en JSON válido: {"date": "YYYY-MM-DD" o null}`;
       const cleanResponse = (data.response || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
       const parsed = JSON.parse(cleanResponse);
       const date = typeof parsed.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.date) ? parsed.date : null;
-      return { date, source: 'llm' };
+      const preferredTime = typeof parsed.preferredTime === 'string' && /^\d{2}:\d{2}$/.test(parsed.preferredTime) ? parsed.preferredTime : null;
+      return { date, preferredTime, source: 'llm' };
     } catch (err) {
       console.warn('Ollama Cloud LLM date parsing notice:', err.message);
       return this.fallbackParseSchedulingDate(text, todayIso);
@@ -476,14 +485,48 @@ Responde ÚNICAMENTE en JSON válido: {"date": "YYYY-MM-DD" o null}`;
     const [y, m, d] = todayIso.split('-').map(Number);
     const todayUTC = Date.UTC(y, m - 1, d);
 
+    // Sin IA solo se reconoce una hora escrita de forma inequívoca: con
+    // minutos ("18:30"), con meridiano ("6pm") o precedida de "a las". Un
+    // número suelto NO cuenta, para no confundir "el 6 de septiembre" con
+    // las 6 de la mañana. El orden importa: en "a las 10:30" el "a las"
+    // aparece antes, así que primero se busca el formato con minutos.
+    let hour = null;
+    let minutes = 0;
+    let meridiem = '';
+
+    let timeMatch = normalized.match(/(\d{1,2}):(\d{2})\s*(a\.?\s?m|p\.?\s?m)?/);
+    if (timeMatch) {
+      hour = Number(timeMatch[1]);
+      minutes = Number(timeMatch[2]);
+      meridiem = timeMatch[3] || '';
+    } else if ((timeMatch = normalized.match(/(\d{1,2})\s*(a\.?\s?m|p\.?\s?m)/))) {
+      hour = Number(timeMatch[1]);
+      meridiem = timeMatch[2];
+    } else if ((timeMatch = normalized.match(/a\s+las\s+(\d{1,2})\b/))) {
+      hour = Number(timeMatch[1]);
+    }
+
+    let preferredTime = null;
+    if (hour !== null) {
+      meridiem = meridiem.replace(/[.\s]/g, '');
+      if (meridiem.startsWith('p') && hour < 12) hour += 12;
+      if (meridiem.startsWith('a') && hour === 12) hour = 0;
+      // "a las 6" sin meridiano, en un contexto comercial, es la tarde: las
+      // 6 a.m. no son un horario de atención plausible.
+      if (!meridiem && hour >= 1 && hour <= 7) hour += 12;
+      if (hour >= 0 && hour <= 23 && minutes >= 0 && minutes <= 59) {
+        preferredTime = `${String(hour).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+      }
+    }
+
     if (/\bhoy\b/.test(normalized)) {
-      return { date: todayIso, source: 'fallback' };
+      return { date: todayIso, preferredTime, source: 'fallback' };
     }
     if (/\bmanana\b|\bmañana\b/.test(normalized)) {
       const tomorrow = new Date(todayUTC + 86400000);
-      return { date: tomorrow.toISOString().slice(0, 10), source: 'fallback' };
+      return { date: tomorrow.toISOString().slice(0, 10), preferredTime, source: 'fallback' };
     }
-    return { date: null, source: 'fallback' };
+    return { date: null, preferredTime, source: 'fallback' };
   }
 
   /**
@@ -551,6 +594,84 @@ Responde ÚNICAMENTE en JSON válido: {"index": <número de 1 a ${optionLabels.l
   }
 
   /**
+   * Durante el agendamiento (elegir modalidad, dar el correo/teléfono, elegir
+   * día u hora) el flujo lo maneja una máquina de estados determinista que
+   * solo sabe extraer UN dato. Este clasificador es la válvula de escape: mira
+   * el mensaje real del contacto y responde dos cosas:
+   *
+   *   - `answersStep`: si el mensaje trae la respuesta al paso actual (aunque
+   *     venga acompañada de otra cosa, ej. "mi correo es x@y.com pero cuánto
+   *     dura la reunión?").
+   *   - `isAside` + `answer`: si además hace una pregunta APARTE, con la
+   *     respuesta ya redactada usando ÚNICAMENTE la base de conocimiento.
+   *
+   * Las preguntas sobre los días/horarios ofrecidos NO cuentan como pregunta
+   * aparte: de eso ya se encargan parseSchedulingDate/parseSchedulingChoice.
+   *
+   * Si no hay LLM disponible, devuelve el comportamiento histórico
+   * (`answersStep: true`, sin pregunta aparte): el paso sigue como siempre.
+   */
+  async classifySchedulingAside(text, { stepQuestion, knowledgeBlock, contactName } = {}) {
+    const activeApiKey = this.apiKey || process.env.OLLAMA_API_KEY || '';
+    let activeHost = this.host || 'https://ollama.com';
+    if (activeHost === 'https://api.ollama.com') activeHost = 'https://ollama.com';
+
+    if (!activeApiKey && !activeHost.includes('localhost') && !activeHost.includes('127.0.0.1')) {
+      return { answersStep: true, isAside: false, answer: null, source: 'fallback' };
+    }
+
+    const prompt = `Eres Avan, de Avantage Group (Perú). Estás coordinando por WhatsApp una reunión con el jefe comercial y acabas de preguntarle esto al contacto${contactName ? ` (${contactName})` : ''}:
+
+"""${stepQuestion}"""
+
+El contacto respondió:
+
+"""${text}"""
+
+DATOS REALES DEL SERVICIO (lo ÚNICO que puedes afirmar; nunca inventes precios, plazos ni cifras que no estén aquí):
+${knowledgeBlock || '(sin datos cargados)'}
+
+Analiza el mensaje y responde:
+- "answersStep": true si el mensaje CONTIENE la respuesta a lo que le preguntaste, aunque venga junto con otra cosa. false si no la contiene.
+- "isAside": true si además hace una PREGUNTA APARTE, sobre algo distinto de lo que le preguntaste (ej. cuánto dura la reunión, cuánto cuesta, qué incluye, con quién es, si es presencial). false si no pregunta nada aparte.
+  MUY IMPORTANTE: preguntar por los días u horarios disponibles, pedir otro horario, o preguntar si hay espacio a cierta hora NO es una pregunta aparte — eso es parte del paso actual. En esos casos "isAside" debe ser false.
+- "answer": si "isAside" es true, la respuesta a esa pregunta: 1 o 2 líneas, tono WhatsApp cercano, máximo 1 emoji, usando SOLO los datos reales de arriba. Si la pregunta no se puede responder con esos datos, dile con naturalidad que eso se lo detalla el jefe comercial en la reunión. No agregues preguntas al final (el sistema retoma el paso por su cuenta). Si "isAside" es false, deja null.
+
+Responde ÚNICAMENTE en JSON válido: {"answersStep": <true o false>, "isAside": <true o false>, "answer": "<texto o null>"}`;
+
+    try {
+      const generateUrl = this.getApiUrl(activeHost, '/generate');
+      const response = await fetch(generateUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(activeApiKey ? { 'Authorization': `Bearer ${activeApiKey}` } : {})
+        },
+        body: JSON.stringify({ model: this.chatModel, prompt, stream: false, format: 'json' }),
+        signal: AbortSignal.timeout(15000)
+      });
+
+      if (!response.ok) return { answersStep: true, isAside: false, answer: null, source: 'fallback' };
+
+      const data = await response.json();
+      const cleanResponse = (data.response || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
+      const parsed = JSON.parse(cleanResponse);
+      const answer = typeof parsed.answer === 'string' && parsed.answer.trim() ? parsed.answer.trim() : null;
+      return {
+        answersStep: !!parsed.answersStep,
+        // Sin texto de respuesta no hay nada que contestar: se trata como si
+        // no hubiera pregunta aparte y el paso sigue su curso normal.
+        isAside: !!parsed.isAside && !!answer,
+        answer,
+        source: 'llm'
+      };
+    } catch (err) {
+      console.warn('Ollama Cloud LLM scheduling aside notice:', err.message);
+      return { answersStep: true, isAside: false, answer: null, source: 'fallback' };
+    }
+  }
+
+  /**
    * Clasifica un mensaje que llega DESPUÉS de que el lead ya agendó su
    * llamada (sesión "completed" con reunión real en `scheduled_meetings`).
    * Inspirado en la lógica de un workflow n8n existente del equipo: los
@@ -562,7 +683,7 @@ Responde ÚNICAMENTE en JSON válido: {"index": <número de 1 a ${optionLabels.l
    * (que Avan puede responder solo con los datos reales que ya tiene),
    * deben avisarle a un asesor humano.
    */
-  async classifyPostBookingMessage(text, { meetingLabel, meetLink, contactName }) {
+  async classifyPostBookingMessage(text, { meetingLabel, meetLink, contactName, knowledgeBlock }) {
     const activeApiKey = this.apiKey || process.env.OLLAMA_API_KEY || '';
     let activeHost = this.host || 'https://ollama.com';
     if (activeHost === 'https://api.ollama.com') activeHost = 'https://ollama.com';
@@ -575,9 +696,12 @@ Responde ÚNICAMENTE en JSON válido: {"index": <número de 1 a ${optionLabels.l
 
 """${text}"""
 
-Clasifícalo:
+${knowledgeBlock ? `DATOS REALES DEL SERVICIO (lo ÚNICO que puedes afirmar además de la fecha y el link de arriba):
+${knowledgeBlock}
+
+` : ''}Clasifícalo:
 - Si es solo un saludo, agradecimiento o confirmación corta sin pedir nada más (ej. "gracias", "ok", "perfecto", "listo", "buenas"), no necesita respuesta.
-- Si pregunta por datos de SU reunión (link, hora, fecha, cuánto dura, dónde es), respóndele tú mismo usando ÚNICAMENTE los datos reales de arriba (la fecha/hora y el link), sin inventar nada más.
+- Si pregunta por datos de SU reunión (link, hora, fecha, cuánto dura, dónde es), respóndele tú mismo usando ÚNICAMENTE los datos reales de arriba (la fecha/hora, el link y los datos del servicio), sin inventar nada más.
 - Si pide reagendar, cancelar, cambiar de horario, se queja de que nadie llegó a la reunión o de un problema con el enlace, o hace una consulta totalmente nueva (precio, otro tema de tesis, otro servicio), respóndele con un mensaje breve y empático confirmando que un asesor del equipo le va a escribir directamente para resolverlo — y márcalo como urgente para que el equipo lo vea.
 
 Responde ÚNICAMENTE en JSON válido:

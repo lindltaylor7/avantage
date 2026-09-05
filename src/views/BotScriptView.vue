@@ -105,6 +105,46 @@
       </section>
 
       <section class="glass-panel bot-settings-panel">
+        <div class="bot-panel-head">
+          <h3 class="bot-info-title">📚 Datos del servicio (lo que Avan puede responder)</h3>
+          <button type="button" class="btn-secondary bot-restore-btn" @click="restoreFaqDefaults" :disabled="!promptDefaults">
+            ↩️ Restaurar datos por defecto
+          </button>
+        </div>
+        <p class="bot-field-hint bot-rules-intro">
+          Es lo <strong>único</strong> que Avan tiene permitido afirmar. Si el contacto pregunta algo que no está aquí,
+          responde que el jefe comercial se lo detalla en la reunión, en vez de inventar. Se usa tanto en la conversación
+          libre como cuando pregunta algo en medio del agendamiento.
+        </p>
+
+        <div class="form-group bot-gap-group">
+          <label class="form-label">Duración de la reunión (minutos)</label>
+          <input v-model.number="form.meetingDurationMinutes" type="number" min="5" max="180" class="form-input bot-gap-input" />
+          <p class="bot-field-hint">
+            Lo que Avan responde cuando preguntan cuánto dura la llamada con el jefe comercial. No cambia el bloque que se
+            reserva en el Google Calendar del asesor (eso lo define su horario en "Disponibilidad").
+          </p>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Otros datos verificados</label>
+          <div class="bot-rules-list">
+            <div v-for="(fact, index) in form.faqKnowledge" :key="index" class="bot-rule-row">
+              <span class="bot-rule-num">{{ index + 1 }}</span>
+              <textarea
+                class="form-textarea bot-rule-input"
+                rows="2"
+                v-model="form.faqKnowledge[index]"
+                placeholder="Ej: Acompañamos tesis desde cero y también tesis ya empezadas."
+              ></textarea>
+              <button type="button" class="bot-rule-remove" title="Quitar este dato" @click="removeFact(index)">✕</button>
+            </div>
+          </div>
+          <button type="button" class="btn-secondary bot-add-rule-btn" @click="addFact">＋ Agregar dato</button>
+        </div>
+      </section>
+
+      <section class="glass-panel bot-settings-panel">
         <h3 class="bot-info-title">🎓 Valores por defecto</h3>
         <div class="bot-defaults-grid">
           <div class="form-group">
@@ -171,8 +211,12 @@
             <p>Va identificando tema, carrera, universidad, ámbito y nivel del hilo real de la conversación (y el correo solo si el contacto lo menciona), sin que note que está "llenando un formulario".</p>
           </div>
           <div class="info-box">
+            <h4>🙋 Preguntas durante el agendamiento</h4>
+            <p>Si el contacto pregunta algo mientras coordina la reunión ("¿cuánto dura?", "¿cuánto cuesta?"), Avan le responde con los datos del servicio de arriba y retoma el paso donde iba, en vez de ignorar la pregunta.</p>
+          </div>
+          <div class="info-box">
             <h4>📅 Cierre con agendamiento</h4>
-            <p>Con el tema y la carrera o universidad ya en mano, ofrece la reunión con el jefe comercial, pregunta si la quiere telefónica o por Meet (10% dto.), pide el número o el correo según corresponda y propone los horarios libres reales del calendario (hasta 2 días desde hoy).</p>
+            <p>Con el tema y la carrera o universidad ya en mano, ofrece la reunión con el jefe comercial, pregunta si la quiere telefónica o por Meet (10% dto.), pide el número o el correo según corresponda y propone los horarios libres reales del calendario (hasta 2 días desde hoy). Si dice una hora ("hoy a las 6 pm"), le ofrece los bloques más cercanos a esa hora, no los primeros del día.</p>
           </div>
         </div>
       </section>
@@ -196,6 +240,8 @@ const form = reactive({
   botIdentity: '',
   botObjective: '',
   promptRules: [],
+  faqKnowledge: [],
+  meetingDurationMinutes: 10,
   defaultAcademicLevel: 'Pregrado (Bachiller/Título)',
   defaultFieldOfStudy: '',
   defaultLocation: '',
@@ -210,6 +256,8 @@ function toForm(settings) {
     botIdentity: settings.bot_identity || '',
     botObjective: settings.bot_objective || '',
     promptRules: Array.isArray(settings.prompt_rules) ? [...settings.prompt_rules] : [],
+    faqKnowledge: Array.isArray(settings.faq_knowledge) ? [...settings.faq_knowledge] : [],
+    meetingDurationMinutes: settings.meeting_duration_minutes == null ? 10 : Number(settings.meeting_duration_minutes),
     defaultAcademicLevel: settings.default_academic_level || 'Pregrado (Bachiller/Título)',
     defaultFieldOfStudy: settings.default_field_of_study || '',
     defaultLocation: settings.default_location || '',
@@ -225,6 +273,20 @@ function addRule() {
 
 function removeRule(index) {
   form.promptRules.splice(index, 1);
+}
+
+function addFact() {
+  form.faqKnowledge.push('');
+}
+
+function removeFact(index) {
+  form.faqKnowledge.splice(index, 1);
+}
+
+function restoreFaqDefaults() {
+  if (!promptDefaults.value) return;
+  form.faqKnowledge = [...(promptDefaults.value.faq || [])];
+  form.meetingDurationMinutes = promptDefaults.value.meetingDurationMinutes ?? 10;
 }
 
 function restoreDefaults() {
