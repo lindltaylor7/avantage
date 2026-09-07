@@ -471,6 +471,13 @@ export class WhatsappBotService {
    * con un número que ya la completó o quedó pausado, sin tener que esperar
    * a un contacto nuevo. No borra el historial de mensajes visible en el
    * hilo, solo el estado interno del bot.
+   *
+   * También borra el registro propio de reuniones agendadas con ese contacto
+   * (tabla scheduled_meetings, NO el evento real en Google Calendar): sin
+   * esto, getLatestForContact() seguía trayendo una reunión de una prueba
+   * anterior y el bot volvía a recordarle esa reunión vieja al contacto en
+   * cuanto la conversación reiniciada llegaba de nuevo a "completed", aunque
+   * la sesión se hubiera reiniciado.
    */
   async resetSession(waId) {
     const pending = this.pendingMessages.get(waId);
@@ -479,6 +486,7 @@ export class WhatsappBotService {
     this.inboundCounter.delete(waId);
 
     await db('whatsapp_bot_sessions').where({ wa_id: waId }).delete();
+    if (this.scheduledMeetingService) await this.scheduledMeetingService.deleteForContact(waId);
     this.logActivity({ type: 'reset', waId });
   }
 

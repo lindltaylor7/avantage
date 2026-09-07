@@ -71,4 +71,16 @@ export class ScheduledMeetingService {
   async getLatestForContact(waId) {
     return db('scheduled_meetings').where({ wa_id: waId }).orderBy('created_at', 'desc').first();
   }
+
+  /**
+   * Borra el registro propio de reuniones agendadas con este contacto (no
+   * cancela el evento real en Google Calendar). Se usa desde "Reiniciar
+   * conversación" en el panel: sin esto, una reunión agendada en una prueba
+   * anterior seguía apareciendo para siempre vía getLatestForContact(), y el
+   * bot le recordaba esa reunión vieja al contacto aunque la sesión se
+   * hubiera reiniciado.
+   */
+  async deleteForContact(waId) {
+    return db('scheduled_meetings').where({ wa_id: waId }).delete();
+  }
 }
