@@ -6,7 +6,7 @@
         <h2 class="section-heading"><span class="heading-icon">🤖</span> Personalidad y objetivo del bot</h2>
         <p class="section-subheading bot-subheading">
           Avan ya no sigue un guion de preguntas fijas: conversa libremente guiado por IA hasta reunir el tema de
-          tesis, la carrera y la universidad del contacto, y luego le ofrece una reunión con el jefe comercial (telefónica o por Meet).
+          tesis, la carrera y la universidad del contacto, y luego le ofrece una reunión con el asesor (telefónica o por Meet).
           Aquí ajustas su identidad, su objetivo, las reglas de comportamiento (que puedes agregar o quitar) y los
           valores por defecto que usa cuando el contacto no menciona su nivel o ámbito.
         </p>
@@ -56,7 +56,7 @@
             v-model="form.botObjective"
             class="form-textarea"
             rows="4"
-            placeholder="Ej: Entender el tema de tesis de la persona y ofrecerle una reunión con el jefe comercial..."
+            placeholder="Ej: Entender el tema de tesis de la persona y ofrecerle una reunión con el asesor..."
           ></textarea>
           <p class="bot-field-hint">El cierre que busca Avan. Si lo dejas vacío se usa el texto por defecto.</p>
         </div>
@@ -114,7 +114,7 @@
         </div>
         <p class="bot-field-hint bot-rules-intro">
           <strong>Revisa estos textos:</strong> es lo <strong>único</strong> que Avan tiene permitido afirmar. Si el contacto pregunta algo que no está aquí,
-          responde que el jefe comercial se lo detalla en la reunión, en vez de inventar. Se usa tanto en la conversación
+          responde que el asesor se lo detalla en la reunión, en vez de inventar. Se usa tanto en la conversación
           libre como cuando pregunta algo en medio del agendamiento.
         </p>
 
@@ -122,7 +122,7 @@
           <label class="form-label">Duración de la reunión (minutos)</label>
           <input v-model.number="form.meetingDurationMinutes" type="number" min="5" max="180" class="form-input bot-gap-input" />
           <p class="bot-field-hint">
-            Lo que Avan responde cuando preguntan cuánto dura la llamada con el jefe comercial. No cambia el bloque que se
+            Lo que Avan responde cuando preguntan cuánto dura la llamada con el asesor. No cambia el bloque que se
             reserva en el Google Calendar del asesor (eso lo define su horario en "Disponibilidad").
           </p>
         </div>
@@ -217,7 +217,7 @@
           </div>
           <div class="info-box">
             <h4>📅 Cierre con agendamiento</h4>
-            <p>Con el tema, la carrera y la universidad ya en mano, ofrece la reunión con el jefe comercial, pregunta si la quiere telefónica o por Meet (10% dto.), pide el número o el correo según corresponda y propone los horarios libres reales del calendario (hasta 2 días desde hoy). Si dice una hora ("hoy a las 6 pm"), le ofrece los bloques más cercanos a esa hora, no los primeros del día.</p>
+            <p>Con el tema, la carrera y la universidad ya en mano, ofrece la reunión con el asesor, pregunta si la quiere telefónica o por Meet (10% dto.), pide el número o el correo según corresponda y propone los horarios libres reales del calendario (hasta 2 días desde hoy). Si dice una hora ("hoy a las 6 pm"), le ofrece los bloques más cercanos a esa hora, no los primeros del día.</p>
           </div>
         </div>
       </section>

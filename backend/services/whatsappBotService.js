@@ -916,7 +916,7 @@ export class WhatsappBotService {
     // Pedir la reunión gana sobre cualquier dato que falte: si el contacto ya
     // dijo que quiere agendar (o propuso un día y una hora), se pasa a
     // agendar de inmediato. Los datos que no dio se completan con los valores
-    // por defecto del panel y el  los ve en la reunión;
+    // por defecto del panel y el asesor los ve en la reunión;
     // insistir con más preguntas a alguien que ya dijo "quiero reunirme" es
     // la forma más rápida de perderlo.
     // 'both' cuando no se tiene ninguno de los dos: se piden en un solo mensaje.
@@ -1076,7 +1076,7 @@ export class WhatsappBotService {
       const understood = [answers.field, answers.university].filter(Boolean).join(' en ');
       const opener = understood ? `Perfecto: ${understood}. ` : '';
 
-      await this.send(waId, `${opener}Coordinemos una reunión con nuestro  para revisar tu tema 🙌 ¿Cómo prefieres la reunión?\n\n1. Telefónica\n2. Por Google Meet (con ${MEET_DISCOUNT_PCT}% de descuento sobre el precio final)`);
+      await this.send(waId, `${opener}Coordinemos una reunión con nuestro asesor para revisar tu tema 🙌 ¿Cómo prefieres la reunión?\n\n1. Telefónica\n2. Por Google Meet (con ${MEET_DISCOUNT_PCT}% de descuento sobre el precio final)`);
     } catch (error) {
       // Si la conexión de Google Calendar del asesor caducó, avisar al equipo
       // en el panel para que la reconecte — si no, todos los leads que
@@ -1366,7 +1366,7 @@ export class WhatsappBotService {
       // palabra al respecto, se lee como que nadie te escuchó.
       let intro;
       if (parsed.preferredTime) {
-        intro = `A las ${formatClockLabel(parsed.preferredTime)} el  no tiene libre ${dayLabelWithArticle(date)}. Estos son los más cercanos:`;
+        intro = `A las ${formatClockLabel(parsed.preferredTime)} el asesor no tiene libre ${dayLabelWithArticle(date)}. Estos son los más cercanos:`;
       } else if (sameDayAsOffered) {
         intro = `Sí, esos horarios son justo ${dayLabelWithArticle(date)}:`;
       } else {
@@ -1403,7 +1403,7 @@ export class WhatsappBotService {
     const dayLabel = date === limaTodayIso() ? 'hoy' : dayLabelWithArticle(date);
 
     const reason = blockedByLeadTime
-      ? `Para ${dayLabel} ya no alcanzamos: el  necesita al menos ${hours === 1 ? 'una hora' : `${hours} horas`} de anticipación.`
+      ? `Para ${dayLabel} ya no alcanzamos: el asesor necesita al menos ${hours === 1 ? 'una hora' : `${hours} horas`} de anticipación.`
       : `Para ${dayLabel} ya no queda espacio.`;
 
     await this.updateSession(waId, { answers: JSON.stringify(answers) });
@@ -1482,13 +1482,13 @@ export class WhatsappBotService {
             if (!preferredTime) {
               intro = `📅 Perfecto, para ${dayLabelWithArticle(targetDate)} hay estos horarios:`;
             } else if (explicitDate) {
-              intro = `A las ${formatClockLabel(preferredTime)} el  no tiene libre ${dayLabelWithArticle(targetDate)}. Estos son los más cercanos:`;
+              intro = `A las ${formatClockLabel(preferredTime)} el asesor no tiene libre ${dayLabelWithArticle(targetDate)}. Estos son los más cercanos:`;
             } else if (spansDays) {
               // Solo dijo la hora y la lista salió de varios días: cada opción
               // lleva su fecha, así que nombrar un día aquí sobra.
-              intro = `A las ${formatClockLabel(preferredTime)} el  no tiene libre. Estos son los más cercanos:`;
+              intro = `A las ${formatClockLabel(preferredTime)} el asesor no tiene libre. Estos son los más cercanos:`;
             } else {
-              intro = `A las ${formatClockLabel(preferredTime)} el  no tiene libre. Lo más cercano para ${dayLabelWithArticle(targetDate)}:`;
+              intro = `A las ${formatClockLabel(preferredTime)} el asesor no tiene libre. Lo más cercano para ${dayLabelWithArticle(targetDate)}:`;
             }
 
             scheduling.slots = slots;
@@ -1529,7 +1529,7 @@ export class WhatsappBotService {
     await this.updateSession(waId, { status: 'scheduling_date', answers: JSON.stringify(answers) });
     await this.send(
       waId,
-      `📅 Tenemos agenda ${endSentence(windowsPhrase)} ¿Qué día prefieres para la llamada con el ?`
+      `📅 Tenemos agenda ${endSentence(windowsPhrase)} ¿Qué día prefieres para la llamada con el asesor?`
     );
   }
 
@@ -1581,7 +1581,6 @@ export class WhatsappBotService {
     // horario que le sirva es cobrar la fricción por adelantado. Se pide al
     // final, cuando ya eligió su horario (ver `bookSlot`).
     await this.updateSession(waId, { answers: JSON.stringify(answers) });
-    await this.send(waId, `Listo, queda con el ${MEET_DISCOUNT_PCT}% de descuento sobre el precio final 🙌`);
     await this.promptForDate(waId);
   }
 
@@ -1779,7 +1778,7 @@ export class WhatsappBotService {
     const slots = await this._fillNearbySlots(daySlots, preferredTime);
     const intro = !preferredTime
       ? `📅 Horarios para ${dayLabelWithArticle(date)}:`
-      : `A las ${formatClockLabel(preferredTime)} el  no tiene libre ese día. Estos son los más cercanos:`;
+      : `A las ${formatClockLabel(preferredTime)} el asesor no tiene libre ese día. Estos son los más cercanos:`;
 
     scheduling.slots = slots;
     await this.updateSession(waId, { status: 'scheduling_time', answers: JSON.stringify(answers) });
@@ -1835,7 +1834,7 @@ export class WhatsappBotService {
           await this.updateSession(waId, { answers: JSON.stringify(answers) });
           await this.send(
             waId,
-            `Ese horario el  no lo tiene libre, pero estos son los más cercanos a lo que buscas:\n\n${numberedList(slotOptionLabels(nearSlots))}\n\nResponde con el número que prefieras, o "no" si prefieres que te contacten después.`
+            `Ese horario el asesor no lo tiene libre, pero estos son los más cercanos a lo que buscas:\n\n${numberedList(slotOptionLabels(nearSlots))}\n\nResponde con el número que prefieras, o "no" si prefieres que te contacten después.`
           );
           return;
         }
@@ -1977,7 +1976,7 @@ export class WhatsappBotService {
 
       await this.send(
         waId,
-        `✅ ¡Listo${name ? `, ${name}` : ''}! Tu ${isPhone ? 'llamada telefónica' : 'reunión por Google Meet'} con el  quedó agendada para *${slot.label}* (hora de Perú)${durationLabel ? ` y dura ${durationLabel}` : ''}.` +
+        `✅ ¡Listo${name ? `, ${name}` : ''}! Tu ${isPhone ? 'llamada telefónica' : 'reunión por Google Meet'} con el asesor quedó agendada para *${slot.label}* (hora de Perú)${durationLabel ? ` y dura ${durationLabel}` : ''}.` +
         (isPhone
           ? `\n\n📞 Te llamaremos${contactPhone ? ` al ${contactPhone}` : ''}.`
           : (event.meetLink ? `\n\n🔗 Link de Google Meet: ${event.meetLink}` : '') +
@@ -2025,7 +2024,7 @@ export class WhatsappBotService {
       const name = firstNameOf(meeting.lead_full_name);
       const startsIn = formatTimeUntil(meeting.start_time);
       const text =
-        `⏰ ${name ? `${name}, te` : 'Te'} recuerdo tu reunión con el : *${formatMeetingDateTimeLabel(meeting.start_time)}*${startsIn ? ` (${startsIn})` : ''}.` +
+        `⏰ ${name ? `${name}, te` : 'Te'} recuerdo tu reunión con el asesor: *${formatMeetingDateTimeLabel(meeting.start_time)}*${startsIn ? ` (${startsIn})` : ''}.` +
         (meeting.meet_link ? `\n\n🔗 ${meeting.meet_link}` : '\n\n📞 Te llamamos a este mismo número.') +
         '\n\nSi no puedes, escríbeme por aquí y la movemos.';
 
