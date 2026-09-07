@@ -803,12 +803,21 @@ export class WhatsappBotService {
     // toma en el instante exacto en que se cierra la agrupación.
     const mark = inboundMark ?? (this.inboundCounter.get(waId) || 0);
 
-    const isFirstTurn = !session;
+    // OJO: "existe la fila de sesión" NO es lo mismo que "la conversación ya
+    // arrancó". setBotEnabled() también puede crear esa fila (ej. al tocar
+    // "Activar bot" en el panel) sin que el contacto haya escrito todavía.
+    // Por eso el primer turno real se detecta con `started_at`, que solo se
+    // llena aquí, y no con la sola existencia de la fila.
+    const isFirstTurn = !session || !session.started_at;
 
     if (!session) {
-      await db('whatsapp_bot_sessions').insert({ wa_id: waId, status: 'active', bot_enabled: true, answers: JSON.stringify({}) });
+      await db('whatsapp_bot_sessions').insert({ wa_id: waId, status: 'active', bot_enabled: true, answers: JSON.stringify({}), started_at: db.fn.now() });
       // El contacto pasa de "Conversación Abierta" a "En Calificación" en el
       // Setter Funnel apenas Avan arranca la conversación con él.
+      await this.moveFunnelStage(waId, 'calificando');
+      session = await this.getSession(waId);
+    } else if (!session.started_at) {
+      await this.updateSession(waId, { started_at: db.fn.now() });
       await this.moveFunnelStage(waId, 'calificando');
       session = await this.getSession(waId);
     }
@@ -819,7 +828,7 @@ export class WhatsappBotService {
     // había hablado con Avan antes y alguien reinició la conversación desde
     // el panel, esa sesión (y su fecha de inicio) es nueva, así que el LLM
     // no arrastra el hilo de la conversación anterior aunque siga guardado.
-    const thread = await this.whatsappMessageService.getThread(waId, { limit: 40, since: session.created_at });
+    const thread = await this.whatsappMessageService.getThread(waId, { limit: 40, since: session.started_at || session.created_at });
     const history = thread
       .filter((m) => m.body && m.body.trim())
       .map((m) => ({ direction: m.direction, text: m.body }));
