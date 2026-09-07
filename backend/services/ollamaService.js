@@ -66,12 +66,14 @@ const OPENS_WITH_GREETING_RE = /^\s*[¡!]*\s*(hola|buenas|buenos d[ií]as|buenas
  * El primer mensaje tiene que abrir con un saludo. La instrucción está en el
  * prompt, pero el modelo la cumple de forma intermitente (sobre todo desde que
  * se le prohibió presentarse), y abrir en seco con una explicación se siente
- * brusco. Si no saluda, se le antepone el saludo — sin presentación.
+ * brusco. Si no saluda, se le antepone el saludo — con exclamación, no un
+ * punto seco: un saludo cerrado con punto lee como una lista de trámites, no
+ * como alguien saludando de verdad.
  */
 function ensureGreeting(reply, contactName) {
   const text = String(reply || '').trim();
   if (!text || OPENS_WITH_GREETING_RE.test(text)) return text;
-  return `${contactName ? `Hola, ${contactName}.` : 'Hola.'} ${text}`;
+  return `${contactName ? `¡Hola, ${contactName}!` : '¡Hola!'} ${text}`;
 }
 
 /**
@@ -340,10 +342,10 @@ Detalles adicionales: ${additionalNotes || 'Ninguno'}`;
       ? `NO TE PRESENTES: nunca abras diciendo quién eres ni nombrando a la empresa ("soy X de Y"). Entra directo a ayudar. Solo di con quién hablan si te lo preguntan explícitamente. Pero este PRIMER mensaje de la conversación SÍ abre con un saludo antes de lo demás: no presentarte no significa abrir en seco.
 
 CÓMO ES EXACTAMENTE ESTE PRIMER MENSAJE (es el que decide si te responden, y se escribe distinto a todos los demás):
-a) Saludo sobrio con su nombre y punto, sin signos de exclamación de apertura y SIN emojis: "Hola, <su nombre>." Nunca "¡Hola, <su nombre>!" ni "¡Hola! 👋".
+a) Saludo cálido con su nombre y signo de exclamación, nunca un punto seco: "¡Hola, <su nombre>!" Un punto después del saludo lee como un trámite, no como alguien saludando de verdad. Puedes cerrar el mensaje con UN emoji cuando aporte calidez (👋 🙌 😊), nunca más de uno.
 b) Inmediatamente después, LA PREGUNTA por su tema de tesis. La pregunta va ANTES de cualquier explicación de lo que hacen: es lo que abre conversación. Nunca metas una frase de catálogo entre el saludo y la pregunta ("te acompañamos con un asesor durante toda tu tesis", "un asesor te guía paso a paso"): se lee como plantilla y es el error a evitar.
 c) El mensaje TERMINA en esa pregunta. No prometas nada para después —ni "con eso te explico cómo trabajamos", ni "ahora te cuento", ni "te explico en un momento"—: una promesa en el primer mensaje crea una deuda que el turno siguiente no paga, y el contacto la nota. Tampoco prometas en futuro sobre la persona ("te acompañaremos", "te guiaremos", "lograrás sustentar"): todavía no hay nada acordado y suena hueco. Si te preguntan algo concreto más adelante, ahí sí respondes con los datos reales del servicio.
-d) Ejemplos del registro exacto, y son el mensaje COMPLETO. Pidiendo información: "Hola, Jair. ¿Sobre qué tema quieres hacer tu tesis?" Solo saludo: "Hola, Jair. ¿Ya tienes un tema en mente para tu tesis?"
+d) Ejemplos del registro exacto, y son el mensaje COMPLETO. Pidiendo información: "¡Hola, Jair! ¿Sobre qué tema te gustaría hacer tu tesis? 👋" Solo saludo: "¡Hola, Jair! ¿Ya tienes un tema en mente para tu tesis?"
 e) Ese saludo NO es un acuse de recibo: "Claro que sí", "Por supuesto" y "Con gusto" SOLO valen si la persona te pidió o preguntó algo — nunca le respondas que sí a algo que no te pidió.`
       : `NO TE PRESENTES: nunca digas quién eres ni nombres a la empresa ("soy X de Y"). Solo di con quién hablan si te lo preguntan explícitamente.
 
@@ -376,7 +378,7 @@ AGENDAR GANA SOBRE TODO: si el contacto pide una reunión/llamada, pregunta por 
 
 NO SEAS CERRADO: que te falte un dato NUNCA es excusa para ignorar lo que la persona escribió. Si te hace una pregunta ("¿qué hacen?", "¿cuánto cuesta?", "¿cuánto dura?", "necesito información"), RESPÓNDELA primero con los DATOS REALES DEL SERVICIO y recién después, en el mismo mensaje, haz tu pregunta pendiente. Alguien que pide información y solo recibe preguntas se va. Cuando pidan información en general, empieza por QUÉ hacen (el acompañamiento de tesis), no por la logística de la reunión: la duración, la modalidad y el descuento solo se mencionan si preguntan por eso.
 
-Datos OPCIONALES Y PASIVOS (correo, nivel académico, ámbito/región): si la persona los menciona por su cuenta, guárdalos en "extracted". Pero JAMÁS los preguntes — hay valores por defecto y el  los ve en la reunión.
+Datos OPCIONALES Y PASIVOS (correo, nivel académico, ámbito/región): si la persona los menciona por su cuenta, guárdalos en "extracted". Pero JAMÁS los preguntes — hay valores por defecto y el asesor los ve en la reunión.
 
 REGLAS DEL EQUIPO (respétalas siempre; nunca contradicen lo estructural de arriba):
 ${rulesBlock}
@@ -471,7 +473,7 @@ Responde ÚNICAMENTE en JSON válido con esta forma exacta (usa null en los camp
    */
   fallbackConversationTurn(knownAnswers, incomingText, isFirstTurn) {
     const answers = knownAnswers || {};
-    const greeting = isFirstTurn ? 'Hola. ' : '';
+    const greeting = isFirstTurn ? '¡Hola! ' : '';
 
     if (!answers.problem) {
       return {
