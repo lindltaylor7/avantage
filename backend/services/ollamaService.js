@@ -84,6 +84,37 @@ function hasExplicitClockMention(text) {
   return EXPLICIT_CLOCK_RE.test(String(text || ''));
 }
 
+/**
+ * ¿El contacto nombró un DÍA de verdad ("hoy", "mañana", "el jueves", "el 28",
+ * "8 de setiembre"), o el mensaje es solo una hora ("para las 11?", "a las
+ * 8pm")?
+ *
+ * Hace falta porque el prompt de `parseSchedulingDate` le pide al modelo
+ * convertir a fecha CUALQUIER mensaje que llegue, aunque no traiga ningún día:
+ * ante un "para las 11?" —sin "hoy", sin nombre de día, nada— el modelo
+ * completaba igual con la fecha de HOY, en vez de devolver null como pide el
+ * propio prompt. Eso hacía que, en medio de elegir horario para el martes, un
+ * "para las 11?" se leyera como "para HOY a las 11" y activara el aviso de
+ * "hoy ya no alcanzamos" — un día que nadie mencionó — en vez de buscar las
+ * 11 dentro del martes que ya se estaba coordinando.
+ */
+const DAY_NAMES_RE = 'lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo';
+const MONTH_NAMES_RE = 'enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre';
+const EXPLICIT_DAY_RE = new RegExp(
+  '\\bhoy\\b'
+  + '|\\bma[ñn]ana\\b'          // ambiguo con "de la mañana" (hora), pero la misma ambigüedad ya la acepta el resto del parser
+  + '|\\bpasado\\s+ma[ñn]ana\\b'
+  + `|\\b(?:${DAY_NAMES_RE})\\b`
+  + '|\\bel\\s+\\d{1,2}\\b'      // "el 8", "el 28"
+  + `|\\d{1,2}\\s*(?:de)?\\s*(?:${MONTH_NAMES_RE})\\b`
+  + '|\\d{4}-\\d{2}-\\d{2}',      // fecha ISO explícita
+  'i'
+);
+
+function hasExplicitDayMention(text) {
+  return EXPLICIT_DAY_RE.test(String(text || ''));
+}
+
 const OPENS_WITH_GREETING_RE = /^\s*[¡!]*\s*(hola|buenas|buenos d[ií]as|buenas tardes|buenas noches|buen d[ií]a|qu[eé] tal)\b/i;
 
 /**
@@ -674,7 +705,12 @@ Responde ÚNICAMENTE en JSON válido: {"date": "YYYY-MM-DD" o null, "preferredTi
       const cleanResponse = (data.response || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
       const parsed = JSON.parse(cleanResponse);
       const declined = !!parsed.declined;
-      const date = !declined && typeof parsed.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.date) ? parsed.date : null;
+      // Igual que con la hora: el prompt le pide completar SIEMPRE una fecha,
+      // y ante un mensaje que no nombra ningún día ("para las 11?") el modelo
+      // completaba con "hoy" en vez de responder null. Se descarta esa fecha
+      // si el texto original no menciona un día de verdad.
+      const rawDate = !declined && typeof parsed.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.date) ? parsed.date : null;
+      const date = rawDate && hasExplicitDayMention(text) ? rawDate : null;
       const preferredTime = typeof parsed.preferredTime === 'string' && /^\d{2}:\d{2}$/.test(parsed.preferredTime) ? parsed.preferredTime : null;
       const normalizedTime = normalizeBusinessHour(preferredTime, text);
       // La precisión se decide sobre el texto original, no sobre lo que
