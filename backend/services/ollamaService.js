@@ -60,6 +60,30 @@ function normalizeBusinessHour(hhmm, sourceText) {
   return `${String(h + 12).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
+/**
+ * ¿El contacto nombró una hora CONCRETA ("a las 6", "18:30", "6pm", "a las
+ * once"), o solo un momento del día ("temprano", "en la tarde")?
+ *
+ * La distinción importa porque el prompt de `parseSchedulingDate` convierte
+ * los momentos vagos en una hora representativa ("temprano" → "09:00"), y sin
+ * esta marca el resto del sistema no puede distinguir esa hora inventada de
+ * una que la persona sí dijo: "el martes temprano?" terminaba agendado a las
+ * 9:00 en punto, una hora que nadie eligió.
+ */
+const WORD_HOURS = 'una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|mediod[ií]a';
+const EXPLICIT_CLOCK_RE = new RegExp(
+  '\\d{1,2}\\s*:\\s*\\d{2}'                          // 18:30
+  + '|\\d{1,2}\\s*(?:h|hrs?|horas)\\b'               // 18h, 6 hrs
+  + '|\\d{1,2}\\s*\\.?\\s*(?:a\\.?\\s?m|p\\.?\\s?m)' // 6pm, 6 p.m.
+  + `|a\\s+las?\\s+(?:\\d{1,2}|${WORD_HOURS})\\b`    // a las 6, a la una, a las once
+  + `|\\b(?:${WORD_HOURS})\\s*(?:a\\.?\\s?m|p\\.?\\s?m)`, // once am
+  'i'
+);
+
+function hasExplicitClockMention(text) {
+  return EXPLICIT_CLOCK_RE.test(String(text || ''));
+}
+
 const OPENS_WITH_GREETING_RE = /^\s*[¡!]*\s*(hola|buenas|buenos d[ií]as|buenas tardes|buenas noches|buen d[ií]a|qu[eé] tal)\b/i;
 
 /**
@@ -604,7 +628,17 @@ Responde ÚNICAMENTE en JSON válido: {"date": "YYYY-MM-DD" o null, "preferredTi
       const declined = !!parsed.declined;
       const date = !declined && typeof parsed.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.date) ? parsed.date : null;
       const preferredTime = typeof parsed.preferredTime === 'string' && /^\d{2}:\d{2}$/.test(parsed.preferredTime) ? parsed.preferredTime : null;
-      return { date, preferredTime: normalizeBusinessHour(preferredTime, text), declined, source: 'llm' };
+      const normalizedTime = normalizeBusinessHour(preferredTime, text);
+      // La precisión se decide sobre el texto original, no sobre lo que
+      // devolvió el modelo: el prompt le pide convertir "temprano" en "09:00",
+      // así que su salida sola no distingue una hora dicha de una inferida.
+      return {
+        date,
+        preferredTime: normalizedTime,
+        timePrecision: normalizedTime ? (hasExplicitClockMention(text) ? 'exact' : 'vague') : null,
+        declined,
+        source: 'llm'
+      };
     } catch (err) {
       console.warn('Ollama Cloud LLM date parsing notice:', err.message);
       return this.fallbackParseSchedulingDate(text, todayIso);
@@ -626,7 +660,7 @@ Responde ÚNICAMENTE en JSON válido: {"date": "YYYY-MM-DD" o null, "preferredTi
     // nombrar un día para que se le ofrezcan horarios. "mañana" aquí es parte
     // de la despedida, no una elección de fecha.
     if (/\b(te|le)\s+escribo\b|\bya\s+te\s+(escribo|aviso|digo)\b|\bdespu[eé]s\s+(te\s+)?(escribo|aviso|vemos)\b|\bm[aá]s\s+adelante\b|\bno\s+puedo\s+ahora\b/i.test(normalized)) {
-      return { date: null, preferredTime: null, declined: true, source: 'fallback' };
+      return { date: null, preferredTime: null, timePrecision: null, declined: true, source: 'fallback' };
     }
 
     // Sin IA solo se reconoce una hora escrita de forma inequívoca: con
@@ -663,14 +697,19 @@ Responde ÚNICAMENTE en JSON válido: {"date": "YYYY-MM-DD" o null, "preferredTi
       }
     }
 
+    // Sin IA solo se llega hasta aquí con horas escritas de forma inequívoca,
+    // pero se calcula igual para que el contrato de la función sea el mismo
+    // que el del camino con LLM.
+    const timePrecision = preferredTime ? (hasExplicitClockMention(text) ? 'exact' : 'vague') : null;
+
     if (/\bhoy\b/.test(normalized)) {
-      return { date: todayIso, preferredTime, declined: false, source: 'fallback' };
+      return { date: todayIso, preferredTime, timePrecision, declined: false, source: 'fallback' };
     }
     if (/\bmanana\b|\bmañana\b/.test(normalized)) {
       const tomorrow = new Date(todayUTC + 86400000);
-      return { date: tomorrow.toISOString().slice(0, 10), preferredTime, declined: false, source: 'fallback' };
+      return { date: tomorrow.toISOString().slice(0, 10), preferredTime, timePrecision, declined: false, source: 'fallback' };
     }
-    return { date: null, preferredTime, declined: false, source: 'fallback' };
+    return { date: null, preferredTime, timePrecision, declined: false, source: 'fallback' };
   }
 
   /**
