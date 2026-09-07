@@ -580,7 +580,9 @@ Interpreta a qué fecha se refiere (puede decir "hoy", "mañana", "pasado mañan
 
 Además, si junto con el día también dijo una HORA o un momento del día (ej. "hoy a las 6 pm", "mañana temprano", "el jueves por la tarde"), extráela en formato 24h "HH:MM" en "preferredTime" (usa una hora representativa: "temprano"/"en la mañana" ~ "09:00", "en la tarde" ~ "15:00", "de noche"/"tarde" ~ "20:00"). Si no dijo ninguna hora, deja preferredTime en null. Las reuniones son en horario comercial: una hora sin "am"/"pm" entre la 1 y las 7 SIEMPRE es de la tarde ("a las 5" = "17:00"), salvo que diga explícitamente que es de la mañana.
 
-Responde ÚNICAMENTE en JSON válido: {"date": "YYYY-MM-DD" o null, "preferredTime": "<HH:MM o null>"}`;
+OJO — POSPONER NO ES ELEGIR UN DÍA: si el mensaje en realidad es una forma de aplazar o declinar el agendamiento (ej. "mañana le escribo", "ya te aviso", "después vemos", "no puedo ahora", "lo dejamos para más adelante"), marca "declined": true y deja "date" en null AUNQUE el texto mencione una palabra de fecha como "mañana" — esa palabra ahí no es una elección de horario, es parte de la despedida. Distíngelo así: si la persona NOMBRA un día para QUE LE OFREZCAS horarios ("el jueves", "mañana en la tarde"), no es un aplazamiento; si dice que ELLA te va a escribir/avisar después, sí lo es.
+
+Responde ÚNICAMENTE en JSON válido: {"date": "YYYY-MM-DD" o null, "preferredTime": "<HH:MM o null>", "declined": true o false}`;
 
     try {
       const generateUrl = this.getApiUrl(activeHost, '/generate');
@@ -599,9 +601,10 @@ Responde ÚNICAMENTE en JSON válido: {"date": "YYYY-MM-DD" o null, "preferredTi
       const data = await response.json();
       const cleanResponse = (data.response || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
       const parsed = JSON.parse(cleanResponse);
-      const date = typeof parsed.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.date) ? parsed.date : null;
+      const declined = !!parsed.declined;
+      const date = !declined && typeof parsed.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.date) ? parsed.date : null;
       const preferredTime = typeof parsed.preferredTime === 'string' && /^\d{2}:\d{2}$/.test(parsed.preferredTime) ? parsed.preferredTime : null;
-      return { date, preferredTime: normalizeBusinessHour(preferredTime, text), source: 'llm' };
+      return { date, preferredTime: normalizeBusinessHour(preferredTime, text), declined, source: 'llm' };
     } catch (err) {
       console.warn('Ollama Cloud LLM date parsing notice:', err.message);
       return this.fallbackParseSchedulingDate(text, todayIso);
@@ -617,6 +620,14 @@ Responde ÚNICAMENTE en JSON válido: {"date": "YYYY-MM-DD" o null, "preferredTi
     const normalized = (text || '').toLowerCase();
     const [y, m, d] = todayIso.split('-').map(Number);
     const todayUTC = Date.UTC(y, m - 1, d);
+
+    // Sin IA solo se reconocen las formas más comunes de aplazar/declinar:
+    // la persona avisa que ELLA va a escribir/avisar después, en vez de
+    // nombrar un día para que se le ofrezcan horarios. "mañana" aquí es parte
+    // de la despedida, no una elección de fecha.
+    if (/\b(te|le)\s+escribo\b|\bya\s+te\s+(escribo|aviso|digo)\b|\bdespu[eé]s\s+(te\s+)?(escribo|aviso|vemos)\b|\bm[aá]s\s+adelante\b|\bno\s+puedo\s+ahora\b/i.test(normalized)) {
+      return { date: null, preferredTime: null, declined: true, source: 'fallback' };
+    }
 
     // Sin IA solo se reconoce una hora escrita de forma inequívoca: con
     // minutos ("18:30"), con meridiano ("6pm") o precedida de "a las". Un
@@ -653,13 +664,13 @@ Responde ÚNICAMENTE en JSON válido: {"date": "YYYY-MM-DD" o null, "preferredTi
     }
 
     if (/\bhoy\b/.test(normalized)) {
-      return { date: todayIso, preferredTime, source: 'fallback' };
+      return { date: todayIso, preferredTime, declined: false, source: 'fallback' };
     }
     if (/\bmanana\b|\bmañana\b/.test(normalized)) {
       const tomorrow = new Date(todayUTC + 86400000);
-      return { date: tomorrow.toISOString().slice(0, 10), preferredTime, source: 'fallback' };
+      return { date: tomorrow.toISOString().slice(0, 10), preferredTime, declined: false, source: 'fallback' };
     }
-    return { date: null, preferredTime, source: 'fallback' };
+    return { date: null, preferredTime, declined: false, source: 'fallback' };
   }
 
   /**

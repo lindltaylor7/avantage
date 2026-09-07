@@ -1750,7 +1750,17 @@ export class WhatsappBotService {
     // `preferredTime` recoge la hora que el lead dijo junto con el día ("hoy
     // a las 6 pm"). Antes se descartaba y se le ofrecían siempre los primeros
     // bloques del día, aunque la hora que pidió estuviera libre.
-    const { date, preferredTime } = await this.ollamaService.parseSchedulingDate(trimmed, todayIso, MAX_BOOKING_DAYS_AHEAD);
+    const { date, preferredTime, declined } = await this.ollamaService.parseSchedulingDate(trimmed, todayIso, MAX_BOOKING_DAYS_AHEAD);
+
+    // El lead está posponiendo/declinando (ej. "mañana le escribo"), no
+    // eligiendo un día: aunque mencione una palabra de fecha, insistir con
+    // horarios ahí ignora que se está despidiendo.
+    if (declined) {
+      delete answers.__scheduling;
+      await this.updateSession(waId, { answers: JSON.stringify(answers) });
+      await this.handOffToAdvisor(waId, 'El lead prefirió posponer el agendamiento.');
+      return;
+    }
 
     if (!date) {
       if (await this._registerStepMiss(waId, answers, scheduling, 'No se logró identificar el día que quería el lead.')) return;
