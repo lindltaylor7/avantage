@@ -2304,8 +2304,7 @@ export class WhatsappBotService {
       const startsIn = formatTimeUntil(meeting.start_time);
       const text =
         `⏰ ${name ? `${name}, te` : 'Te'} recuerdo tu reunión con el asesor: *${formatMeetingDateTimeLabel(meeting.start_time)}*${startsIn ? ` (${startsIn})` : ''}.` +
-        (meeting.meet_link ? `\n\n🔗 ${meeting.meet_link}` : '\n\n📞 Te llamamos a este mismo número.') +
-        '\n\nSi no puedes, escríbeme por aquí y la movemos.';
+        (meeting.meet_link ? `\n\n🔗 ${meeting.meet_link}` : '\n\n📞 Te llamamos a este mismo número.');
 
       try {
         await this.send(meeting.wa_id, text);
