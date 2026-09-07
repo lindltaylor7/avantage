@@ -1052,7 +1052,7 @@ export class WhatsappBotService {
     this.logActivity({ type: 'scheduling_offer_skipped', waId, reason });
     await this.updateSession(waId, { status: 'completed' });
     await this.moveFunnelStage(waId, 'transferido_closer');
-    await this.send(waId, 'El  se pondrá en contacto contigo pronto para coordinar la reunión. ¡Gracias! 🙌');
+    await this.send(waId, 'El asesor se pondrá en contacto contigo pronto para coordinar la reunión. ¡Gracias! 🙌');
   }
 
   /**
