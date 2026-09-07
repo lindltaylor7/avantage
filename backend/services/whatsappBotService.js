@@ -1375,7 +1375,7 @@ export class WhatsappBotService {
       // palabra al respecto, se lee como que nadie te escuchó.
       let intro;
       if (parsed.preferredTime) {
-        intro = `A las ${formatClockLabel(parsed.preferredTime)} el asesor no tiene libre ${dayLabelWithArticle(date)}. Estos son los más cercanos:`;
+        intro = `A las ${formatClockLabel(parsed.preferredTime)} no tenemos disponibilidad ${dayLabelWithArticle(date)}. Estos son los más cercanos:`;
       } else if (sameDayAsOffered) {
         intro = `Sí, esos horarios son justo ${dayLabelWithArticle(date)}:`;
       } else {
@@ -1491,13 +1491,13 @@ export class WhatsappBotService {
             if (!preferredTime) {
               intro = `📅 Perfecto, para ${dayLabelWithArticle(targetDate)} hay estos horarios:`;
             } else if (explicitDate) {
-              intro = `A las ${formatClockLabel(preferredTime)} el asesor no tiene libre ${dayLabelWithArticle(targetDate)}. Estos son los más cercanos:`;
+              intro = `A las ${formatClockLabel(preferredTime)} no tenemos disponibilidad ${dayLabelWithArticle(targetDate)}. Estos son los más cercanos:`;
             } else if (spansDays) {
               // Solo dijo la hora y la lista salió de varios días: cada opción
               // lleva su fecha, así que nombrar un día aquí sobra.
-              intro = `A las ${formatClockLabel(preferredTime)} el asesor no tiene libre. Estos son los más cercanos:`;
+              intro = `A las ${formatClockLabel(preferredTime)} no tenemos disponibilidad. Estos son los más cercanos:`;
             } else {
-              intro = `A las ${formatClockLabel(preferredTime)} el asesor no tiene libre. Lo más cercano para ${dayLabelWithArticle(targetDate)}:`;
+              intro = `A las ${formatClockLabel(preferredTime)} no tenemos disponibilidad. Lo más cercano para ${dayLabelWithArticle(targetDate)}:`;
             }
 
             scheduling.slots = slots;
@@ -1673,11 +1673,24 @@ export class WhatsappBotService {
     }
 
     const hourOf = (slot) => slot.timeLabel || formatClockLabel(limaTimeOf(slot.startTime));
+
+    // Un hueco de más de 35 min entre dos horarios libres seguidos del mismo
+    // día significa que hay un tramo ocupado en el medio (ej. una hora ya
+    // agendada en otra prueba). Decir "de 2 a 6:30 p.m." ahí prometía un
+    // bloque continuo que no existe: el contacto pedía una hora intermedia
+    // razonable y el bot le decía que no había, contradiciendo lo que acababa
+    // de afirmar. Con huecos se avisa "varios horarios entre" en vez de "de...a".
+    const hasGap = (daySlots) => daySlots.some((slot, i) => {
+      if (i === 0) return false;
+      return new Date(slot.startTime) - new Date(daySlots[i - 1].startTime) > 35 * 60 * 1000;
+    });
+
     const parts = [...byDay.entries()].map(([date, daySlots]) => {
       const first = daySlots[0];
       const last = daySlots[daySlots.length - 1];
-      return daySlots.length === 1
-        ? `${dayLabelWithArticle(date)} a las ${hourOf(first)}`
+      if (daySlots.length === 1) return `${dayLabelWithArticle(date)} a las ${hourOf(first)}`;
+      return hasGap(daySlots)
+        ? `${dayLabelWithArticle(date)} con varios horarios libres entre las ${hourOf(first)} y las ${hourOf(last)}`
         : `${dayLabelWithArticle(date)} de ${hourOf(first)} a ${hourOf(last)}`;
     });
 
@@ -1787,7 +1800,7 @@ export class WhatsappBotService {
     const slots = await this._fillNearbySlots(daySlots, preferredTime);
     const intro = !preferredTime
       ? `📅 Horarios para ${dayLabelWithArticle(date)}:`
-      : `A las ${formatClockLabel(preferredTime)} el asesor no tiene libre ese día. Estos son los más cercanos:`;
+      : `A las ${formatClockLabel(preferredTime)} no tenemos disponibilidad ese día. Estos son los más cercanos:`;
 
     scheduling.slots = slots;
     await this.updateSession(waId, { status: 'scheduling_time', answers: JSON.stringify(answers) });
@@ -1843,7 +1856,7 @@ export class WhatsappBotService {
           await this.updateSession(waId, { answers: JSON.stringify(answers) });
           await this.send(
             waId,
-            `Ese horario el asesor no lo tiene libre, pero estos son los más cercanos a lo que buscas:\n\n${numberedList(slotOptionLabels(nearSlots))}\n\nResponde con el número que prefieras, o "no" si prefieres que te contacten después.`
+            `Ese horario ya no está disponible, pero estos son los más cercanos a lo que buscas:\n\n${numberedList(slotOptionLabels(nearSlots))}\n\nResponde con el número que prefieras, o "no" si prefieres que te contacten después.`
           );
           return;
         }
