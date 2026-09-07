@@ -69,10 +69,12 @@ const DAY_DISTANCE_PENALTY_MINUTES = 45;
 /**
  * Anticipación mínima con la que se puede reservar un bloque: nada que empiece
  * dentro de los próximos N minutos se ofrece. Es lo que decide si "hoy" todavía
- * es posible — con 120 minutos, a las 3:42 p.m. el bloque de las 5:30 p.m. ya
- * queda fuera por doce minutos — así que se deja configurable por entorno.
+ * es posible — con 60 minutos, a las 3:42 p.m. el bloque de las 5:30 p.m. sigue
+ * ofreciéndose; antes eran 120, y perder "hoy" tan temprano en la tarde era lo
+ * que más fricción generaba en el agendamiento — así que se deja configurable
+ * por entorno.
  */
-export const MIN_BOOKING_LEAD_MINUTES = Number(process.env.WHATSAPP_BOOKING_MIN_LEAD_MINUTES) || 120;
+export const MIN_BOOKING_LEAD_MINUTES = Number(process.env.WHATSAPP_BOOKING_MIN_LEAD_MINUTES) || 60;
 
 /** Instante de inicio del bloque, venga como candidato (`start`) o ya formateado. */
 function slotStartDate(slot) {

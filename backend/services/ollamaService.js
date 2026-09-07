@@ -147,6 +147,54 @@ function generateFallbackEmbedding(text) {
 }
 
 /**
+ * JSON Schemas para las llamadas del AGENDAMIENTO (parseSchedulingDate,
+ * parseSchedulingChoice, classifySchedulingAside). Se pasan en `format` en vez
+ * del `'json'` genérico que se usaba antes: eso solo obligaba a que la
+ * respuesta fuera JSON válido, sin garantizar ni los campos ni sus tipos —
+ * Ollama la sigue aceptando aunque le falte un campo o venga con uno de más.
+ * Con el esquema, el propio servidor restringe el muestreo para que la salida
+ * calce con esta forma antes de llegar al parseo; el parseo manual que ya
+ * existía se deja intacto como red de seguridad (fechas fuera de rango,
+ * confusión de mayúscula/minúscula, o si el modelo en turno no soporta salida
+ * estructurada y Ollama decide ignorar el esquema).
+ *
+ * Los campos NO llevan `pattern` (ej. para YYYY-MM-DD): esas restricciones de
+ * formato no son parte del subconjunto de JSON Schema que todo backend de
+ * Ollama garantiza soportar, y fallar la restricción de formato tira toda la
+ * llamada al fallback. El formato del texto lo sigue validando el código con
+ * los mismos regex de siempre.
+ */
+const SCHEDULING_DATE_SCHEMA = {
+  type: 'object',
+  properties: {
+    date: { type: ['string', 'null'] },
+    preferredTime: { type: ['string', 'null'] },
+    declined: { type: 'boolean' }
+  },
+  required: ['date', 'preferredTime', 'declined']
+};
+
+const SCHEDULING_CHOICE_SCHEMA = {
+  type: 'object',
+  properties: {
+    index: { type: ['integer', 'null'] },
+    preferredTime: { type: ['string', 'null'] }
+  },
+  required: ['index', 'preferredTime']
+};
+
+const SCHEDULING_ASIDE_SCHEMA = {
+  type: 'object',
+  properties: {
+    answersStep: { type: 'boolean' },
+    isAside: { type: 'boolean' },
+    preferredWhen: { type: ['string', 'null'] },
+    answer: { type: ['string', 'null'] }
+  },
+  required: ['answersStep', 'isAside', 'preferredWhen', 'answer']
+};
+
+/**
  * Servicio de integración con Ollama Cloud API / Local Ollama
  */
 export class OllamaService {
@@ -616,7 +664,7 @@ Responde ÚNICAMENTE en JSON válido: {"date": "YYYY-MM-DD" o null, "preferredTi
           'Content-Type': 'application/json',
           ...(activeApiKey ? { 'Authorization': `Bearer ${activeApiKey}` } : {})
         },
-        body: JSON.stringify({ model: this.chatModel, prompt, stream: false, format: 'json' }),
+        body: JSON.stringify({ model: this.chatModel, prompt, stream: false, format: SCHEDULING_DATE_SCHEMA }),
         signal: AbortSignal.timeout(15000)
       });
 
@@ -748,7 +796,7 @@ Responde ÚNICAMENTE en JSON válido: {"index": <número de 1 a ${optionLabels.l
           'Content-Type': 'application/json',
           ...(activeApiKey ? { 'Authorization': `Bearer ${activeApiKey}` } : {})
         },
-        body: JSON.stringify({ model: this.chatModel, prompt, stream: false, format: 'json' }),
+        body: JSON.stringify({ model: this.chatModel, prompt, stream: false, format: SCHEDULING_CHOICE_SCHEMA }),
         signal: AbortSignal.timeout(15000)
       });
 
@@ -834,7 +882,7 @@ Responde ÚNICAMENTE en JSON válido: {"answersStep": <true o false>, "isAside":
           'Content-Type': 'application/json',
           ...(activeApiKey ? { 'Authorization': `Bearer ${activeApiKey}` } : {})
         },
-        body: JSON.stringify({ model: this.chatModel, prompt, stream: false, format: 'json' }),
+        body: JSON.stringify({ model: this.chatModel, prompt, stream: false, format: SCHEDULING_ASIDE_SCHEMA }),
         signal: AbortSignal.timeout(15000)
       });
 

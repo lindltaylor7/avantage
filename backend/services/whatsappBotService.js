@@ -125,10 +125,11 @@ const INACTIVITY_NUDGE_MS = 60 * 60 * 1000;
 const INACTIVITY_FREEZE_MS = 60 * 60 * 1000;
 
 // Recordatorio previo a la reunión: se manda cuando faltan menos de estas dos
-// horas. `MIN_AGE` deja fuera las reuniones recién agendadas — los bloques se
-// ofrecen con dos horas de anticipación mínima, así que sin este margen quien
-// reserva para el primer hueco disponible recibiría el recordatorio a los
-// minutos de confirmar.
+// horas. `MIN_AGE` deja fuera las reuniones recién agendadas: con solo 1 hora
+// de anticipación mínima entre los bloques ofrecidos y ahora, es normal
+// reservar dentro de esta ventana de 2 horas, y sin este margen el
+// recordatorio saldría a los minutos de confirmar en vez de más cerca de la
+// hora real de la reunión.
 const MEETING_REMINDER_LEAD_MS = 2 * 60 * 60 * 1000;
 const MEETING_REMINDER_MIN_AGE_MS = 30 * 60 * 1000;
 
