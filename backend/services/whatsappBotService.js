@@ -2335,7 +2335,33 @@ export class WhatsappBotService {
       .where('bot_enabled', true)
       .whereNull('nudge_sent_at');
 
+    const awaitingFreeze = await db('whatsapp_bot_sessions')
+      .whereIn('status', ['active', ...SCHEDULING_STATUSES])
+      .where('bot_enabled', true)
+      .whereNotNull('nudge_sent_at');
+
+    // Red de seguridad: el status debería quedar en "completed" apenas se
+    // agenda una reunión real (confirmSlot lo hace antes de mandar la
+    // confirmación), así que en teoría estas dos consultas nunca deberían
+    // traer a un contacto que ya cerró. Pero un contacto que YA tiene una
+    // reunión próxima agendada no puede recibir un "¿Estás ahí?" ni quedar
+    // congelado bajo NINGUNA circunstancia — así que se verifica también acá,
+    // por si algún camino (una carrera entre mensajes, un reinicio manual a
+    // medias, un bug futuro) deja la sesión en un status que no le
+    // corresponde.
+    const candidateWaIds = [...new Set([...awaitingReply, ...awaitingFreeze].map((s) => s.wa_id))];
+    const withUpcomingMeeting = candidateWaIds.length > 0
+      ? new Set(
+        (await db('scheduled_meetings')
+          .whereIn('wa_id', candidateWaIds)
+          .where('start_time', '>=', db.fn.now())
+          .select('wa_id')).map((row) => row.wa_id)
+      )
+      : new Set();
+
     for (const session of awaitingReply) {
+      if (withUpcomingMeeting.has(session.wa_id)) continue;
+
       const silentMs = now - new Date(session.updated_at).getTime();
       if (silentMs < INACTIVITY_NUDGE_MS) continue;
 
@@ -2348,12 +2374,9 @@ export class WhatsappBotService {
       }
     }
 
-    const awaitingFreeze = await db('whatsapp_bot_sessions')
-      .whereIn('status', ['active', ...SCHEDULING_STATUSES])
-      .where('bot_enabled', true)
-      .whereNotNull('nudge_sent_at');
-
     for (const session of awaitingFreeze) {
+      if (withUpcomingMeeting.has(session.wa_id)) continue;
+
       const silentSinceNudgeMs = now - new Date(session.nudge_sent_at).getTime();
       if (silentSinceNudgeMs < INACTIVITY_FREEZE_MS) continue;
 
