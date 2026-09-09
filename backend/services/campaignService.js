@@ -43,6 +43,25 @@ const WON_STATUSES = new Set(['ganado']);
 const LOST_STATUSES = new Set(['perdido', 'descartado']);
 const APPOINTMENT_STATUSES = new Set(['cita_agendada']);
 
+function parseMetaInsights(raw) {
+  if (!raw) return null;
+  if (typeof raw === 'object') return raw;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+/** Gasto real de la campaña: métricas de Meta > gasto manual > presupuesto. */
+function resolveSpend(campaign) {
+  if (!campaign) return 0;
+  const meta = parseMetaInsights(campaign.meta_insights);
+  if (meta && Number(meta.spend) > 0) return Number(meta.spend);
+  if (campaign.spend_to_date != null) return Number(campaign.spend_to_date);
+  return Number(campaign.budget_total) || 0;
+}
+
 export class CampaignService {
   // ─────────────────────────── CRUD de campañas ───────────────────────────
   async listCampaigns() {
@@ -233,22 +252,31 @@ export class CampaignService {
     const won = contacts.filter((c) => c.won).length;
     const lost = contacts.filter((c) => c.lost).length;
 
-    const spend = campaign
-      ? (campaign.spend_to_date != null ? Number(campaign.spend_to_date) : Number(campaign.budget_total) || 0)
-      : 0;
+    const spend = campaign ? resolveSpend(campaign) : 0;
+    const meta = campaign ? parseMetaInsights(campaign.meta_insights) : null;
     const quotedValue = contacts.reduce((sum, c) => sum + (c.quotedValue || 0), 0);
 
     const rate = (num, den) => (den > 0 ? Math.round((num / den) * 1000) / 10 : 0);
     const perStage = (den) => (den > 0 && spend > 0 ? Math.round((spend / den) * 100) / 100 : null);
 
+    const funnel = [];
+    if (meta && meta.impressions > 0) {
+      funnel.push({ key: 'impresiones', label: 'Impresiones (Meta)', count: meta.impressions });
+      funnel.push({ key: 'clics', label: 'Clics en el anuncio (Meta)', count: meta.clicks || 0 });
+    }
+    if (meta && meta.messagingStarted > 0) {
+      funnel.push({ key: 'msg_meta', label: 'Conversaciones iniciadas (Meta)', count: meta.messagingStarted });
+    }
+    funnel.push(
+      { key: 'conversacion', label: 'Conversaciones atribuidas (CRM)', count: conversations },
+      { key: 'respondido', label: 'Avan respondió', count: responded },
+      { key: 'calificado', label: 'Calificado (informe de viabilidad)', count: qualified },
+      { key: 'cita_agendada', label: 'Cita agendada', count: appointments },
+      { key: 'ganado', label: 'Ganado / matriculado', count: won }
+    );
+
     return {
-      funnel: [
-        { key: 'conversacion', label: 'Conversaciones atribuidas', count: conversations },
-        { key: 'respondido', label: 'Avan respondió', count: responded },
-        { key: 'calificado', label: 'Calificado (informe de viabilidad)', count: qualified },
-        { key: 'cita_agendada', label: 'Cita agendada', count: appointments },
-        { key: 'ganado', label: 'Ganado / matriculado', count: won }
-      ],
+      funnel,
       metrics: {
         conversations,
         responded,
@@ -273,7 +301,16 @@ export class CampaignService {
         costPerConversation: perStage(conversations),
         costPerQualified: perStage(qualified),
         costPerAppointment: perStage(appointments),
-        costPerWon: perStage(won)
+        costPerWon: perStage(won),
+        impressions: meta?.impressions ?? null,
+        reach: meta?.reach ?? null,
+        clicks: meta?.clicks ?? null,
+        ctr: meta?.ctr ?? null,
+        cpm: meta?.cpm ?? null,
+        cpc: meta?.cpc ?? null,
+        metaMessagingStarted: meta?.messagingStarted ?? null,
+        costPerLeadMeta: meta && meta.messagingStarted > 0 && spend > 0
+          ? Math.round((spend / meta.messagingStarted) * 100) / 100 : null
       },
       sampleContacts: contacts
         .slice()
@@ -355,6 +392,11 @@ export class CampaignService {
         startDate: campaign.start_date,
         endDate: campaign.end_date,
         notes: campaign.notes,
+        source: campaign.source || 'manual',
+        externalId: campaign.external_id || null,
+        metaStatus: campaign.meta_status || null,
+        lastSyncedAt: campaign.last_synced_at || null,
+        insightsWindow: parseMetaInsights(campaign.meta_insights)?.window || null,
         ads: campaign.ads.map((a) => ({ id: a.id, sourceId: a.ad_source_id, label: a.ad_label })),
         ...summary
       };
@@ -389,11 +431,19 @@ export class CampaignService {
       contacts.filter((c) => campaignByAd.has(c.sourceId)),
       null
     ).metrics;
-    const totalSpend = campaigns.reduce(
-      (sum, c) => sum + (c.spend_to_date != null ? Number(c.spend_to_date) : Number(c.budget_total) || 0),
-      0
-    );
+    const totalSpend = campaigns.reduce((sum, c) => sum + resolveSpend(c), 0);
     const totalQuoted = contacts.reduce((sum, c) => sum + (c.quotedValue || 0), 0);
+    const metaTotals = campaigns.reduce((acc, c) => {
+      const m = parseMetaInsights(c.meta_insights);
+      if (m) {
+        acc.impressions += Number(m.impressions || 0);
+        acc.clicks += Number(m.clicks || 0);
+        acc.reach += Number(m.reach || 0);
+        acc.messagingStarted += Number(m.messagingStarted || 0);
+        acc.hasData = true;
+      }
+      return acc;
+    }, { impressions: 0, clicks: 0, reach: 0, messagingStarted: 0, hasData: false });
 
     return {
       generatedAt: new Date().toISOString(),
@@ -414,7 +464,21 @@ export class CampaignService {
         costPerAppointment: totalSpend > 0 && totalsClassified.appointments > 0
           ? Math.round((totalSpend / totalsClassified.appointments) * 100) / 100 : null,
         costPerWon: totalSpend > 0 && totalsClassified.won > 0
-          ? Math.round((totalSpend / totalsClassified.won) * 100) / 100 : null
+          ? Math.round((totalSpend / totalsClassified.won) * 100) / 100 : null,
+        metaImpressions: metaTotals.hasData ? metaTotals.impressions : null,
+        metaClicks: metaTotals.hasData ? metaTotals.clicks : null,
+        metaReach: metaTotals.hasData ? metaTotals.reach : null,
+        metaMessagingStarted: metaTotals.hasData ? metaTotals.messagingStarted : null,
+        metaCtr: metaTotals.hasData && metaTotals.impressions > 0
+          ? Math.round((metaTotals.clicks / metaTotals.impressions) * 10000) / 100 : null
+      },
+      meta: {
+        syncedCampaigns: campaigns.filter((c) => c.source === 'meta').length,
+        lastSyncedAt: campaigns
+          .map((c) => c.last_synced_at)
+          .filter(Boolean)
+          .sort()
+          .pop() || null
       },
       campaigns: campaignReports,
       unclassifiedAds: [...unclassifiedByAd.values()].sort((a, b) => b.conversations - a.conversations)

@@ -12,6 +12,7 @@ import { TaskService } from './services/taskService.js';
 import { QuoteService } from './services/quoteService.js';
 import { buildQuotationDocument } from './services/quotationDocument.js';
 import { CampaignService } from './services/campaignService.js';
+import { MetaAdsService } from './services/metaAdsService.js';
 import { UserService } from './services/userService.js';
 import { RoleService } from './services/roleService.js';
 import { ProjectUpdateService } from './services/projectUpdateService.js';
@@ -99,6 +100,7 @@ const projectService = new ProjectService();
 const taskService = new TaskService();
 const quoteService = new QuoteService();
 const campaignService = new CampaignService();
+const metaAdsService = new MetaAdsService();
 const userService = new UserService();
 const roleService = new RoleService();
 const projectUpdateService = new ProjectUpdateService();
@@ -1801,6 +1803,31 @@ app.delete('/api/campaigns/ads/:mappingId', requireAuth, requirePermission('lead
   } catch (error) {
     console.error('❌ Error al quitar el mapeo del anuncio:', error);
     res.status(500).json({ error: 'Error al quitar el mapeo del anuncio.', details: error.message });
+  }
+});
+
+/** Estado de la integración con la Meta Marketing API (Ads). */
+app.get('/api/campaigns/meta/status', requireAuth, requirePermission('leads.view'), (req, res) => {
+  res.json(metaAdsService.status());
+});
+
+/**
+ * Sincroniza las campañas de Meta Ads: importa campañas, mapea sus anuncios
+ * (para atribuir el tráfico Click-to-WhatsApp) y trae las métricas de
+ * rendimiento (gasto, impresiones, alcance, clics, CPM, CTR).
+ */
+app.post('/api/campaigns/meta/sync', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const datePreset = ['last_7d', 'last_14d', 'last_30d', 'last_90d', 'maximum'].includes(req.body?.datePreset)
+      ? req.body.datePreset
+      : 'last_30d';
+    const summary = await metaAdsService.sync({ datePreset });
+    console.log(`📊 [Campañas] Sync Meta: ${summary.campaigns} campañas, ${summary.adsMapped} anuncios, ${summary.insightsUpdated} con métricas.`);
+    res.json({ summary });
+  } catch (error) {
+    console.error('❌ Error al sincronizar con Meta Ads:', error);
+    const status = error.code === 'NOT_CONFIGURED' ? 400 : 502;
+    res.status(status).json({ error: error.message, code: error.code || null, metaCode: error.metaCode || null });
   }
 });
 

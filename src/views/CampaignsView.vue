@@ -21,10 +21,24 @@
             @click="setRange(opt.value)"
           >{{ opt.label }}</button>
         </div>
+        <button
+          type="button"
+          class="btn-secondary sync-btn"
+          :disabled="syncing || (metaStatus && !metaStatus.configured)"
+          :title="metaStatus && !metaStatus.configured ? 'Configura las credenciales de Meta Ads primero' : ''"
+          @click="syncMeta"
+        >{{ syncing ? '↻ Sincronizando…' : '↻ Sincronizar con Meta' }}</button>
         <button type="button" class="btn-primary new-campaign-btn" @click="openCreateModal">＋ Nueva campaña</button>
       </div>
     </header>
 
+    <p v-if="metaStatus && !metaStatus.configured" class="state-banner state-hint">
+      🔌 Para importar campañas y métricas reales de Meta Ads, define en el <code>.env</code>:
+      <code>META_ADS_ACCOUNT_ID</code> (ID de la cuenta publicitaria) y
+      <code>META_ADS_ACCESS_TOKEN</code> (un token con el permiso <code>ads_read</code>; si tu
+      <code>META_PAGE_ACCESS_TOKEN</code> ya tiene <code>ads_read</code>, se usa ese).
+    </p>
+    <p v-if="syncMsg" class="state-banner" :class="syncError ? 'state-error' : 'state-ok'">{{ syncMsg }}</p>
     <p v-if="errorMsg" class="state-banner state-error">⚠️ {{ errorMsg }}</p>
     <p v-else-if="loading && !report" class="state-banner">Cargando rendimiento de campañas…</p>
 
@@ -71,6 +85,22 @@
           <span class="kpi-value">{{ money(report.kpis.totalQuotedValue) }}</span>
           <span class="kpi-sub" v-if="report.kpis.roas != null">ROAS {{ report.kpis.roas }}×</span>
         </div>
+        <template v-if="report.kpis.metaImpressions != null">
+          <div class="kpi-tile kpi-meta">
+            <span class="kpi-label">Impresiones (Meta)</span>
+            <span class="kpi-value">{{ num(report.kpis.metaImpressions) }}</span>
+            <span class="kpi-sub" v-if="report.kpis.metaReach">Alcance {{ num(report.kpis.metaReach) }}</span>
+          </div>
+          <div class="kpi-tile kpi-meta">
+            <span class="kpi-label">Clics (Meta)</span>
+            <span class="kpi-value">{{ num(report.kpis.metaClicks) }}</span>
+            <span class="kpi-sub" v-if="report.kpis.metaCtr != null">CTR {{ report.kpis.metaCtr }}%</span>
+          </div>
+          <div class="kpi-tile kpi-meta">
+            <span class="kpi-label">Conversaciones (Meta)</span>
+            <span class="kpi-value">{{ num(report.kpis.metaMessagingStarted) }}</span>
+          </div>
+        </template>
       </section>
 
       <!-- Campañas -->
@@ -84,18 +114,28 @@
             <div class="campaign-identity">
               <BrandIcon :name="brandIconName(campaign.platform)" :size="26" class="campaign-platform-icon" />
               <div>
-                <h3 class="campaign-name">{{ campaign.name }}</h3>
+                <h3 class="campaign-name">
+                  {{ campaign.name }}
+                  <span v-if="campaign.source === 'meta'" class="meta-badge">Meta Ads</span>
+                </h3>
                 <span class="campaign-meta">
                   {{ dateRangeLabel(campaign) }}
-                  · Inversión {{ money(campaignSpend(campaign)) }}
+                  · Inversión {{ money(campaign.metrics.spend) }}
                   <template v-if="campaign.objective"> · {{ campaign.objective }}</template>
+                  <template v-if="campaign.lastSyncedAt"> · sync {{ formatDateTime(campaign.lastSyncedAt) }}</template>
                 </span>
               </div>
             </div>
             <div class="campaign-header-actions">
               <span class="pill" :class="statusPillClass(campaign.status)">{{ statusLabel(campaign.status) }}</span>
               <button type="button" class="icon-btn" title="Editar campaña" @click="openEditModal(campaign)">✏️</button>
-              <button type="button" class="icon-btn" title="Eliminar campaña" @click="removeCampaign(campaign)">🗑️</button>
+              <button
+                v-if="campaign.source !== 'meta'"
+                type="button"
+                class="icon-btn"
+                title="Eliminar campaña"
+                @click="removeCampaign(campaign)"
+              >🗑️</button>
             </div>
           </div>
 
@@ -118,6 +158,15 @@
 
           <!-- Métricas de marketing -->
           <div class="metric-grid">
+            <template v-if="campaign.metrics.impressions != null">
+              <div class="metric metric-meta"><span class="metric-label">Impresiones</span><span class="metric-value">{{ num(campaign.metrics.impressions) }}</span></div>
+              <div class="metric metric-meta"><span class="metric-label">Alcance</span><span class="metric-value">{{ num(campaign.metrics.reach) }}</span></div>
+              <div class="metric metric-meta"><span class="metric-label">Clics</span><span class="metric-value">{{ num(campaign.metrics.clicks) }}</span></div>
+              <div class="metric metric-meta"><span class="metric-label">CTR</span><span class="metric-value">{{ campaign.metrics.ctr != null ? campaign.metrics.ctr + '%' : '—' }}</span></div>
+              <div class="metric metric-meta"><span class="metric-label">CPM</span><span class="metric-value">{{ campaign.metrics.cpm != null ? money(campaign.metrics.cpm) : '—' }}</span></div>
+              <div class="metric metric-meta"><span class="metric-label">CPC</span><span class="metric-value">{{ campaign.metrics.cpc != null ? money(campaign.metrics.cpc) : '—' }}</span></div>
+              <div class="metric metric-meta"><span class="metric-label">Costo/conv. (Meta)</span><span class="metric-value">{{ campaign.metrics.costPerLeadMeta != null ? money(campaign.metrics.costPerLeadMeta) : '—' }}</span></div>
+            </template>
             <div class="metric"><span class="metric-label">Tasa de calificación</span><span class="metric-value">{{ campaign.metrics.qualificationRate }}%</span></div>
             <div class="metric"><span class="metric-label">Conversación → cita</span><span class="metric-value">{{ campaign.metrics.conversationToAppointmentRate }}%</span></div>
             <div class="metric"><span class="metric-label">Cita → ganado</span><span class="metric-value">{{ campaign.metrics.appointmentToWonRate }}%</span></div>
@@ -325,6 +374,11 @@ const rangeDays = ref(30);
 const openTraceId = ref(null);
 const assignSelection = reactive({});
 
+const metaStatus = ref(null);
+const syncing = ref(false);
+const syncMsg = ref('');
+const syncError = ref(false);
+
 const showModal = ref(false);
 const editingId = ref(null);
 const saving = ref(false);
@@ -359,6 +413,39 @@ async function loadReport() {
 function setRange(value) {
   rangeDays.value = value;
   loadReport();
+}
+
+async function loadMetaStatus() {
+  try {
+    const res = await apiFetch('/api/campaigns/meta/status');
+    if (res.ok) metaStatus.value = await res.json();
+  } catch { /* silencioso: el banner de config se muestra solo si hay respuesta */ }
+}
+
+const PRESET_BY_RANGE = { 7: 'last_7d', 30: 'last_30d', 90: 'last_90d', 0: 'maximum' };
+
+async function syncMeta() {
+  syncing.value = true;
+  syncMsg.value = '';
+  syncError.value = false;
+  try {
+    const res = await apiFetch('/api/campaigns/meta/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ datePreset: PRESET_BY_RANGE[rangeDays.value] || 'last_30d' })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo sincronizar con Meta.');
+    const s = data.summary;
+    syncMsg.value = `✅ Meta: ${s.campaigns} campaña(s), ${s.adsMapped} anuncio(s) mapeado(s), ${s.insightsUpdated} con métricas.`
+      + (s.errors?.length ? ` ⚠️ ${s.errors.join(' · ')}` : '');
+    await loadReport();
+  } catch (err) {
+    syncError.value = true;
+    syncMsg.value = `No se pudo sincronizar: ${err.message}`;
+  } finally {
+    syncing.value = false;
+  }
 }
 
 function toggleTrace(id) {
@@ -520,10 +607,6 @@ function dateRangeLabel(campaign) {
   return 'sin fechas';
 }
 
-function campaignSpend(campaign) {
-  return campaign.spendToDate != null ? campaign.spendToDate : campaign.budgetTotal;
-}
-
 function brandIconName(platform) {
   if (platform === 'instagram') return 'instagram';
   if (platform === 'facebook') return 'facebook';
@@ -568,7 +651,10 @@ function stepDotClass(lead, step, idx) {
   return 'is-current';
 }
 
-onMounted(loadReport);
+onMounted(() => {
+  loadReport();
+  loadMetaStatus();
+});
 </script>
 
 <style scoped>
@@ -632,6 +718,7 @@ onMounted(loadReport);
 }
 
 .new-campaign-btn { white-space: nowrap; }
+.sync-btn { white-space: nowrap; width: auto; }
 
 .state-banner {
   background: var(--bg-card-solid);
@@ -641,7 +728,33 @@ onMounted(loadReport);
   font-size: 0.88rem;
   color: var(--text-muted);
 }
+.state-banner code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--surface-2);
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+}
 .state-error { border-color: var(--accent-rose); color: var(--accent-rose); }
+.state-ok { border-color: rgba(46, 125, 70, 0.4); color: var(--accent-emerald); }
+.state-hint { border-style: dashed; }
+
+.meta-badge {
+  display: inline-block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #1877F2;
+  background: rgba(24, 119, 242, 0.12);
+  border: 1px solid rgba(24, 119, 242, 0.3);
+  border-radius: 5px;
+  padding: 0.1rem 0.35rem;
+  margin-left: 0.4rem;
+  vertical-align: middle;
+}
+.kpi-meta { border-color: rgba(24, 119, 242, 0.28); }
+.metric-meta { background: rgba(24, 119, 242, 0.06); border-color: rgba(24, 119, 242, 0.2); }
 
 /* KPIs */
 .kpi-row {
