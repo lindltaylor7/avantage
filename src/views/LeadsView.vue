@@ -752,39 +752,86 @@
             <form v-if="showQuoteForm" class="quote-form-section" @submit.prevent="submitQuote">
               <h4 class="quote-heading">💰 Nueva Cotización Comercial</h4>
               <div class="form-group">
-                <label class="form-label">Monto (S/.) *</label>
+                <label class="form-label">Concepto del servicio *</label>
                 <input
-                  v-model="quoteAmount"
-                  type="number"
-                  min="1"
-                  step="0.01"
+                  v-model="quoteConcept"
+                  type="text"
                   class="form-input custom-input"
-                  placeholder="Ej: 1500"
+                  placeholder="Ej: TESIS COMPLETA"
                   required
                 />
               </div>
+              <div style="display: flex; gap: 0.6rem;">
+                <div class="form-group" style="flex: 1;">
+                  <label class="form-label">Monto total *</label>
+                  <input
+                    v-model="quoteAmount"
+                    type="number"
+                    min="1"
+                    step="0.01"
+                    class="form-input custom-input"
+                    placeholder="Ej: 9000"
+                    required
+                  />
+                </div>
+                <div class="form-group" style="width: 90px;">
+                  <label class="form-label">Cant.</label>
+                  <input
+                    v-model="quoteQuantity"
+                    type="number"
+                    min="1"
+                    step="1"
+                    class="form-input custom-input"
+                  />
+                </div>
+                <div class="form-group" style="width: 110px;">
+                  <label class="form-label">Moneda</label>
+                  <select v-model="quoteCurrency" class="form-select custom-select">
+                    <option value="PEN">S/ (PEN)</option>
+                    <option value="USD">US$ (USD)</option>
+                  </select>
+                </div>
+              </div>
               <div class="form-group">
-                <label class="form-label">Notas y Alcance del Servicio</label>
+                <label class="form-label">Alcance del servicio (una viñeta por línea)</label>
+                <textarea
+                  v-model="quoteScope"
+                  class="form-textarea custom-input"
+                  rows="4"
+                  placeholder="02 propuestas opcionales de tema&#10;Plan de tesis o proyecto de investigación&#10;Informe final de tesis&#10;Reporte de similitud TURNITIN"
+                ></textarea>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Observaciones (opcional)</label>
                 <textarea
                   v-model="quoteNotes"
                   class="form-textarea custom-input"
-                  rows="3"
-                  placeholder="Ej: Incluye asesoría metodológica completa, validación de instrumentos y levantamiento de observaciones..."
+                  rows="2"
+                  placeholder="Condiciones particulares, descuentos, etc."
                 ></textarea>
               </div>
               <div style="display: flex; gap: 0.6rem; justify-content: flex-end;">
                 <button type="button" class="btn-action-ghost" @click="showQuoteForm = false">Cancelar</button>
                 <button type="submit" class="btn-action-primary" :disabled="quoteSubmitting">
-                  {{ quoteSubmitting ? 'Enviando...' : 'Enviar Cotización' }}
+                  {{ quoteSubmitting ? 'Generando...' : 'Generar y Enviar' }}
                 </button>
               </div>
             </form>
           </transition>
 
           <div v-if="quoteSuccess" class="info-box" style="margin-top: 1rem; border-color: rgba(46, 125, 70, 0.4); background: rgba(46, 125, 70, 0.08);">
-            <p style="color: var(--accent-emerald); margin: 0; font-size: 0.88rem;">
+            <p style="color: var(--accent-emerald); margin: 0 0 0.6rem; font-size: 0.88rem;">
               ✅ Cotización de <strong>{{ formatCurrency(quoteSuccess.amount, quoteSuccess.currency) }}</strong> enviada con éxito a <strong>{{ selectedLead.email }}</strong>.
             </p>
+            <button
+              type="button"
+              class="btn-action-secondary"
+              style="font-size: 0.8rem;"
+              :disabled="quoteDocLoading"
+              @click="openQuoteDocument(quoteSuccess.id)"
+            >
+              {{ quoteDocLoading ? 'Abriendo…' : '📄 Ver / Descargar cotización (PDF)' }}
+            </button>
           </div>
         </div>
       </div>
@@ -928,14 +975,23 @@ const targetReassignColKey = ref('nuevo');
 
 // Cotización
 const showQuoteForm = ref(false);
+const quoteConcept = ref('TESIS COMPLETA');
 const quoteAmount = ref('');
+const quoteQuantity = ref(1);
+const quoteCurrency = ref('PEN');
+const quoteScope = ref('');
 const quoteNotes = ref('');
 const quoteSubmitting = ref(false);
 const quoteSuccess = ref(null);
+const quoteDocLoading = ref(false);
 
 watch(selectedLead, () => {
   showQuoteForm.value = false;
+  quoteConcept.value = 'TESIS COMPLETA';
   quoteAmount.value = '';
+  quoteQuantity.value = 1;
+  quoteCurrency.value = 'PEN';
+  quoteScope.value = '';
   quoteNotes.value = '';
   quoteSuccess.value = null;
 });
@@ -1342,16 +1398,54 @@ async function submitQuote() {
     const response = await apiFetch(`/api/leads/${selectedLead.value.id}/quote`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount: Number(quoteAmount.value), notes: quoteNotes.value })
+      body: JSON.stringify({
+        amount: Number(quoteAmount.value),
+        quantity: Number(quoteQuantity.value) || 1,
+        currency: quoteCurrency.value,
+        conceptTitle: quoteConcept.value,
+        scopeItems: quoteScope.value,
+        notes: quoteNotes.value
+      })
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Error al generar la cotización.');
     quoteSuccess.value = data.quote;
     showQuoteForm.value = false;
+    // Abre automáticamente el documento imprimible con la marca de Avantage.
+    openQuoteDocument(data.quote.id);
   } catch (err) {
     alert('No se pudo generar la cotización: ' + err.message);
   } finally {
     quoteSubmitting.value = false;
+  }
+}
+
+/**
+ * Descarga el HTML del documento de cotización (con el token de sesión) y lo
+ * abre en una pestaña nueva, lista para "Guardar como PDF" / imprimir.
+ */
+async function openQuoteDocument(quoteId) {
+  if (!quoteId) return;
+  quoteDocLoading.value = true;
+  try {
+    const response = await apiFetch(`/api/quotes/${quoteId}/document`);
+    if (!response.ok) throw new Error('No se pudo obtener el documento.');
+    const html = await response.text();
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const win = window.open(url, '_blank');
+    if (!win) {
+      // El navegador bloqueó la ventana emergente: descarga el archivo.
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `cotizacion-${quoteId}.html`;
+      link.click();
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (err) {
+    alert('No se pudo abrir la cotización: ' + err.message);
+  } finally {
+    quoteDocLoading.value = false;
   }
 }
 

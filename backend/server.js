@@ -10,6 +10,7 @@ import { FunnelColumnService } from './services/funnelColumnService.js';
 import { ProjectService } from './services/projectService.js';
 import { TaskService } from './services/taskService.js';
 import { QuoteService } from './services/quoteService.js';
+import { buildQuotationDocument } from './services/quotationDocument.js';
 import { UserService } from './services/userService.js';
 import { RoleService } from './services/roleService.js';
 import { ProjectUpdateService } from './services/projectUpdateService.js';
@@ -1648,8 +1649,16 @@ app.delete('/api/funnel-columns/:key', requireAuth, requirePermission('leads.vie
  */
 app.post('/api/leads/:id/quote', requireAuth, requirePermission('leads.view'), async (req, res) => {
   try {
-    const { amount, currency = 'PEN', notes } = req.body;
+    const {
+      amount,
+      currency = 'PEN',
+      notes,
+      conceptTitle,
+      quantity,
+      scopeItems
+    } = req.body;
     const parsedAmount = Number(amount);
+    const parsedQuantity = Number(quantity) > 0 ? Math.floor(Number(quantity)) : 1;
 
     if (!amount || Number.isNaN(parsedAmount) || parsedAmount <= 0) {
       return res.status(400).json({ error: 'Proporcione un monto válido para la cotización.' });
@@ -1664,8 +1673,20 @@ app.post('/api/leads/:id/quote', requireAuth, requirePermission('leads.view'), a
       return res.status(400).json({ error: 'Solo se puede cotizar a leads en estado "Contactado" o "En Negociación".' });
     }
 
-    const quote = await quoteService.createQuote({ leadId: lead.id, amount: parsedAmount, currency, notes });
-    const emailStatus = await emailService.sendQuoteEmail(lead.email, { topic: lead.topic, amount: parsedAmount, currency, notes });
+    // La cotización es válida por 10 días calendario desde su emisión.
+    const validUntil = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+    const quote = await quoteService.createQuote({
+      leadId: lead.id,
+      amount: parsedAmount,
+      currency,
+      notes,
+      conceptTitle,
+      quantity: parsedQuantity,
+      scopeItems,
+      validUntil
+    });
+    const emailStatus = await emailService.sendQuoteEmail(lead.email, { quote, lead });
 
     console.log(`💰 [Cotizaciones] Cotización #${quote.id} generada para el lead #${lead.id} (${lead.email})`);
 
@@ -1673,6 +1694,26 @@ app.post('/api/leads/:id/quote', requireAuth, requirePermission('leads.view'), a
   } catch (error) {
     console.error('❌ Error al generar la cotización:', error);
     res.status(500).json({ error: 'Error al generar la cotización.', details: error.message });
+  }
+});
+
+/**
+ * Devuelve el documento HTML imprimible de una cotización con la marca de
+ * Avantage Group, listo para "Guardar como PDF" desde el navegador.
+ */
+app.get('/api/quotes/:id/document', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const data = await quoteService.getQuoteWithLead(req.params.id);
+    if (!data || !data.quote || !data.lead) {
+      return res.status(404).json({ error: 'Cotización no encontrada.' });
+    }
+
+    const html = buildQuotationDocument({ quote: data.quote, lead: data.lead, forPrint: true });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (error) {
+    console.error('❌ Error al generar el documento de la cotización:', error);
+    res.status(500).json({ error: 'Error al generar el documento de la cotización.', details: error.message });
   }
 });
 
