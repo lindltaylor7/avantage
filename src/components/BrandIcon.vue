@@ -15,6 +15,9 @@
       <rect x="3" y="5" width="18" height="14" rx="2" />
       <path d="m3 7 9 6 9-6" />
     </svg>
+    <svg v-else-if="name === 'meta'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+      <path d="M2 16c0-5 2.2-9 5-9 3.5 0 4 6 5 6s1.5-6 5-6c2.8 0 5 4 5 9" />
+    </svg>
   </span>
 </template>
 

@@ -11,6 +11,7 @@ import { ProjectService } from './services/projectService.js';
 import { TaskService } from './services/taskService.js';
 import { QuoteService } from './services/quoteService.js';
 import { buildQuotationDocument } from './services/quotationDocument.js';
+import { CampaignService } from './services/campaignService.js';
 import { UserService } from './services/userService.js';
 import { RoleService } from './services/roleService.js';
 import { ProjectUpdateService } from './services/projectUpdateService.js';
@@ -97,6 +98,7 @@ const funnelColumnService = new FunnelColumnService();
 const projectService = new ProjectService();
 const taskService = new TaskService();
 const quoteService = new QuoteService();
+const campaignService = new CampaignService();
 const userService = new UserService();
 const roleService = new RoleService();
 const projectUpdateService = new ProjectUpdateService();
@@ -1714,6 +1716,91 @@ app.get('/api/quotes/:id/document', requireAuth, requirePermission('leads.view')
   } catch (error) {
     console.error('❌ Error al generar el documento de la cotización:', error);
     res.status(500).json({ error: 'Error al generar el documento de la cotización.', details: error.message });
+  }
+});
+
+/* ===================================================================== */
+/* Campañas de marketing digital                                          */
+/* ===================================================================== */
+
+/** Rendimiento en vivo de todas las campañas (embudo real + costos manuales). */
+app.get('/api/campaigns/performance', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const { from = null, to = null } = req.query;
+    const report = await campaignService.getPerformance({ from, to });
+    res.json(report);
+  } catch (error) {
+    console.error('❌ Error al calcular el rendimiento de campañas:', error);
+    res.status(500).json({ error: 'Error al calcular el rendimiento de campañas.', details: error.message });
+  }
+});
+
+/** Lista de campañas con su mapeo de anuncios. */
+app.get('/api/campaigns', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    res.json({ campaigns: await campaignService.listCampaigns() });
+  } catch (error) {
+    console.error('❌ Error al listar campañas:', error);
+    res.status(500).json({ error: 'Error al listar campañas.', details: error.message });
+  }
+});
+
+app.post('/api/campaigns', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    if (!req.body?.name || !String(req.body.name).trim()) {
+      return res.status(400).json({ error: 'La campaña necesita un nombre.' });
+    }
+    const campaign = await campaignService.createCampaign(req.body);
+    res.status(201).json({ campaign });
+  } catch (error) {
+    console.error('❌ Error al crear la campaña:', error);
+    res.status(500).json({ error: 'Error al crear la campaña.', details: error.message });
+  }
+});
+
+app.put('/api/campaigns/:id', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const campaign = await campaignService.updateCampaign(req.params.id, req.body);
+    if (!campaign) return res.status(404).json({ error: 'Campaña no encontrada.' });
+    res.json({ campaign });
+  } catch (error) {
+    console.error('❌ Error al actualizar la campaña:', error);
+    res.status(500).json({ error: 'Error al actualizar la campaña.', details: error.message });
+  }
+});
+
+app.delete('/api/campaigns/:id', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    await campaignService.deleteCampaign(req.params.id);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error al eliminar la campaña:', error);
+    res.status(500).json({ error: 'Error al eliminar la campaña.', details: error.message });
+  }
+});
+
+/** Asocia un ID de anuncio (source_id del referral) a una campaña. */
+app.post('/api/campaigns/:id/ads', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const campaign = await campaignService.addAdMapping(req.params.id, {
+      adSourceId: req.body?.adSourceId,
+      adLabel: req.body?.adLabel
+    });
+    if (!campaign) return res.status(404).json({ error: 'Campaña no encontrada.' });
+    res.status(201).json({ campaign });
+  } catch (error) {
+    console.error('❌ Error al mapear el anuncio:', error);
+    res.status(400).json({ error: error.message || 'Error al mapear el anuncio.' });
+  }
+});
+
+app.delete('/api/campaigns/ads/:mappingId', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    await campaignService.removeAdMapping(req.params.mappingId);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error al quitar el mapeo del anuncio:', error);
+    res.status(500).json({ error: 'Error al quitar el mapeo del anuncio.', details: error.message });
   }
 });
 
