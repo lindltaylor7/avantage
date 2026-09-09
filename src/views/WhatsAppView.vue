@@ -29,6 +29,15 @@
           Actividad del bot
           <span v-if="botActivity.length" class="btn-count">{{ botActivity.length }}</span>
         </button>
+        <button
+          class="btn-action-secondary"
+          @click="downloadTodayConversations"
+          :disabled="isDownloading"
+          title="Descargar todas las conversaciones de hoy en un archivo .txt"
+        >
+          <span class="btn-icon">⬇️</span>
+          {{ isDownloading ? 'Generando...' : 'Descargar conversaciones de hoy' }}
+        </button>
       </div>
     </header>
 
@@ -414,6 +423,7 @@ const simWaId = ref(`test-${Math.floor(100000 + Math.random() * 900000)}`);
 const simText = ref('');
 const isSimulating = ref(false);
 const simMessagesSent = ref([]);
+const isDownloading = ref(false);
 
 let pollHandle = null;
 
@@ -723,6 +733,40 @@ async function clearActivity() {
     botActivity.value = [];
   } catch (error) {
     errorMessage.value = error.message;
+  }
+}
+
+/**
+ * Descarga en un .txt todas las conversaciones (entrantes + salientes) del día
+ * de hoy. Se pide con apiFetch para adjuntar el token y luego se fuerza la
+ * descarga desde el blob, ya que el endpoint responde con Content-Disposition.
+ */
+async function downloadTodayConversations() {
+  isDownloading.value = true;
+  errorMessage.value = '';
+  try {
+    const response = await apiFetch('/api/whatsapp/conversations/export');
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || 'No se pudieron descargar las conversaciones.');
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get('Content-Disposition') || '';
+    const match = disposition.match(/filename="?([^"]+)"?/);
+    const filename = match ? match[1] : `conversaciones-whatsapp-${new Date().toISOString().slice(0, 10)}.txt`;
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    errorMessage.value = error.message;
+  } finally {
+    isDownloading.value = false;
   }
 }
 

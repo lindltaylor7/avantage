@@ -360,4 +360,81 @@ export class WhatsappMessageService {
     const [{ contacts }] = await db('whatsapp_messages').countDistinct('wa_id as contacts');
     return { total: Number(total), contacts: Number(contacts) };
   }
+
+  /**
+   * Todos los mensajes (entrantes + salientes) de un día concreto, en orden
+   * cronológico. Se usa para exportar la bitácora completa de conversaciones
+   * a un archivo de texto. `day` es un Date; se toma el rango [00:00, 24:00)
+   * en la hora local del servidor.
+   */
+  async getMessagesForDay(day = new Date()) {
+    const start = new Date(day);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 1);
+
+    return db('whatsapp_messages')
+      .whereNotNull('wa_id')
+      .where('wa_id', '!=', '')
+      .where('received_at', '>=', start)
+      .where('received_at', '<', end)
+      .orderBy('received_at', 'asc')
+      .orderBy('id', 'asc');
+  }
+
+  /**
+   * Arma un volcado de texto plano de todas las conversaciones de un día,
+   * agrupadas por contacto y ordenadas cronológicamente dentro de cada una.
+   * Devuelve `{ filename, content }` listo para descargar.
+   */
+  async buildDayTranscript(day = new Date()) {
+    const messages = await this.getMessagesForDay(day);
+
+    const dateFmt = new Intl.DateTimeFormat('es-PE', {
+      day: '2-digit', month: '2-digit', year: 'numeric'
+    });
+    const timeFmt = new Intl.DateTimeFormat('es-PE', {
+      hour: '2-digit', minute: '2-digit', hour12: false
+    });
+    const dayLabel = dateFmt.format(day);
+
+    // Un bloque por contacto, conservando el último nombre de perfil conocido.
+    const byContact = new Map();
+    for (const msg of messages) {
+      const entry = byContact.get(msg.wa_id) || { name: null, messages: [] };
+      if (msg.contact_name) entry.name = msg.contact_name;
+      entry.messages.push(msg);
+      byContact.set(msg.wa_id, entry);
+    }
+
+    const lines = [];
+    lines.push(`Conversaciones de WhatsApp — ${dayLabel}`);
+    lines.push(`Generado: ${dateFmt.format(new Date())} ${timeFmt.format(new Date())}`);
+    lines.push(`Contactos: ${byContact.size} · Mensajes: ${messages.length}`);
+    lines.push('='.repeat(60));
+    lines.push('');
+
+    if (byContact.size === 0) {
+      lines.push('(No hubo mensajes este día.)');
+    }
+
+    for (const [waId, entry] of byContact) {
+      const header = entry.name ? `${entry.name} (${waId})` : waId;
+      lines.push(header);
+      lines.push('-'.repeat(header.length));
+      for (const msg of entry.messages) {
+        const who = msg.direction === 'outbound' ? 'Asesor/Bot' : (entry.name || 'Contacto');
+        const time = timeFmt.format(new Date(msg.received_at));
+        const body = (msg.body || '').replace(/\r?\n/g, '\n           ');
+        lines.push(`[${time}] ${who}: ${body}`);
+      }
+      lines.push('');
+    }
+
+    const stamp = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+    return {
+      filename: `conversaciones-whatsapp-${stamp}.txt`,
+      content: lines.join('\n')
+    };
+  }
 }

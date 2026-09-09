@@ -1349,6 +1349,32 @@ app.get('/api/whatsapp/conversations', requireAuth, requirePermission('leads.vie
 });
 
 /**
+ * Exporta todas las conversaciones de WhatsApp de un día (hoy por defecto, o
+ * ?date=YYYY-MM-DD) como un archivo de texto plano descargable.
+ */
+app.get('/api/whatsapp/conversations/export', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const raw = (req.query.date || '').trim();
+    let day = new Date();
+    if (raw) {
+      const parsed = new Date(`${raw}T00:00:00`);
+      if (Number.isNaN(parsed.getTime())) {
+        return res.status(400).json({ error: 'El parámetro "date" debe tener el formato YYYY-MM-DD.' });
+      }
+      day = parsed;
+    }
+
+    const { filename, content } = await whatsappMessageService.buildDayTranscript(day);
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(content);
+  } catch (error) {
+    console.error('❌ Error al exportar las conversaciones de WhatsApp:', error);
+    res.status(500).json({ error: 'Error al exportar las conversaciones de WhatsApp.', details: error.message });
+  }
+});
+
+/**
  * Hilo completo (entrantes + salientes) de un contacto de WhatsApp.
  */
 app.get('/api/whatsapp/conversations/:waId/messages', requireAuth, requirePermission('leads.view'), async (req, res) => {
