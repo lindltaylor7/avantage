@@ -33,10 +33,26 @@
     </header>
 
     <p v-if="metaStatus && !metaStatus.configured" class="state-banner state-hint">
-      🔌 Para importar campañas y métricas reales de Meta Ads, define en el <code>.env</code>:
-      <code>META_ADS_ACCOUNT_ID</code> (ID de la cuenta publicitaria) y
-      <code>META_ADS_ACCESS_TOKEN</code> (un token con el permiso <code>ads_read</code>; si tu
-      <code>META_PAGE_ACCESS_TOKEN</code> ya tiene <code>ads_read</code>, se usa ese).
+      <template v-if="metaStatus.reason === 'no_token'">
+        🔌 No hay ningún token de Meta configurado. Define <code>META_ADS_ACCESS_TOKEN</code> (o
+        <code>META_PAGE_ACCESS_TOKEN</code>) en el <code>.env</code>.
+      </template>
+      <template v-else-if="metaStatus.reason === 'no_ad_account'">
+        🔌 El token de Meta no tiene acceso a ninguna cuenta publicitaria. Agrégale el permiso
+        <code>ads_read</code> y asigna el usuario/System User a la cuenta de Meta Ads, o define
+        <code>META_ADS_ACCOUNT_ID</code> en el <code>.env</code>.
+      </template>
+      <template v-else>
+        🔌 No se pudo conectar con Meta Ads: {{ metaStatus.error || 'error desconocido' }}.
+        Verifica el permiso <code>ads_read</code> del token o define <code>META_ADS_ACCOUNT_ID</code> en el <code>.env</code>.
+      </template>
+    </p>
+    <p v-else-if="metaStatus && metaStatus.configured" class="state-banner state-ok meta-connected">
+      🟢 Conectado a Meta Ads<template v-if="metaStatus.accountName"> · {{ metaStatus.accountName }}</template>
+      <span class="data-mono"> ({{ metaStatus.accountId }})</span>
+      <template v-if="metaStatus.accountSource === 'auto' && metaStatus.accountOptions > 1">
+        · detectadas {{ metaStatus.accountOptions }} cuentas, usando la primera activa; fija una con <code>META_ADS_ACCOUNT_ID</code>
+      </template>
     </p>
     <p v-if="syncMsg" class="state-banner" :class="syncError ? 'state-error' : 'state-ok'">{{ syncMsg }}</p>
     <p v-if="errorMsg" class="state-banner state-error">⚠️ {{ errorMsg }}</p>
@@ -738,6 +754,8 @@ onMounted(() => {
 .state-error { border-color: var(--accent-rose); color: var(--accent-rose); }
 .state-ok { border-color: rgba(46, 125, 70, 0.4); color: var(--accent-emerald); }
 .state-hint { border-style: dashed; }
+.meta-connected { font-size: 0.8rem; padding: 0.65rem 1rem; }
+.meta-connected .data-mono { opacity: 0.75; }
 
 .meta-badge {
   display: inline-block;

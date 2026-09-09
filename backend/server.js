@@ -1807,8 +1807,12 @@ app.delete('/api/campaigns/ads/:mappingId', requireAuth, requirePermission('lead
 });
 
 /** Estado de la integración con la Meta Marketing API (Ads). */
-app.get('/api/campaigns/meta/status', requireAuth, requirePermission('leads.view'), (req, res) => {
-  res.json(metaAdsService.status());
+app.get('/api/campaigns/meta/status', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    res.json(await metaAdsService.status());
+  } catch (error) {
+    res.json({ configured: false, reason: 'error', error: error.message });
+  }
 });
 
 /**
@@ -1826,7 +1830,8 @@ app.post('/api/campaigns/meta/sync', requireAuth, requirePermission('leads.view'
     res.json({ summary });
   } catch (error) {
     console.error('❌ Error al sincronizar con Meta Ads:', error);
-    const status = error.code === 'NOT_CONFIGURED' ? 400 : 502;
+    const configErrors = ['NOT_CONFIGURED', 'NO_TOKEN', 'NO_AD_ACCOUNT'];
+    const status = configErrors.includes(error.code) ? 400 : 502;
     res.status(status).json({ error: error.message, code: error.code || null, metaCode: error.metaCode || null });
   }
 });

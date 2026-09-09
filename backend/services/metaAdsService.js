@@ -48,28 +48,68 @@ function toDateOnly(value) {
 export class MetaAdsService {
   constructor({ fetchImpl } = {}) {
     this.fetch = fetchImpl || globalThis.fetch;
-  }
-
-  get accountId() {
-    return normalizeAccountId(process.env.META_ADS_ACCOUNT_ID);
+    this._resolvedAccount = null; // cache: { id, name }
   }
 
   get accessToken() {
     return process.env.META_ADS_ACCESS_TOKEN || process.env.META_PAGE_ACCESS_TOKEN || null;
   }
 
-  isConfigured() {
-    return !!(this.accountId && this.accessToken);
+  /**
+   * Resuelve la cuenta publicitaria: usa META_ADS_ACCOUNT_ID si está definida,
+   * o la descubre automáticamente con el token vía `/me/adaccounts` (igual que
+   * el panel de Instagram descubre la cuenta de IG con el Page Access Token).
+   */
+  async resolveAccount({ force = false } = {}) {
+    if (this._resolvedAccount && !force) return this._resolvedAccount;
+    if (!this.accessToken) {
+      const e = new Error('No hay ningún token de Meta configurado (META_ADS_ACCESS_TOKEN o META_PAGE_ACCESS_TOKEN).');
+      e.code = 'NO_TOKEN';
+      throw e;
+    }
+
+    const envId = normalizeAccountId(process.env.META_ADS_ACCOUNT_ID);
+    if (envId) {
+      this._resolvedAccount = { id: envId, name: null, source: 'env' };
+      return this._resolvedAccount;
+    }
+
+    const accounts = await this.#graphGet('me/adaccounts', { fields: 'id,name,account_status', limit: '50' });
+    if (!accounts.length) {
+      const e = new Error('El token no tiene acceso a ninguna cuenta publicitaria. Verifica que incluya el permiso ads_read y que el usuario/System User esté asignado a la cuenta de Meta Ads.');
+      e.code = 'NO_AD_ACCOUNT';
+      throw e;
+    }
+    const active = accounts.find((a) => Number(a.account_status) === 1) || accounts[0];
+    this._resolvedAccount = { id: normalizeAccountId(active.id), name: active.name || null, source: 'auto', options: accounts.length };
+    return this._resolvedAccount;
   }
 
-  status() {
-    const id = this.accountId;
-    return {
-      configured: this.isConfigured(),
-      accountId: id ? id.replace(/^(act_\d{3})\d+(\d{3})$/, '$1…$2') : null,
-      hasToken: !!this.accessToken,
-      usingPageToken: !process.env.META_ADS_ACCESS_TOKEN && !!process.env.META_PAGE_ACCESS_TOKEN
-    };
+  /** Estado de la integración, con comprobación en vivo contra el Graph API. */
+  async status() {
+    if (!this.accessToken) {
+      return { configured: false, reason: 'no_token', hasToken: false };
+    }
+    try {
+      const account = await this.resolveAccount({ force: true });
+      return {
+        configured: true,
+        hasToken: true,
+        usingPageToken: !process.env.META_ADS_ACCESS_TOKEN,
+        accountId: account.id,
+        accountName: account.name,
+        accountSource: account.source,
+        accountOptions: account.options || 1
+      };
+    } catch (err) {
+      return {
+        configured: false,
+        hasToken: true,
+        reason: (err.code || 'error').toLowerCase(),
+        error: err.message,
+        metaCode: err.metaCode || null
+      };
+    }
   }
 
   /** GET a un endpoint del Graph con paginación por `paging.next`. */
@@ -101,14 +141,8 @@ export class MetaAdsService {
    * insights de Meta (last_7d | last_30d | last_90d | maximum).
    */
   async sync({ datePreset = 'last_30d' } = {}) {
-    if (!this.isConfigured()) {
-      const e = new Error('Falta configurar META_ADS_ACCOUNT_ID y un token con permiso ads_read (META_ADS_ACCESS_TOKEN o META_PAGE_ACCESS_TOKEN).');
-      e.code = 'NOT_CONFIGURED';
-      throw e;
-    }
-
-    const account = this.accountId;
-    const summary = { campaigns: 0, adsMapped: 0, insightsUpdated: 0, datePreset, errors: [] };
+    const account = (await this.resolveAccount()).id;
+    const summary = { campaigns: 0, adsMapped: 0, insightsUpdated: 0, adAccount: account, datePreset, errors: [] };
 
     // 1) Campañas
     const campaigns = await this.#graphGet(`${account}/campaigns`, {
@@ -144,24 +178,43 @@ export class MetaAdsService {
       summary.campaigns++;
     }
 
-    // 2) Anuncios -> mapeo automático (ad.id === referral.source_id de WhatsApp)
+    // 2) Anuncios -> mapeo automático. El `referral.source_id` que manda
+    //    WhatsApp puede ser el ID del anuncio, el ID de la publicación detrás
+    //    del anuncio (effective_object_story_id) o el ID del media de Instagram,
+    //    según el tipo de anuncio. Se mapean TODOS los candidatos a la campaña.
     let ads = [];
     try {
       ads = await this.#graphGet(`${account}/ads`, {
-        fields: 'id,name,campaign_id,effective_status',
+        fields: 'id,name,campaign_id,effective_status,creative{effective_object_story_id,effective_instagram_media_id,object_story_id}',
         limit: '500'
       });
     } catch (err) {
       summary.errors.push(`No se pudieron traer los anuncios: ${err.message}`);
     }
 
+    const mappedSourceIds = new Set();
     for (const ad of ads) {
       const localCampaignId = localIdByExternal.get(String(ad.campaign_id));
       if (!localCampaignId) continue;
-      await db('campaign_ads')
-        .insert({ campaign_id: localCampaignId, ad_source_id: String(ad.id), ad_label: ad.name || null })
-        .onConflict('ad_source_id')
-        .merge({ campaign_id: localCampaignId, ad_label: ad.name || null });
+
+      const storyId = ad.creative?.effective_object_story_id || ad.creative?.object_story_id || null;
+      const candidates = new Set([String(ad.id)]);
+      if (storyId) {
+        candidates.add(String(storyId));
+        if (storyId.includes('_')) candidates.add(storyId.split('_').pop());
+      }
+      if (ad.creative?.effective_instagram_media_id) {
+        candidates.add(String(ad.creative.effective_instagram_media_id));
+      }
+
+      for (const sourceId of candidates) {
+        if (!sourceId || mappedSourceIds.has(sourceId)) continue;
+        mappedSourceIds.add(sourceId);
+        await db('campaign_ads')
+          .insert({ campaign_id: localCampaignId, ad_source_id: sourceId, ad_label: ad.name || null })
+          .onConflict('ad_source_id')
+          .merge({ campaign_id: localCampaignId, ad_label: ad.name || null });
+      }
       summary.adsMapped++;
     }
 
