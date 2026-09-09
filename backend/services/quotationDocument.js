@@ -212,7 +212,7 @@ export function buildQuotationDocument({ quote, lead, forPrint = false }) {
 
   .q-sheet {
     width: 194mm;
-    min-height: 281mm;
+    min-height: 274mm;
     margin: 20px auto;
     background: var(--paper);
     display: flex;
@@ -242,11 +242,11 @@ export function buildQuotationDocument({ quote, lead, forPrint = false }) {
     z-index: 2;
   }
   .q-head__meta {
-    padding: 20px 26px 18px 38px;
+    padding: 22px 26px 20px 38px;
     display: flex;
     flex-direction: column;
     justify-content: center;
-    gap: 15px;
+    gap: 16px;
     position: relative;
     z-index: 1;
   }
@@ -257,14 +257,13 @@ export function buildQuotationDocument({ quote, lead, forPrint = false }) {
     margin-top: 9px; font-size: 11px; font-weight: 700; letter-spacing: 2px;
     color: var(--olive-deep); padding-bottom: 4px; border-bottom: 2px solid var(--olive);
   }
-  .q-facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px 12px; }
-  .q-facts dt {
-    display: flex; align-items: center; gap: 4px;
-    font-size: 7.5px; font-weight: 700; letter-spacing: 0.3px; color: var(--ink);
-    white-space: nowrap;
+  .q-facts { display: grid; gap: 10px; }
+  .q-fact__k {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 8.5px; font-weight: 700; letter-spacing: 0.7px; color: var(--ink);
   }
-  .q-facts dd { font-size: 9px; color: var(--muted); margin-top: 3px; line-height: 1.3; }
-  .q-facts .q-ic { width: 12px; height: 12px; color: var(--olive-deep); flex: none; }
+  .q-fact__v { font-size: 9px; color: var(--muted); margin-top: 2px; padding-left: 18px; line-height: 1.3; }
+  .q-fact .q-ic { width: 12px; height: 12px; color: var(--olive-deep); flex: none; }
 
   /* ─── Logo ─── */
   .q-logo { display: flex; align-items: center; gap: 13px; }
@@ -374,18 +373,18 @@ export function buildQuotationDocument({ quote, lead, forPrint = false }) {
   .q-printbar span { font-size: 11px; color: #4b4b44; }
 
   @media print {
-    html, body { background: #fff; width: auto; }
+    html, body { background: #fff; width: 210mm; }
     .q-noprint { display: none !important; }
     .q-sheet {
-      width: 100%;
-      min-height: 272mm;
+      width: 210mm;
+      min-height: 296mm;
       margin: 0;
       box-shadow: none;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
     .q-intro, .q-table, .q-summary, .q-terms, .q-foot { break-inside: avoid; }
-    @page { size: A4; margin: 8mm; }
+    @page { size: A4; margin: 0; }
   }
 
   @media screen and (max-width: 840px) {
@@ -405,11 +404,11 @@ ${printBar}
         <h1>COTIZACIÓN</h1>
         <span class="q-num">${esc(quoteNumber)}</span>
       </div>
-      <dl class="q-facts">
-        <dt>${icon('calendar')} FECHA</dt><dd>${esc(issueDate)}</dd>
-        <dt>${icon('calendar')} VÁLIDO HASTA</dt><dd>${esc(validUntil)}</dd>
-        <dt>${icon('doc')} ELABORADO POR</dt><dd>${esc(COMPANY.brandName)}</dd>
-      </dl>
+      <div class="q-facts">
+        <div class="q-fact"><div class="q-fact__k">${icon('calendar')} FECHA</div><div class="q-fact__v">${esc(issueDate)}</div></div>
+        <div class="q-fact"><div class="q-fact__k">${icon('calendar')} VÁLIDO HASTA</div><div class="q-fact__v">${esc(validUntil)}</div></div>
+        <div class="q-fact"><div class="q-fact__k">${icon('doc')} ELABORADO POR</div><div class="q-fact__v">${esc(COMPANY.brandName)}</div></div>
+      </div>
     </div>
   </header>
 
