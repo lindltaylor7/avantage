@@ -86,21 +86,29 @@ function parseScopeItems(raw) {
     .filter(Boolean);
 }
 
-/* Logotipo AVANTAGE GROUP recreado en SVG (monograma "A" + arco "G"). */
+/* Marca "A" angular (chevron + travesaño) enmarcada por un anillo abierto,
+ * en verde de marca. Se reutiliza en el logotipo y en la marca de agua. */
+function agMarkPaths(fill, ring) {
+  return `
+    <path d="M9 45 A24 24 0 1 1 43 45" fill="none" stroke="${ring}" stroke-width="5" stroke-linecap="round"/>
+    <path d="M26 9 L40 42 L32 42 L26 27 L20 42 L12 42 Z" fill="${fill}"/>
+    <path d="M20 35 L32 35 L30.5 30 L21.5 30 Z" fill="${fill}"/>`;
+}
+
+/* Logotipo AVANTAGE GROUP recreado en SVG. */
 function brandLogo({ dark = true } = {}) {
   const wordColor = dark ? '#ffffff' : C.ink;
   const groupColor = dark ? '#c9c9c1' : C.textMuted;
   return `
     <div class="ag-logo">
-      <svg class="ag-logo__mark" viewBox="0 0 64 56" role="img" aria-label="Avantage Group">
-        <path d="M32 3 L60 52 L44.5 52 L32 29 L26 40 L33 40 L37 47 L15 47 L32 3 Z" fill="${C.green}"/>
-        <path d="M40 52 A21 21 0 1 1 44 20" fill="none" stroke="${C.greenSoft}" stroke-width="6" stroke-linecap="round"/>
+      <svg class="ag-logo__mark" viewBox="0 0 60 56" role="img" aria-label="Avantage Group">
+        ${agMarkPaths(C.green, C.greenSoft)}
       </svg>
       <div class="ag-logo__text">
-        <span class="ag-logo__word" style="color:${wordColor}">A V A N T A G E</span>
+        <span class="ag-logo__word" style="color:${wordColor}">AVANTAGE</span>
         <span class="ag-logo__group">
           <span class="ag-logo__rule"></span>
-          <span style="color:${groupColor}">G R O U P</span>
+          <span style="color:${groupColor}">GROUP</span>
           <span class="ag-logo__rule"></span>
         </span>
         <span class="ag-logo__tagline">${esc(COMPANY.tagline)}</span>
@@ -110,9 +118,8 @@ function brandLogo({ dark = true } = {}) {
 
 function watermarkMark(className) {
   return `
-    <svg class="${className}" viewBox="0 0 64 56" aria-hidden="true">
-      <path d="M32 3 L60 52 L44.5 52 L32 29 L26 40 L33 40 L37 47 L15 47 L32 3 Z" fill="${C.green}"/>
-      <path d="M40 52 A21 21 0 1 1 44 20" fill="none" stroke="${C.green}" stroke-width="6" stroke-linecap="round"/>
+    <svg class="${className}" viewBox="0 0 60 56" aria-hidden="true">
+      ${agMarkPaths(C.green, C.green)}
     </svg>`;
 }
 
@@ -176,6 +183,7 @@ export function buildQuotationDocument({ quote, lead, forPrint = false }) {
   }
   .sheet {
     width: 820px;
+    max-width: 100%;
     margin: 24px auto;
     background: ${C.beigeLight};
     box-shadow: 0 12px 40px rgba(0,0,0,0.25);
@@ -215,13 +223,14 @@ export function buildQuotationDocument({ quote, lead, forPrint = false }) {
   .q-head__facts dd { color: ${C.textMuted}; }
 
   /* ---------- Logo ---------- */
-  .ag-logo { display: flex; align-items: center; gap: 12px; }
-  .ag-logo__mark { width: 58px; height: 52px; flex: none; }
-  .ag-logo__text { display: flex; flex-direction: column; gap: 3px; }
-  .ag-logo__word { font-size: 19px; font-weight: 700; letter-spacing: 1px; }
-  .ag-logo__group { display: flex; align-items: center; gap: 6px; font-size: 9px; font-weight: 600; letter-spacing: 2px; }
-  .ag-logo__rule { height: 1px; width: 14px; background: ${C.red}; display: inline-block; }
-  .ag-logo__tagline { font-size: 6.7px; font-weight: 600; letter-spacing: 0.7px; color: ${C.greenSoft}; margin-top: 2px; }
+  .ag-logo { display: flex; align-items: center; gap: 14px; }
+  .ag-logo__mark { width: 52px; height: 48px; flex: none; }
+  .ag-logo__text { display: flex; flex-direction: column; gap: 4px; }
+  .ag-logo__word { font-size: 22px; font-weight: 700; letter-spacing: 5px; line-height: 1; }
+  .ag-logo__group { display: flex; align-items: center; gap: 8px; font-size: 8.5px; font-weight: 600; letter-spacing: 4px; }
+  .ag-logo__group > span:not(.ag-logo__rule) { padding-left: 4px; }
+  .ag-logo__rule { height: 1px; width: 16px; background: ${C.red}; display: inline-block; }
+  .ag-logo__tagline { font-size: 6px; font-weight: 600; letter-spacing: 0.9px; color: ${C.greenSoft}; margin-top: 3px; white-space: nowrap; }
 
   /* ---------- Cuerpo ---------- */
   .q-body { padding: 26px; position: relative; z-index: 1; }
@@ -304,10 +313,21 @@ export function buildQuotationDocument({ quote, lead, forPrint = false }) {
   .print-bar button:hover { background: ${C.greenDark}; }
 
   @media print {
-    body { background: #fff; }
+    html, body { width: 100%; margin: 0; padding: 0; background: #fff; overflow: hidden; }
     .no-print { display: none !important; }
-    .sheet { width: 100%; margin: 0; box-shadow: none; }
-    @page { size: A4; margin: 12mm; }
+    .sheet {
+      width: 100%;
+      max-width: 210mm;
+      margin: 0;
+      box-shadow: none;
+      overflow: hidden;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    /* El encabezado y el pie sangran a los bordes; el resto del contenido no
+       debe partirse a media caja entre páginas. */
+    .q-cols, .q-table, .q-summary, .q-features, .q-foot { break-inside: avoid; }
+    @page { size: A4; margin: 0; }
   }
 </style>
 </head>
