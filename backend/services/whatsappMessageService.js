@@ -4,6 +4,13 @@ import { db } from '../db/connection.js';
 
 const GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v21.0';
 
+/** Fecha de hoy ("YYYY-MM-DD") en el calendario de Lima, sin importar la zona horaria del servidor. */
+function limaTodayIso() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date());
+}
+
 function extractBody(message) {
   switch (message.type) {
     case 'text': return message.text?.body || '';
@@ -362,16 +369,16 @@ export class WhatsappMessageService {
   }
 
   /**
-   * Todos los mensajes (entrantes + salientes) de un día concreto, en orden
-   * cronológico. Se usa para exportar la bitácora completa de conversaciones
-   * a un archivo de texto. `day` es un Date; se toma el rango [00:00, 24:00)
-   * en la hora local del servidor.
+   * Todos los mensajes (entrantes + salientes) de un día del calendario de
+   * Lima, en orden cronológico. Se usa para exportar la bitácora completa de
+   * conversaciones a un archivo de texto. `dateStr` es "YYYY-MM-DD" en
+   * calendario de Lima (por defecto, hoy en Lima). Perú es UTC-5 todo el año
+   * (sin horario de verano), así que 00:00 de Lima son las 05:00 UTC.
    */
-  async getMessagesForDay(day = new Date()) {
-    const start = new Date(day);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(start);
-    end.setDate(start.getDate() + 1);
+  async getMessagesForDay(dateStr = limaTodayIso()) {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const start = new Date(Date.UTC(y, m - 1, d, 5, 0, 0));
+    const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
 
     return db('whatsapp_messages')
       .whereNotNull('wa_id')
@@ -385,18 +392,20 @@ export class WhatsappMessageService {
   /**
    * Arma un volcado de texto plano de todas las conversaciones de un día,
    * agrupadas por contacto y ordenadas cronológicamente dentro de cada una.
+   * `dateStr` es "YYYY-MM-DD" en calendario de Lima (por defecto, hoy en Lima).
    * Devuelve `{ filename, content }` listo para descargar.
    */
-  async buildDayTranscript(day = new Date()) {
-    const messages = await this.getMessagesForDay(day);
+  async buildDayTranscript(dateStr = limaTodayIso()) {
+    const messages = await this.getMessagesForDay(dateStr);
 
     const dateFmt = new Intl.DateTimeFormat('es-PE', {
-      day: '2-digit', month: '2-digit', year: 'numeric'
+      timeZone: 'America/Lima', day: '2-digit', month: '2-digit', year: 'numeric'
     });
     const timeFmt = new Intl.DateTimeFormat('es-PE', {
-      hour: '2-digit', minute: '2-digit', hour12: false
+      timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hour12: false
     });
-    const dayLabel = dateFmt.format(day);
+    const [ly, lm, ld] = dateStr.split('-');
+    const dayLabel = `${ld}/${lm}/${ly}`;
 
     // Un bloque por contacto, conservando el último nombre de perfil conocido.
     const byContact = new Map();
@@ -431,9 +440,8 @@ export class WhatsappMessageService {
       lines.push('');
     }
 
-    const stamp = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
     return {
-      filename: `conversaciones-whatsapp-${stamp}.txt`,
+      filename: `conversaciones-whatsapp-${dateStr}.txt`,
       content: lines.join('\n')
     };
   }

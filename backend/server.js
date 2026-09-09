@@ -1355,16 +1355,13 @@ app.get('/api/whatsapp/conversations', requireAuth, requirePermission('leads.vie
 app.get('/api/whatsapp/conversations/export', requireAuth, requirePermission('leads.view'), async (req, res) => {
   try {
     const raw = (req.query.date || '').trim();
-    let day = new Date();
-    if (raw) {
-      const parsed = new Date(`${raw}T00:00:00`);
-      if (Number.isNaN(parsed.getTime())) {
-        return res.status(400).json({ error: 'El parámetro "date" debe tener el formato YYYY-MM-DD.' });
-      }
-      day = parsed;
+    if (raw && !/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+      return res.status(400).json({ error: 'El parámetro "date" debe tener el formato YYYY-MM-DD.' });
     }
 
-    const { filename, content } = await whatsappMessageService.buildDayTranscript(day);
+    const { filename, content } = raw
+      ? await whatsappMessageService.buildDayTranscript(raw)
+      : await whatsappMessageService.buildDayTranscript();
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(content);

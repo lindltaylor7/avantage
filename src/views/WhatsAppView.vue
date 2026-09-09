@@ -753,7 +753,10 @@ async function downloadTodayConversations() {
     const blob = await response.blob();
     const disposition = response.headers.get('Content-Disposition') || '';
     const match = disposition.match(/filename="?([^"]+)"?/);
-    const filename = match ? match[1] : `conversaciones-whatsapp-${new Date().toISOString().slice(0, 10)}.txt`;
+    const limaToday = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit'
+    }).format(new Date());
+    const filename = match ? match[1] : `conversaciones-whatsapp-${limaToday}.txt`;
 
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
