@@ -1,8 +1,8 @@
 import { db } from '../db/connection.js';
 
 /**
- * Servicio de acceso a datos para las cotizaciones generadas a leads en
- * las etapas "contactado" o "en_negociacion" del funnel de ventas.
+ * Servicio de acceso a datos para las cotizaciones generadas a los leads
+ * del funnel de ventas.
  */
 export class QuoteService {
   async createQuote({

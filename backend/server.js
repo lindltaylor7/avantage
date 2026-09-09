@@ -40,9 +40,6 @@ import { uploadProjectUpdateAttachment, uploadDir, uploadFinanceReceipt, uploadF
 // aquí se genera automáticamente el proyecto asociado al lead.
 const FUNNEL_FINAL_STATUS = 'ganado';
 
-// Etapas del funnel en las que un lead ya puede recibir una cotización.
-const QUOTE_ELIGIBLE_STATUSES = ['contactado', 'en_negociacion'];
-
 // Frecuencia del sondeo del conteo de seguidores de la página (Meta no lo
 // notifica por webhook), 1 hora por defecto.
 const FOLLOWER_POLL_INTERVAL_MS = Number(process.env.META_FOLLOWER_POLL_INTERVAL_MS) || 60 * 60 * 1000;
@@ -1648,8 +1645,9 @@ app.delete('/api/funnel-columns/:key', requireAuth, requirePermission('leads.vie
 });
 
 /**
- * Genera y envía por correo una cotización para un lead en etapa
- * "contactado" o "en_negociacion" del funnel de ventas.
+ * Genera y envía por correo una cotización para un lead del funnel de ventas
+ * (disponible en cualquier etapa, ya que las columnas del funnel son
+ * configurables por el equipo).
  */
 app.post('/api/leads/:id/quote', requireAuth, requirePermission('leads.view'), async (req, res) => {
   try {
@@ -1671,10 +1669,6 @@ app.post('/api/leads/:id/quote', requireAuth, requirePermission('leads.view'), a
     const lead = await leadService.getLeadById(req.params.id);
     if (!lead) {
       return res.status(404).json({ error: 'Lead no encontrado.' });
-    }
-
-    if (!QUOTE_ELIGIBLE_STATUSES.includes(lead.status)) {
-      return res.status(400).json({ error: 'Solo se puede cotizar a leads en estado "Contactado" o "En Negociación".' });
     }
 
     // La cotización es válida por 10 días calendario desde su emisión.
