@@ -273,9 +273,27 @@ function formatTimeUntil(startTime) {
   return hours === 1 ? 'en 1 hora' : `en ${hours} horas`;
 }
 
+/**
+ * ¿`token` parece un nombre de pila real y no un usuario/apodo/correo?
+ * Los nombres de perfil de WhatsApp muchas veces son handles
+ * ("jquintanillaphocco", "Julinho_Cal🤗", "emiliorcabogado@gmail.con"):
+ * saludar con eso ("¡Hola, jquintanillaphocco!") se lee peor que un "¡Hola!".
+ * Pide: solo letras (con tildes/ñ, guion o apóstrofo internos), 2 a 14
+ * caracteres, con alguna vocal y sin mezclas tipo "camelCase".
+ */
+function looksLikeRealFirstName(token) {
+  const t = String(token || '').trim();
+  if (t.length < 2 || t.length > 14) return false;
+  if (!/^[\p{L}][\p{L}'’-]*$/u.test(t)) return false;   // dígitos, @, _, ., espacios, emojis → fuera
+  if (/\p{Ll}\p{Lu}/u.test(t)) return false;             // "JulinhoCal", "McLovin"
+  if (!/[aeiouáéíóúüAEIOUÁÉÍÓÚÜ]/.test(t)) return false;  // sin vocales no es un nombre
+  return true;
+}
+
 function firstNameOf(fullName) {
   if (!fullName || fullName === GENERIC_CONTACT_NAME) return null;
-  return fullName.trim().split(/\s+/)[0] || null;
+  const first = fullName.trim().split(/\s+/)[0] || '';
+  return looksLikeRealFirstName(first) ? first : null;
 }
 
 function sleep(ms) {
@@ -346,7 +364,9 @@ function isObviousStepAnswer(status, text) {
     case 'scheduling_phone':
       return /^[\d\s+()-]{7,20}$/.test(t);
     case 'scheduling_email':
-      return /^[^\s<>@]+@[^\s<>@]+\.[a-z]{2,}$/i.test(t);
+      // Un correo escrito solo, o un "mándamelo por aquí" (que el handler ya
+      // sabe leer como "sigo sin correo"): ni uno ni otro necesitan al LLM.
+      return /^[^\s<>@]+@[^\s<>@]+\.[a-z]{2,}$/i.test(t) || wantsLinkHere(t);
     default:
       // scheduling_date: "mañana", "el jueves"... no hay forma barata de
       // distinguirlo de una pregunta, así que siempre se clasifica.
@@ -418,6 +438,48 @@ function normalize(text) {
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
     .toLowerCase();
+}
+
+/**
+ * En el paso del correo, formas de decir "no te doy un correo, mándame el
+ * link del Meet por acá mismo". Es el mismo desenlace que responder "no":
+ * `emailSkipped = true` y el link se manda por WhatsApp.
+ */
+const LINK_HERE_RE = /\b(este\s+medio|por\s+(?:aqui|aca|whatsapp|wsp|el\s+chat|este\s+chat|este\s+medio)|aqui\s+(?:nomas|mismo|mejor|no\s+mas)|aca\s+(?:nomas|mismo|no\s+mas)|manda(?:melo)?\s+(?:el\s+link\s+)?(?:por\s+)?(?:aqui|aca|whatsapp)|deja(?:lo|me)?\s+(?:el\s+link\s+)?(?:por\s+)?(?:aqui|aca))\b/;
+
+function wantsLinkHere(text) {
+  return LINK_HERE_RE.test(normalize(String(text || '').trim()));
+}
+
+/**
+ * ¿Vale la pena consultarle al LLM el nombre oficial de esta universidad? Si
+ * el texto ya trae "universidad"/"instituto" escrito, se toma tal cual; una
+ * sigla o un nombre corto ("unac", "la continental", "san marcos") sí se
+ * normaliza.
+ */
+function shouldResolveUniversity(text) {
+  return !/universidad|instituto|\bescuela\b|polit[eé]cn/i.test(String(text || ''));
+}
+
+/**
+ * Similitud de tokens (Jaccard) entre dos mensajes, para no reenviarle al
+ * contacto la MISMA pregunta cuando su respuesta intermedia no aportó nada
+ * (un ".", un "ok"): recibir dos veces seguidas "¿En qué universidad
+ * estudias?" se lee como que nadie leyó lo que escribió.
+ */
+function messageSimilarity(a, b) {
+  const toks = (s) => new Set(
+    normalize(String(s || ''))
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length > 2)
+  );
+  const A = toks(a);
+  const B = toks(b);
+  if (A.size === 0 || B.size === 0) return 0;
+  let inter = 0;
+  for (const w of A) if (B.has(w)) inter += 1;
+  return inter / (A.size + B.size - inter);
 }
 
 /**
@@ -919,7 +981,33 @@ export class WhatsappBotService {
     if (extracted.location) answers.location = extracted.location;
     if (extracted.level) answers.level = extracted.level;
     if (extracted.field) answers.field = extracted.field;
-    if (extracted.university) answers.university = extracted.university;
+    if (extracted.university && extracted.university !== answers.university) {
+      // Las siglas peruanas se confunden fácil (el LLM del turno leyó "UNAC"
+      // como "Universidad Nacional del Centro" cuando es la del Callao): se
+      // resuelve el nombre oficial en una llamada aparte, con contexto de
+      // universidades de Perú. Si la sigla es ambigua o no se reconoce, se
+      // guarda lo que escribió el contacto tal cual.
+      const rawUniversity = extracted.university;
+      if (shouldResolveUniversity(rawUniversity)) {
+        try {
+          const resolved = await this.ollamaService.resolveUniversity(rawUniversity);
+          answers.university = (resolved.confident && resolved.name) ? resolved.name : rawUniversity;
+          this.logActivity({
+            type: 'university_resolved',
+            waId,
+            raw: rawUniversity,
+            resolved: answers.university,
+            confident: !!resolved.confident,
+            source: resolved.source
+          });
+        } catch (error) {
+          answers.university = rawUniversity;
+          this.logActivity({ type: 'university_resolve_failed', waId, raw: rawUniversity, error: error.message });
+        }
+      } else {
+        answers.university = rawUniversity;
+      }
+    }
     // Se guarda solo la dirección, aunque el LLM devuelva la frase completa.
     const extractedEmail = extractEmail(extracted.email);
     if (extractedEmail) answers.email = extractedEmail;
@@ -949,6 +1037,26 @@ export class WhatsappBotService {
     if ((this.inboundCounter.get(waId) || 0) !== mark) {
       this.logActivity({ type: 'turn_superseded', waId, text: incomingText, reply: result.reply });
       return;
+    }
+
+    // PRECIO: no se insiste. La primera vez la responde el LLM (y se salda al
+    // proponer la reunión). Si el contacto VUELVE a preguntar por el precio, se
+    // deja de recolectar datos: si ya hay tema, se pasa directo a ofrecerle la
+    // reunión con el asesor (que es donde se lo detallan); si todavía no dio ni
+    // el tema, se le pasa a un asesor. Repetir la misma frase de "el asesor te
+    // lo detalla" tres veces es lo que hace que el contacto se vaya.
+    if (PRICE_QUESTION_RE.test(incomingText || '')) {
+      answers.__priceAsks = (answers.__priceAsks || 0) + 1;
+      await this.updateSession(waId, { answers: JSON.stringify(answers) });
+      if (answers.__priceAsks >= 2) {
+        this.logActivity({ type: 'price_insist_shortcut', waId, priceAsks: answers.__priceAsks, hasProblem: !!answers.problem });
+        if (answers.problem) {
+          await this.finalize(waId, answers);
+        } else {
+          await this.handOffToAdvisor(waId, 'El lead insistió con el precio antes de dar su tema: se pasa a un asesor.');
+        }
+        return;
+      }
     }
 
     // Para pasar a la reunión hacen falta los tres datos: tema, carrera y
@@ -1015,8 +1123,36 @@ export class WhatsappBotService {
       };
       await this.send(waId, askMissing[missingAcademic]);
     } else {
-      await this.send(waId, result.reply);
+      await this._sendConversationalReply(waId, result.reply, answers, history);
     }
+  }
+
+  /**
+   * Envía la respuesta del turno de conversación libre, pero si es
+   * prácticamente la MISMA pregunta que el bot ya mandó en su mensaje anterior
+   * (el contacto respondió un ".", un "ok" o algo que no aportó), no la repite
+   * palabra por palabra: manda una reformulación corta según el dato que
+   * todavía falta. Recibir dos veces seguidas la misma pregunta se lee como
+   * que nadie leyó lo que escribió.
+   */
+  async _sendConversationalReply(waId, reply, answers, history) {
+    const lastBot = [...(history || [])].reverse().find((m) => m.direction === 'outbound')?.text || null;
+
+    if (lastBot && messageSimilarity(reply, lastBot) >= 0.6) {
+      const rephrase = !answers.problem
+        ? 'Para seguir necesito una idea de tu tema: ¿de qué trataría tu tesis, aunque sea en una frase?'
+        : (!answers.field && !answers.university
+          ? 'Me falta ubicarte: ¿qué carrera llevas y en qué universidad estudias?'
+          : (!answers.field
+            ? '¿Qué carrera estás llevando?'
+            : (!answers.university ? '¿Y en qué universidad estudias?' : null)));
+
+      this.logActivity({ type: 'redundant_message_suppressed', waId, original: reply, previous: lastBot, replacement: rephrase });
+      await this.send(waId, rephrase || reply);
+      return;
+    }
+
+    await this.send(waId, reply);
   }
 
   /**
@@ -1318,6 +1454,23 @@ export class WhatsappBotService {
     // esta última y la coordinación pasa a un asesor, en vez de devolverle el
     // mismo menú una vez más.
     const { answers: current, scheduling: live } = this._readScheduling(await this.getSession(waId));
+
+    // PRECIO durante el agendamiento: no se insiste. La primera vez se le
+    // contesta y se retoma el paso; si vuelve a preguntar por el precio sin
+    // elegir horario, quiere números concretos ya — se le pasa a un asesor en
+    // vez de repetir "el asesor te lo detalla en la reunión" una tercera vez.
+    if (live && PRICE_QUESTION_RE.test(trimmed)) {
+      live.priceAsks = (live.priceAsks || 0) + 1;
+      if (live.priceAsks >= 2) {
+        delete current.__scheduling;
+        await this.updateSession(waId, { answers: JSON.stringify(current) });
+        await this.send(waId, 'El precio y las formas de pago te los explica el asesor con calma. Te lo paso ahora para que lo coordinen directamente 🙌');
+        await this.handOffToAdvisor(waId, 'El lead insistió con el precio durante el agendamiento.');
+        return;
+      }
+      await this.updateSession(waId, { answers: JSON.stringify(current) });
+    }
+
     if (live) {
       live.stepTurns = (live.stepTurns || 0) + 1;
       if (live.stepTurns >= MAX_STEP_TURNS) {
@@ -1859,9 +2012,10 @@ export class WhatsappBotService {
     if (foundEmail) {
       scheduling.email = foundEmail;
       this._clearStepMisses(scheduling);
-    } else if (this._isSchedulingRefusal(trimmed) || normalize(trimmed).includes('no tengo')) {
-      // Sigue sin correo: el link de Google Meet se le manda por acá mismo. Se
-      // marca para no volver a pedírselo si vuelve a pasar por este paso.
+    } else if (this._isSchedulingRefusal(trimmed) || normalize(trimmed).includes('no tengo') || wantsLinkHere(trimmed)) {
+      // Sigue sin correo (dijo "no", "no tengo", o "mándamelo por aquí"): el
+      // link de Google Meet se le manda por acá mismo. Se marca para no volver
+      // a pedírselo si vuelve a pasar por este paso.
       scheduling.emailSkipped = true;
     } else {
       // Antes de tratarlo como un correo inválido: puede estar cambiando el

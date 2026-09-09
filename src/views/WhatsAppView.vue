@@ -241,6 +241,24 @@
         <p v-else-if="entry.type === 'reset'" class="activity-text activity-hint">
           El estado del bot para este contacto se borró; su próximo mensaje se procesará como si fuera nuevo.
         </p>
+        <p v-else-if="entry.type === 'university_resolved'" class="activity-text activity-hint">
+          Universidad "{{ entry.raw }}" →
+          <template v-if="entry.confident"><strong>{{ entry.resolved }}</strong> (nombre oficial resuelto por el LLM)</template>
+          <template v-else>se guardó tal cual: la sigla es ambigua o no se reconoció, mejor no "corregirla"</template>
+        </p>
+        <p v-else-if="entry.type === 'university_resolve_failed'" class="activity-text">
+          <span class="activity-error">⚠️ No se pudo normalizar la universidad "{{ entry.raw }}": {{ entry.error }}. Se guardó tal cual.</span>
+        </p>
+        <p v-else-if="entry.type === 'price_insist_shortcut'" class="activity-text activity-hint">
+          El contacto preguntó por el precio {{ entry.priceAsks }} veces. En vez de repetir la explicación,
+          <template v-if="entry.hasProblem">se pasa directo a proponerle la reunión con el asesor.</template>
+          <template v-else>se le transfiere a un asesor (todavía no había dado su tema).</template>
+        </p>
+        <p v-else-if="entry.type === 'redundant_message_suppressed'" class="activity-text activity-hint">
+          El LLM iba a reenviar casi el mismo mensaje anterior: "{{ entry.original }}"<br />
+          <template v-if="entry.replacement">Se envió en su lugar: "{{ entry.replacement }}"</template>
+          <template v-else>No se reenvió.</template>
+        </p>
             </article>
           </div>
         </section>
@@ -450,6 +468,10 @@ const ACTIVITY_META = {
   preferred_when_failed: { icon: '⚠️', label: 'No se pudo interpretar el día/hora que pidió', className: 'activity-error-card' },
   preferred_when_captured: { icon: '🕐', label: 'Anotado el día/hora que pidió', className: 'activity-ok' },
   redundant_question_fixed: { icon: '🛡️', label: 'Se corrigió una pregunta repetida', className: 'activity-ok' },
+  redundant_message_suppressed: { icon: '🛡️', label: 'Se evitó reenviar el mismo mensaje', className: 'activity-ok' },
+  university_resolved: { icon: '🎓', label: 'Universidad normalizada por el LLM', className: 'activity-ok' },
+  university_resolve_failed: { icon: '⚠️', label: 'No se pudo normalizar la universidad', className: 'activity-error-card' },
+  price_insist_shortcut: { icon: '💸', label: 'Insistió con el precio: se ofrece el asesor', className: 'activity-ok' },
   buffer_extended: { icon: '⏳', label: 'Solo un saludo: se espera un poco más', className: 'activity-buffer' },
   exact_time_booked: { icon: '⚡', label: 'La hora que pidió estaba libre: se agendó directo', className: 'activity-ok' }
 };

@@ -225,6 +225,15 @@ const SCHEDULING_ASIDE_SCHEMA = {
   required: ['answersStep', 'isAside', 'preferredWhen', 'answer']
 };
 
+const UNIVERSITY_SCHEMA = {
+  type: 'object',
+  properties: {
+    name: { type: ['string', 'null'] },
+    confident: { type: 'boolean' }
+  },
+  required: ['name', 'confident']
+};
+
 /**
  * Servicio de integración con Ollama Cloud API / Local Ollama
  */
@@ -445,7 +454,7 @@ Detalles adicionales: ${additionalNotes || 'Ninguno'}`;
       ? `NO TE PRESENTES: nunca abras diciendo quién eres ni nombrando a la empresa ("soy X de Y"). Entra directo a ayudar. Solo di con quién hablan si te lo preguntan explícitamente. Pero este PRIMER mensaje de la conversación SÍ abre con un saludo antes de lo demás: no presentarte no significa abrir en seco.
 
 CÓMO ES EXACTAMENTE ESTE PRIMER MENSAJE (es el que decide si te responden, y se escribe distinto a todos los demás):
-a) Saludo cálido con su nombre y signo de exclamación, nunca un punto seco: "¡Hola, <su nombre>!" Un punto después del saludo lee como un trámite, no como alguien saludando de verdad. Puedes cerrar el mensaje con UN emoji cuando aporte calidez (👋 🙌 😊), nunca más de uno.
+a) Saludo cálido con signo de exclamación, nunca un punto seco: "¡Hola, <su nombre>!" Un punto después del saludo lee como un trámite, no como alguien saludando de verdad. SOLO usa su nombre si se te dio uno abajo ("Su nombre ... es"); si no se te pasó ningún nombre, saluda con "¡Hola!" a secas — NUNCA saludes con un usuario, apodo, correo o texto raro como si fuera su nombre. Puedes cerrar el mensaje con UN emoji cuando aporte calidez (👋 🙌 😊), nunca más de uno.
 b) Inmediatamente después, LA PREGUNTA por su tema de tesis. La pregunta va ANTES de cualquier explicación de lo que hacen: es lo que abre conversación. Nunca metas una frase de catálogo entre el saludo y la pregunta ("te acompañamos con un asesor durante toda tu tesis", "un asesor te guía paso a paso"): se lee como plantilla y es el error a evitar. Esto NO cambia si su primer mensaje fue un pedido genérico de "información" ("info", "quisiera información", "sobre tesis"): sin tema todavía no hay nada concreto que explicarle, así que la pregunta por su tema ES la respuesta — pasa directo a saludar y preguntar, sin citar ningún dato del servicio. Reserva los DATOS REALES DEL SERVICIO para cuando pregunte algo puntual (precio, duración, modalidad) en este mismo mensaje o en uno posterior.
 c) El mensaje TERMINA en esa pregunta. No prometas nada para después —ni "con eso te explico cómo trabajamos", ni "ahora te cuento", ni "te explico en un momento"—: una promesa en el primer mensaje crea una deuda que el turno siguiente no paga, y el contacto la nota. Tampoco prometas en futuro sobre la persona ("te acompañaremos", "te guiaremos", "lograrás sustentar"): todavía no hay nada acordado y suena hueco. Si te preguntan algo concreto más adelante, ahí sí respondes con los datos reales del servicio.
 d) Ejemplos del registro exacto, y son el mensaje COMPLETO. Pidiendo información en general (sin pregunta puntual): "¡Hola, Jair! ¿Sobre qué tema te gustaría hacer tu tesis? 👋" Solo saludo: "¡Hola, Jair! ¿Ya tienes un tema en mente para tu tesis?"
@@ -469,7 +478,7 @@ LO QUE NECESITAS SABER, EN ESTE ORDEN (esto es estructural, no cambia):
 
 Recién cuando tengas (1) y (2) completo —tema, carrera Y universidad— marca "ready": true (ver CUÁNDO TERMINAR).
 
-ESCUCHA SIEMPRE, DE PRINCIPIO A FIN: en CADA mensaje, antes de decidir qué responder, revisa si la persona mencionó —aunque no se lo hayas preguntado y aunque venga mezclado en una sola frase— su TEMA, su CARRERA, su UNIVERSIDAD, su nivel académico o CUÁNDO quiere la reunión, y guárdalo todo en "extracted"/"preferredWhen" en ese mismo turno. Ejemplo: "sobre arquitectura de la continental, tesis con avance" trae carrera (Arquitectura), universidad (Universidad Continental) y tema (tesis ya iniciada, con avance). En Perú las universidades se nombran abreviadas o en minúscula: continental = Universidad Continental, upla = Universidad Peruana Los Andes, uncp = Universidad Nacional del Centro del Perú, unmsm = San Marcos, ucv = César Vallejo, y también upc, pucp, uni, utp, usmp, ulima, undac, unsa. JAMÁS preguntes por un dato que ya te dieron, ni en este mensaje ni en uno anterior.
+ESCUCHA SIEMPRE, DE PRINCIPIO A FIN: en CADA mensaje, antes de decidir qué responder, revisa si la persona mencionó —aunque no se lo hayas preguntado y aunque venga mezclado en una sola frase— su TEMA, su CARRERA, su UNIVERSIDAD, su nivel académico o CUÁNDO quiere la reunión, y guárdalo todo en "extracted"/"preferredWhen" en ese mismo turno. Ejemplo: "sobre arquitectura de la continental, tesis con avance" trae carrera (Arquitectura), universidad (Universidad Continental) y tema (tesis ya iniciada, con avance). En Perú las universidades se nombran abreviadas o en minúscula: continental = Universidad Continental, upla = Universidad Peruana Los Andes, uncp = Universidad Nacional del Centro del Perú, unac = Universidad Nacional del Callao (¡NO es la uncp!), unmsm = San Marcos, ucv = César Vallejo, y también upc, pucp, uni, utp, usmp, ulima, undac, unsa. NO confundas siglas parecidas; si no estás seguro de qué universidad es una sigla, extráela TAL CUAL la escribió la persona sin "corregirla". JAMÁS preguntes por un dato que ya te dieron, ni en este mensaje ni en uno anterior.
 
 TRATO: siempre de TÚ, nunca de usted, en todos los mensajes.
 
@@ -657,6 +666,68 @@ Responde ÚNICAMENTE en JSON válido con esta forma exacta (usa null en los camp
       ready: true,
       source: 'fallback'
     };
+  }
+
+  /**
+   * Normaliza el nombre de una universidad peruana escrito de cualquier forma
+   * (sigla, nombre parcial, en minúsculas): "unac" → "Universidad Nacional del
+   * Callao", "san marcos" → "Universidad Nacional Mayor de San Marcos".
+   *
+   * La extracción del turno conversacional a veces confunde siglas parecidas
+   * (UNAC ≠ UNCP), así que este es un paso aparte con una sola tarea. Devuelve
+   * `{ name, confident }`:
+   *   - confident:true  → `name` es el nombre oficial completo.
+   *   - confident:false → la sigla es ambigua o no se reconoce; `name` es el
+   *     texto TAL CUAL lo escribió el contacto. Es mejor repetir lo que dijo
+   *     que "corregirlo" a una universidad equivocada.
+   */
+  async resolveUniversity(raw) {
+    const text = String(raw || '').trim();
+    if (!text) return { name: null, confident: false, source: 'empty' };
+
+    const activeApiKey = this.apiKey || process.env.OLLAMA_API_KEY || '';
+    let activeHost = this.host || 'https://ollama.com';
+    if (activeHost === 'https://api.ollama.com') activeHost = 'https://ollama.com';
+
+    if (!activeApiKey && !activeHost.includes('localhost') && !activeHost.includes('127.0.0.1')) {
+      return { name: text, confident: false, source: 'fallback' };
+    }
+
+    const prompt = `Contexto: universidades e institutos de educación superior de PERÚ.
+Alguien escribió el nombre de su universidad así: """${text}"""
+
+Devuelve el NOMBRE OFICIAL COMPLETO de esa universidad peruana. Ejemplos: "unac" → "Universidad Nacional del Callao"; "uncp" → "Universidad Nacional del Centro del Perú"; "san marcos" o "unmsm" → "Universidad Nacional Mayor de San Marcos"; "la continental" → "Universidad Continental"; "cesar vallejo" o "ucv" → "Universidad César Vallejo".
+
+Reglas:
+- Si reconoces la universidad SIN ambigüedad, "confident": true y "name" = su nombre oficial completo, bien escrito.
+- Si la sigla o el nombre corto podría ser MÁS DE UNA universidad peruana (ej. "UNA", "UPT", "UPSJB", "UNS"), o NO reconoces la institución, "confident": false y "name" = el texto tal cual, sin cambiarlo.
+- Nunca inventes una universidad que no exista en Perú. Nunca cambies una sigla por otra parecida.
+
+Responde ÚNICAMENTE en JSON válido: {"name": "<nombre o el texto tal cual>", "confident": <true o false>}`;
+
+    try {
+      const generateUrl = this.getApiUrl(activeHost, '/generate');
+      const response = await fetch(generateUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(activeApiKey ? { 'Authorization': `Bearer ${activeApiKey}` } : {})
+        },
+        body: JSON.stringify({ model: this.chatModel, prompt, stream: false, format: UNIVERSITY_SCHEMA }),
+        signal: AbortSignal.timeout(12000)
+      });
+
+      if (!response.ok) return { name: text, confident: false, source: 'fallback' };
+
+      const data = await response.json();
+      const cleanResponse = (data.response || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
+      const parsed = JSON.parse(cleanResponse);
+      const name = typeof parsed.name === 'string' && parsed.name.trim() ? parsed.name.trim() : text;
+      return { name, confident: !!parsed.confident, source: 'llm' };
+    } catch (err) {
+      console.warn('Ollama Cloud LLM university resolve notice:', err.message);
+      return { name: text, confident: false, source: 'fallback' };
+    }
   }
 
   /**
