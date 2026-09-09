@@ -1,10 +1,14 @@
 /**
  * Generador del documento de cotización con la identidad de marca de
- * Avantage Group (colores oliva/carbón, tipografía Montserrat y logotipo).
+ * Avantage Group (oliva/carbón, tipografía geométrica y monograma "AG").
  *
  * El mismo HTML se usa para:
  *   - la vista imprimible que abre el botón "Generar Cotización" del Funnel
  *   - el cuerpo del correo que se envía al lead
+ *
+ * El lienzo mide 194 mm (A4 menos 8 mm de margen por lado). Ese margen
+ * evita que las bandas oscuras se recorten en impresoras de inyección, que
+ * casi nunca imprimen a sangre completa.
  */
 
 /* Datos fijos de la empresa (tomados de la plantilla oficial de cotización). */
@@ -24,12 +28,14 @@ export const PAYMENT_METHODS = [
   {
     bank: 'Banco de Crédito del Perú',
     short: 'BCP',
+    accent: '#c0392b',
     account: 'Cuenta Corriente (S/): 3557413863061',
     cci: 'CCI: 002 335 007413863061 66'
   },
   {
     bank: 'INTERBANK Perú',
     short: 'Interbank',
+    accent: '#0aa05a',
     account: 'Cuenta Corriente (S/): 8983515374983',
     cci: 'CCI: 00389801351537498347'
   }
@@ -37,16 +43,16 @@ export const PAYMENT_METHODS = [
 
 /* Paleta de marca */
 const C = {
-  ink: '#23271d',
-  green: '#8a9b30',
-  greenDark: '#6f7d26',
-  greenSoft: '#b9c96a',
-  beige: '#eceadd',
-  beigeLight: '#f5f4ec',
-  panelDark: '#2f2f2b',
-  red: '#b5322b',
-  line: '#d8d6c6',
-  textMuted: '#5c5f52'
+  ink: '#1f1f1c',
+  inkFoot: '#1b1b18',
+  olive: '#8a9b30',
+  oliveDeep: '#68761f',
+  olivePale: '#cbd69a',
+  sand: '#ece9dc',
+  paper: '#f7f6ef',
+  rule: '#dcdac9',
+  muted: '#5d5e51',
+  brick: '#b23a2c'
 };
 
 function esc(value) {
@@ -82,45 +88,59 @@ function formatMoney(amount, currency) {
 function parseScopeItems(raw) {
   return String(raw || '')
     .split(/\r?\n/)
-    .map((line) => line.replace(/^[\s•*-]+/, '').trim())
+    .map((line) => line.replace(/^[\s•*+\-–]+/, '').trim())
     .filter(Boolean);
 }
 
-/* Marca "A" angular (chevron + travesaño) enmarcada por un anillo abierto,
- * en verde de marca. Se reutiliza en el logotipo y en la marca de agua. */
-function agMarkPaths(fill, ring) {
-  return `
-    <path d="M9 45 A24 24 0 1 1 43 45" fill="none" stroke="${ring}" stroke-width="5" stroke-linecap="round"/>
-    <path d="M26 9 L40 42 L32 42 L26 27 L20 42 L12 42 Z" fill="${fill}"/>
-    <path d="M20 35 L32 35 L30.5 30 L21.5 30 Z" fill="${fill}"/>`;
+/* ── Iconografía de línea (16×16, trazo `currentColor`) ─────────────────── */
+const ICONS = {
+  user: '<circle cx="8" cy="5.4" r="3"/><path d="M2.6 14c0-3 2.4-5 5.4-5s5.4 2 5.4 5"/>',
+  career: '<rect x="2" y="5" width="12" height="8" rx="1.2"/><path d="M6 5V3.6h4V5"/><path d="M2 8.6h12"/>',
+  mail: '<rect x="2" y="3.6" width="12" height="8.8" rx="1.2"/><path d="m2.6 4.6 5.4 4 5.4-4"/>',
+  phone: '<path d="M4.2 2.5 6 5.6 4.6 7.2c.9 1.8 2.4 3.3 4.2 4.2l1.6-1.4 3.1 1.8c-.1 1.4-1.1 2.4-2.6 2.4C6.5 14.2 1.8 9.5 1.8 3.7 1.8 2.2 2.8 1.2 4.2 1.1c.4 0 .8.4 1 1z"/>',
+  calendar: '<rect x="2" y="3" width="12" height="11" rx="1.2"/><path d="M2 6.4h12M5.4 1.8v2.6M10.6 1.8v2.6"/>',
+  clock: '<circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.6 1.6"/>',
+  card: '<rect x="1.5" y="4" width="13" height="8" rx="1.2"/><path d="M1.5 6.9h13"/>',
+  shield: '<path d="M8 1.5 13 3.4V8c0 3.5-2.5 5.6-5 6.6C5.5 13.6 3 11.5 3 8V3.4z"/><path d="m5.9 8 1.5 1.6L10.3 6"/>',
+  doc: '<path d="M4 1.6h5l3 3v9.8H4z"/><path d="M9 1.6v3h3"/><path d="M6 8h4M6 10.4h4"/>'
+};
+
+function icon(name, cls = 'q-ic') {
+  return `<svg class="${cls}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
 }
 
-/* Logotipo AVANTAGE GROUP recreado en SVG. */
+/* ── Monograma "AG": "A" facetada en dos planos + curva "G" entrelazada ── */
+function agMarkPaths({ mono = false } = {}) {
+  const planeA = C.olive;
+  const planeB = mono ? C.olive : C.oliveDeep;
+  const arc = mono ? C.olive : C.oliveDeep;
+  return `
+    <path d="M24 5 L42 52 L32 52 L24 29 Z" fill="${planeB}"/>
+    <path d="M24 5 L6 52 L16 52 L24 29 Z" fill="${planeA}"/>
+    <path d="M15 39 L33 39 L30 32 L18 32 Z" fill="${planeA}"/>
+    <circle cx="52" cy="30" r="12" fill="none" stroke="${arc}" stroke-width="5"
+      stroke-linecap="round" stroke-dasharray="57 18" stroke-dashoffset="9"/>
+    <path d="M53 30 L61 30" fill="none" stroke="${arc}" stroke-width="5" stroke-linecap="round"/>`;
+}
+
 function brandLogo({ dark = true } = {}) {
   const wordColor = dark ? '#ffffff' : C.ink;
-  const groupColor = dark ? '#c9c9c1' : C.textMuted;
+  const groupColor = dark ? '#cfcfc6' : C.muted;
   return `
-    <div class="ag-logo">
-      <svg class="ag-logo__mark" viewBox="0 0 60 56" role="img" aria-label="Avantage Group">
-        ${agMarkPaths(C.green, C.greenSoft)}
-      </svg>
-      <div class="ag-logo__text">
-        <span class="ag-logo__word" style="color:${wordColor}">AVANTAGE</span>
-        <span class="ag-logo__group">
-          <span class="ag-logo__rule"></span>
-          <span style="color:${groupColor}">GROUP</span>
-          <span class="ag-logo__rule"></span>
+    <div class="q-logo">
+      <svg class="q-logo__mark" viewBox="0 0 70 58" role="img" aria-label="Avantage Group">${agMarkPaths()}</svg>
+      <span class="q-logo__text">
+        <span class="q-logo__word" style="color:${wordColor}">AVANTAGE</span>
+        <span class="q-logo__group">
+          <i class="q-logo__rule"></i><span style="color:${groupColor}">GROUP</span><i class="q-logo__rule"></i>
         </span>
-        <span class="ag-logo__tagline">${esc(COMPANY.tagline)}</span>
-      </div>
+        <span class="q-logo__tag">${esc(COMPANY.tagline)}</span>
+      </span>
     </div>`;
 }
 
-function watermarkMark(className) {
-  return `
-    <svg class="${className}" viewBox="0 0 60 56" aria-hidden="true">
-      ${agMarkPaths(C.green, C.green)}
-    </svg>`;
+function monogram(cls) {
+  return `<svg class="${cls}" viewBox="0 0 70 58" aria-hidden="true">${agMarkPaths({ mono: true })}</svg>`;
 }
 
 /**
@@ -128,7 +148,7 @@ function watermarkMark(className) {
  * @param {object} params
  * @param {object} params.quote  Fila de la tabla `quotes`.
  * @param {object} params.lead   Fila de la tabla `leads` asociada.
- * @param {boolean} [params.forPrint]  Muestra la barra con el botón "Imprimir / Guardar PDF".
+ * @param {boolean} [params.forPrint]  Muestra la barra con el botón "Imprimir".
  */
 export function buildQuotationDocument({ quote, lead, forPrint = false }) {
   const currency = quote.currency || 'PEN';
@@ -144,21 +164,19 @@ export function buildQuotationDocument({ quote, lead, forPrint = false }) {
   const clientName = lead.full_name || lead.email || 'Cliente';
   const career = lead.field_of_study || lead.university || '—';
   const conceptTitle = quote.concept_title || 'TESIS COMPLETA';
+  const observations = quote.notes ? esc(quote.notes) : '';
 
   const scopeRow = scopeItems.length
-    ? `<tr class="q-table__scope">
+    ? `<tr class="q-scope">
          <td></td>
-         <td colspan="4">
-           <ul>${scopeItems.map((item) => `<li>${esc(item)}</li>`).join('')}</ul>
-         </td>
+         <td colspan="4"><ul>${scopeItems.map((s) => `<li>${esc(s)}</li>`).join('')}</ul></td>
        </tr>`
     : '';
 
-  const observations = quote.notes ? esc(quote.notes) : '';
-
   const printBar = forPrint
-    ? `<div class="print-bar no-print">
-         <button type="button" onclick="window.print()">🖨️ Imprimir / Guardar como PDF</button>
+    ? `<div class="q-printbar q-noprint">
+         <button type="button" onclick="window.print()">Imprimir / Guardar como PDF</button>
+         <span>Sugerencia: en el diálogo elige “Márgenes: Predeterminados” y desactiva “Encabezados y pies de página”.</span>
        </div>`
     : '';
 
@@ -172,204 +190,248 @@ export function buildQuotationDocument({ quote, lead, forPrint = false }) {
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  :root { --green:${C.green}; --green-dark:${C.greenDark}; --ink:${C.ink}; }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --ink: ${C.ink};
+    --olive: ${C.olive};
+    --olive-deep: ${C.oliveDeep};
+    --sand: ${C.sand};
+    --paper: ${C.paper};
+    --rule: ${C.rule};
+    --muted: ${C.muted};
+  }
+
   body {
-    font-family: 'Montserrat', 'Segoe UI', Tahoma, sans-serif;
-    color: ${C.ink};
-    background: #babab0;
+    font-family: 'Montserrat', 'Segoe UI', system-ui, -apple-system, sans-serif;
+    color: var(--ink);
+    background: #b7b6ac;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
-  .sheet {
-    width: 820px;
-    max-width: 100%;
-    margin: 24px auto;
-    background: ${C.beigeLight};
-    box-shadow: 0 12px 40px rgba(0,0,0,0.25);
+
+  .q-sheet {
+    width: 194mm;
+    min-height: 281mm;
+    margin: 20px auto;
+    background: var(--paper);
+    display: flex;
+    flex-direction: column;
     overflow: hidden;
+    box-shadow: 0 14px 44px rgba(0,0,0,0.28);
     position: relative;
   }
 
-  /* ---------- Encabezado ---------- */
-  .q-head { display: flex; align-items: stretch; }
+  /* ─── Encabezado con costura diagonal ─── */
+  .q-head { position: relative; display: grid; grid-template-columns: 52% 1fr; background: var(--sand); overflow: hidden; }
   .q-head__brand {
-    background: #1c1c1a;
-    padding: 22px 26px 18px;
-    flex: 0 0 45%;
-    border-right: 10px solid ${C.green};
+    background: var(--ink);
+    padding: 24px 30px 20px;
+    clip-path: polygon(0 0, 100% 0, calc(100% - 24px) 100%, 0 100%);
+    position: relative;
+    z-index: 1;
+  }
+  .q-head__seam {
+    position: absolute;
+    top: -10px; bottom: -10px;
+    left: 52%;
+    width: 30px;
+    margin-left: -25px;
+    background: var(--olive);
+    transform: skewX(-13deg);
+    z-index: 2;
   }
   .q-head__meta {
-    background: ${C.beige};
-    flex: 1;
-    padding: 20px 26px;
+    padding: 20px 26px 18px 38px;
     display: flex;
-    justify-content: space-between;
-    gap: 16px;
+    flex-direction: column;
+    justify-content: center;
+    gap: 15px;
+    position: relative;
+    z-index: 1;
   }
-  .q-head__title { display: flex; flex-direction: column; align-items: flex-start; }
-  .q-head__title h1 {
-    font-size: 34px; font-weight: 800; letter-spacing: 1px; color: ${C.ink};
-    line-height: 1;
-  }
-  .q-head__title .q-number {
-    display: inline-block; margin-top: 8px; font-size: 13px; font-weight: 700;
-    color: ${C.greenDark}; letter-spacing: 1.5px;
-    border-bottom: 2px solid ${C.green}; padding-bottom: 3px;
-  }
-  .q-head__facts { font-size: 10.5px; line-height: 1.35; min-width: 190px; }
-  .q-head__facts dt { font-weight: 700; letter-spacing: 0.5px; color: ${C.ink}; margin-top: 8px; }
-  .q-head__facts dt:first-child { margin-top: 0; }
-  .q-head__facts dd { color: ${C.textMuted}; }
 
-  /* ---------- Logo ---------- */
-  .ag-logo { display: flex; align-items: center; gap: 14px; }
-  .ag-logo__mark { width: 52px; height: 48px; flex: none; }
-  .ag-logo__text { display: flex; flex-direction: column; gap: 4px; }
-  .ag-logo__word { font-size: 22px; font-weight: 700; letter-spacing: 5px; line-height: 1; }
-  .ag-logo__group { display: flex; align-items: center; gap: 8px; font-size: 8.5px; font-weight: 600; letter-spacing: 4px; }
-  .ag-logo__group > span:not(.ag-logo__rule) { padding-left: 4px; }
-  .ag-logo__rule { height: 1px; width: 16px; background: ${C.red}; display: inline-block; }
-  .ag-logo__tagline { font-size: 6px; font-weight: 600; letter-spacing: 0.9px; color: ${C.greenSoft}; margin-top: 3px; white-space: nowrap; }
-
-  /* ---------- Cuerpo ---------- */
-  .q-body { padding: 26px; position: relative; z-index: 1; }
-  .q-cols { display: flex; gap: 28px; margin-bottom: 26px; }
-  .q-col { flex: 1; }
-  .q-section-title {
-    font-size: 15px; font-weight: 800; letter-spacing: 0.5px; color: ${C.greenDark};
-    margin-bottom: 12px; text-transform: uppercase;
+  .q-title { display: flex; flex-direction: column; align-items: flex-start; }
+  .q-title h1 { font-size: 30px; font-weight: 800; letter-spacing: 1.5px; color: var(--ink); line-height: 0.95; }
+  .q-title .q-num {
+    margin-top: 9px; font-size: 11px; font-weight: 700; letter-spacing: 2px;
+    color: var(--olive-deep); padding-bottom: 4px; border-bottom: 2px solid var(--olive);
   }
-  .q-client dl { font-size: 11px; line-height: 1.4; }
-  .q-client dt { font-weight: 700; color: ${C.ink}; margin-top: 10px; }
-  .q-client dt:first-child { margin-top: 0; }
-  .q-client dd { color: ${C.textMuted}; }
-  .q-presentation p { font-size: 11px; line-height: 1.7; color: ${C.ink}; margin-bottom: 8px; text-align: justify; }
-  .q-presentation .sign { font-weight: 700; }
-  .q-divider { width: 2px; background: ${C.green}; align-self: stretch; }
+  .q-facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px 12px; }
+  .q-facts dt {
+    display: flex; align-items: center; gap: 4px;
+    font-size: 7.5px; font-weight: 700; letter-spacing: 0.3px; color: var(--ink);
+    white-space: nowrap;
+  }
+  .q-facts dd { font-size: 9px; color: var(--muted); margin-top: 3px; line-height: 1.3; }
+  .q-facts .q-ic { width: 12px; height: 12px; color: var(--olive-deep); flex: none; }
 
-  /* ---------- Tabla ---------- */
-  .q-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  /* ─── Logo ─── */
+  .q-logo { display: flex; align-items: center; gap: 13px; }
+  .q-logo__mark { width: 50px; height: 47px; flex: none; }
+  .q-logo__text { display: flex; flex-direction: column; gap: 4px; }
+  .q-logo__word { font-size: 21px; font-weight: 700; letter-spacing: 5.5px; line-height: 1; }
+  .q-logo__group { display: flex; align-items: center; gap: 7px; font-size: 8px; font-weight: 600; letter-spacing: 3.5px; padding-left: 3px; }
+  .q-logo__rule { width: 15px; height: 1px; background: ${C.brick}; display: inline-block; }
+  .q-logo__tag { font-size: 5.7px; font-weight: 600; letter-spacing: 0.7px; color: ${C.olivePale}; white-space: nowrap; margin-top: 2px; }
+
+  /* ─── Cuerpo ─── */
+  .q-body { flex: 1; padding: 26px 30px 22px; position: relative; }
+  .q-watermark {
+    position: absolute; right: -14px; top: 40px; width: 230px; height: 214px;
+    opacity: 0.06; z-index: 0; pointer-events: none;
+  }
+  .q-body > *:not(.q-watermark) { position: relative; z-index: 1; }
+
+  .q-intro { display: grid; grid-template-columns: 1fr 2px 1.15fr; gap: 26px; margin-bottom: 26px; }
+  .q-rule-v { background: var(--olive); }
+  .q-h {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 13px; font-weight: 800; letter-spacing: 0.6px; color: var(--olive-deep);
+    text-transform: uppercase; margin-bottom: 13px;
+  }
+  .q-h .q-ic { width: 16px; height: 16px; }
+
+  .q-client dl { display: grid; gap: 11px; }
+  .q-client .q-field { display: flex; gap: 9px; }
+  .q-client .q-ic { width: 15px; height: 15px; color: var(--olive-deep); flex: none; margin-top: 1px; }
+  .q-client dt { font-size: 9px; font-weight: 700; letter-spacing: 0.4px; color: var(--ink); }
+  .q-client dd { font-size: 10px; color: var(--muted); margin-top: 2px; line-height: 1.35; }
+
+  .q-present p { font-size: 10px; line-height: 1.75; color: var(--ink); margin-bottom: 9px; text-align: justify; }
+  .q-present .q-sign { font-weight: 700; }
+
+  /* ─── Tabla de ítems ─── */
+  .q-table { width: 100%; border-collapse: collapse; font-size: 10px; }
   .q-table thead th {
-    background: ${C.green}; color: #fff; font-weight: 700; letter-spacing: 0.5px;
-    padding: 10px 12px; text-align: center; font-size: 11px;
+    background: var(--olive); color: #fff; font-weight: 700; letter-spacing: 0.5px;
+    padding: 9px 12px; text-align: center; font-size: 9.5px; text-transform: uppercase;
   }
-  .q-table thead th:nth-child(2) { text-align: left; }
-  .q-table tbody td { padding: 14px 12px; border: 1px solid ${C.line}; vertical-align: top; }
-  .q-table .q-num { text-align: center; font-weight: 800; font-size: 15px; color: ${C.ink}; width: 44px; }
-  .q-table .q-desc { font-weight: 700; letter-spacing: 0.5px; }
-  .q-table .q-center { text-align: center; }
-  .q-table .q-right { text-align: right; white-space: nowrap; }
-  .q-table__scope td { border-top: none; padding-top: 0; }
-  .q-table__scope ul { list-style: none; }
-  .q-table__scope li { position: relative; padding-left: 14px; margin-bottom: 5px; line-height: 1.45; color: ${C.ink}; }
-  .q-table__scope li::before { content: "–"; position: absolute; left: 0; color: ${C.greenDark}; font-weight: 700; }
+  .q-table thead th.q-desc-h { text-align: left; }
+  .q-table tbody td { padding: 13px 12px; border: 1px solid var(--rule); vertical-align: top; }
+  .q-table .q-n { text-align: center; font-weight: 800; font-size: 14px; width: 40px; }
+  .q-table .q-concept { display: flex; align-items: center; gap: 9px; font-weight: 800; letter-spacing: 0.5px; }
+  .q-table .q-concept .q-ic { width: 17px; height: 17px; color: var(--olive-deep); flex: none; }
+  .q-table .q-c { text-align: center; }
+  .q-table .q-r { text-align: right; white-space: nowrap; }
+  .q-scope td { border-top: none; padding-top: 2px; padding-bottom: 16px; }
+  .q-scope ul { list-style: none; display: grid; gap: 6px; }
+  .q-scope li { position: relative; padding-left: 15px; line-height: 1.4; color: var(--ink); }
+  .q-scope li::before { content: "–"; position: absolute; left: 2px; color: var(--olive-deep); font-weight: 700; }
 
-  /* ---------- Observaciones + total ---------- */
-  .q-summary { display: flex; margin-top: 0; }
-  .q-observations {
-    flex: 1; border: 1px solid ${C.line}; border-top: none; padding: 14px 12px;
-    font-size: 10.5px; color: ${C.textMuted}; line-height: 1.5;
+  /* ─── Observaciones + total ─── */
+  .q-summary { display: grid; grid-template-columns: 1fr auto auto; }
+  .q-obs {
+    border: 1px solid var(--rule); border-top: none; padding: 13px 14px;
+    font-size: 9.5px; color: var(--muted); line-height: 1.55;
   }
-  .q-observations h4 { font-size: 12px; color: ${C.greenDark}; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
-  .q-total-label {
-    background: ${C.panelDark}; color: #fff; font-weight: 700; font-size: 17px;
-    display: flex; align-items: center; justify-content: center; padding: 0 26px;
+  .q-obs h4 { font-size: 11px; font-weight: 800; letter-spacing: 0.5px; color: var(--olive-deep); text-transform: uppercase; margin-bottom: 5px; }
+  .q-total-k {
+    background: var(--ink); color: #fff; font-weight: 700; font-size: 15px; letter-spacing: 1px;
+    display: flex; align-items: center; justify-content: center; padding: 0 30px;
   }
-  .q-total-value {
-    background: ${C.green}; color: #fff; font-weight: 800; font-size: 17px;
+  .q-total-v {
+    background: var(--olive); color: #fff; font-weight: 800; font-size: 16px;
     display: flex; align-items: center; justify-content: center; padding: 0 26px; white-space: nowrap;
   }
 
-  /* ---------- Franja de condiciones ---------- */
-  .q-features { display: flex; gap: 16px; margin-top: 26px; text-align: center; }
-  .q-feature { flex: 1; }
-  .q-feature .q-feature__icon { font-size: 20px; }
-  .q-feature h5 { font-size: 11px; font-weight: 800; color: ${C.greenDark}; margin: 6px 0 4px; letter-spacing: 0.5px; }
-  .q-feature p { font-size: 9.5px; color: ${C.textMuted}; line-height: 1.4; }
+  /* ─── Condiciones ─── */
+  .q-terms { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 26px; text-align: center; }
+  .q-term .q-ic { width: 22px; height: 22px; color: var(--olive-deep); }
+  .q-term h5 { font-size: 9.5px; font-weight: 800; letter-spacing: 0.5px; color: var(--olive-deep); margin: 6px 0 4px; text-transform: uppercase; }
+  .q-term p { font-size: 8.5px; color: var(--muted); line-height: 1.45; }
 
-  /* ---------- Pie ---------- */
+  /* ─── Pie ─── */
   .q-foot {
-    margin-top: 26px; background: #1c1c1a; color: #d7d7cf; padding: 24px 26px;
-    display: flex; gap: 40px; position: relative; overflow: hidden;
+    margin-top: auto; background: ${C.inkFoot}; color: #d6d6ce;
+    padding: 24px 30px; display: grid; grid-template-columns: 1fr 1fr; gap: 34px;
+    position: relative; overflow: hidden;
   }
-  .q-foot h6 { font-size: 11px; font-weight: 800; letter-spacing: 1px; color: #fff; margin-bottom: 10px; }
-  .q-foot__block { font-size: 9.5px; line-height: 1.7; position: relative; z-index: 1; }
-  .q-foot__block strong { color: #fff; font-weight: 700; }
-  .q-foot__pay { margin-bottom: 8px; }
-  .q-foot .ag-foot-mark {
-    position: absolute; right: -20px; bottom: -30px; width: 200px; height: 180px; opacity: 0.12;
+  .q-foot::before {
+    content: ""; position: absolute; right: -30px; top: -20px; bottom: -20px; width: 90px;
+    background: var(--olive); opacity: 0.16; transform: skewX(-13deg);
   }
+  .q-foot h6 { font-size: 10px; font-weight: 800; letter-spacing: 1px; color: #fff; margin-bottom: 11px; text-transform: uppercase; }
+  .q-foot__list { display: grid; gap: 5px; font-size: 8.7px; line-height: 1.55; position: relative; z-index: 1; }
+  .q-foot__list .q-row { display: flex; gap: 7px; align-items: flex-start; }
+  .q-foot__list .q-ic { width: 12px; height: 12px; color: ${C.olivePale}; flex: none; margin-top: 1px; }
+  .q-foot__list strong { color: #fff; font-weight: 700; }
+  .q-pay { margin-bottom: 9px; position: relative; z-index: 1; }
+  .q-pay:last-child { margin-bottom: 0; }
+  .q-pay__bank { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+  .q-pay__chip { font-size: 7.5px; font-weight: 800; letter-spacing: 0.5px; color: #fff; padding: 2px 6px; border-radius: 3px; }
+  .q-pay__bank span { font-size: 9px; font-weight: 700; color: #fff; }
+  .q-pay__line { font-size: 8.5px; color: #cfcfc6; line-height: 1.5; }
+  .q-foot-mark { position: absolute; right: 10px; bottom: -14px; width: 132px; height: 124px; opacity: 0.1; z-index: 0; }
 
-  /* ---------- Marca de agua ---------- */
-  .ag-watermark { position: absolute; width: 360px; height: 320px; right: -40px; top: 150px; z-index: 0; opacity: 0.05; pointer-events: none; }
-
-  /* ---------- Barra de impresión ---------- */
-  .print-bar { text-align: center; padding: 16px; }
-  .print-bar button {
-    background: ${C.green}; color: #fff; border: none; padding: 12px 26px; font-size: 14px;
-    font-weight: 700; border-radius: 8px; cursor: pointer; font-family: inherit;
+  /* ─── Barra de impresión (solo pantalla) ─── */
+  .q-printbar { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 16px 12px 4px; text-align: center; }
+  .q-printbar button {
+    background: var(--olive); color: #fff; border: none; padding: 11px 26px; font-size: 13px;
+    font-weight: 700; border-radius: 8px; cursor: pointer; font-family: inherit; letter-spacing: 0.3px;
   }
-  .print-bar button:hover { background: ${C.greenDark}; }
+  .q-printbar button:hover { background: var(--olive-deep); }
+  .q-printbar span { font-size: 11px; color: #4b4b44; }
 
   @media print {
-    html, body { width: 100%; margin: 0; padding: 0; background: #fff; overflow: hidden; }
-    .no-print { display: none !important; }
-    .sheet {
+    html, body { background: #fff; width: auto; }
+    .q-noprint { display: none !important; }
+    .q-sheet {
       width: 100%;
-      max-width: 210mm;
+      min-height: 272mm;
       margin: 0;
       box-shadow: none;
-      overflow: hidden;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
-    /* El encabezado y el pie sangran a los bordes; el resto del contenido no
-       debe partirse a media caja entre páginas. */
-    .q-cols, .q-table, .q-summary, .q-features, .q-foot { break-inside: avoid; }
-    @page { size: A4; margin: 0; }
+    .q-intro, .q-table, .q-summary, .q-terms, .q-foot { break-inside: avoid; }
+    @page { size: A4; margin: 8mm; }
+  }
+
+  @media screen and (max-width: 840px) {
+    .q-sheet { width: 100%; min-height: 0; }
   }
 </style>
 </head>
 <body>
 ${printBar}
-<div class="sheet">
+<div class="q-sheet">
 
   <header class="q-head">
     <div class="q-head__brand">${brandLogo({ dark: true })}</div>
+    <div class="q-head__seam"></div>
     <div class="q-head__meta">
-      <div class="q-head__title">
+      <div class="q-title">
         <h1>COTIZACIÓN</h1>
-        <span class="q-number">${esc(quoteNumber)}</span>
+        <span class="q-num">${esc(quoteNumber)}</span>
       </div>
-      <dl class="q-head__facts">
-        <dt>📅 FECHA:</dt><dd>${esc(issueDate)}</dd>
-        <dt>🗓️ VÁLIDO HASTA:</dt><dd>${esc(validUntil)}</dd>
-        <dt>📝 ELABORADO POR:</dt><dd>${esc(COMPANY.brandName)}</dd>
+      <dl class="q-facts">
+        <dt>${icon('calendar')} FECHA</dt><dd>${esc(issueDate)}</dd>
+        <dt>${icon('calendar')} VÁLIDO HASTA</dt><dd>${esc(validUntil)}</dd>
+        <dt>${icon('doc')} ELABORADO POR</dt><dd>${esc(COMPANY.brandName)}</dd>
       </dl>
     </div>
   </header>
 
-  ${watermarkMark('ag-watermark')}
-
   <div class="q-body">
+    ${monogram('q-watermark')}
 
-    <div class="q-cols">
-      <div class="q-col q-client">
-        <div class="q-section-title">👤 Datos del Cliente</div>
+    <div class="q-intro">
+      <div class="q-client">
+        <div class="q-h">${icon('user')} Datos del cliente</div>
         <dl>
-          <dt>Cliente:</dt><dd>${esc(clientName)}</dd>
-          <dt>Carrera:</dt><dd>${esc(career)}</dd>
-          <dt>Correo:</dt><dd>${esc(lead.email || '—')}</dd>
-          <dt>Teléfono:</dt><dd>${esc(lead.phone || '—')}</dd>
+          <div class="q-field">${icon('user')}<div><dt>Cliente</dt><dd>${esc(clientName)}</dd></div></div>
+          <div class="q-field">${icon('career')}<div><dt>Carrera</dt><dd>${esc(career)}</dd></div></div>
+          <div class="q-field">${icon('mail')}<div><dt>Correo</dt><dd>${esc(lead.email || '—')}</dd></div></div>
+          <div class="q-field">${icon('phone')}<div><dt>Teléfono</dt><dd>${esc(lead.phone || '—')}</dd></div></div>
         </dl>
       </div>
-      <div class="q-divider"></div>
-      <div class="q-col q-presentation">
-        <div class="q-section-title">Presentación</div>
+      <div class="q-rule-v"></div>
+      <div class="q-present">
+        <div class="q-h">Presentación</div>
         <p>Estimados señores,</p>
         <p>Agradecemos la oportunidad de presentar nuestra propuesta. En ${esc(COMPANY.brandName)} ofrecemos soluciones personalizadas que impulsan su crecimiento. Quedamos atentos a cualquier consulta.</p>
-        <p>Atentamente,<br><span class="sign">${esc(COMPANY.brandName)}</span></p>
+        <p>Atentamente,<br><span class="q-sign">${esc(COMPANY.brandName)}</span></p>
       </div>
     </div>
 
@@ -377,77 +439,65 @@ ${printBar}
       <thead>
         <tr>
           <th>N°</th>
-          <th>DESCRIPCIÓN</th>
-          <th>CANT.</th>
-          <th>PRECIO UNIT.</th>
-          <th>SUBTOTAL</th>
+          <th class="q-desc-h">Descripción</th>
+          <th>Cant.</th>
+          <th>Precio unit.</th>
+          <th>Subtotal</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td class="q-num">01</td>
-          <td class="q-desc">${esc(conceptTitle)}</td>
-          <td class="q-center">${quantity}</td>
-          <td class="q-right">${formatMoney(unitPrice, currency)}</td>
-          <td class="q-right">${formatMoney(total, currency)}</td>
+          <td class="q-n">01</td>
+          <td><span class="q-concept">${icon('doc')} ${esc(conceptTitle)}</span></td>
+          <td class="q-c">${quantity}</td>
+          <td class="q-r">${formatMoney(unitPrice, currency)}</td>
+          <td class="q-r">${formatMoney(total, currency)}</td>
         </tr>
         ${scopeRow}
       </tbody>
     </table>
 
     <div class="q-summary">
-      <div class="q-observations">
+      <div class="q-obs">
         <h4>Observaciones</h4>
-        ${observations || '<span>&nbsp;</span>'}
+        ${observations || '&nbsp;'}
       </div>
-      <div class="q-total-label">TOTAL</div>
-      <div class="q-total-value">${formatMoney(total, currency)}</div>
+      <div class="q-total-k">TOTAL</div>
+      <div class="q-total-v">${formatMoney(total, currency)}</div>
     </div>
 
-    <div class="q-features">
-      <div class="q-feature">
-        <div class="q-feature__icon">⏱️</div>
-        <h5>TIEMPO DE ENTREGA</h5>
-        <p>Según cronograma acordado y explicado</p>
-      </div>
-      <div class="q-feature">
-        <div class="q-feature__icon">💳</div>
-        <h5>FORMA DE PAGO</h5>
-        <p>Medios de pago según convenga al cliente</p>
-      </div>
-      <div class="q-feature">
-        <div class="q-feature__icon">🛡️</div>
-        <h5>GARANTÍA</h5>
-        <p>Garantizamos todo mediante un contrato</p>
-      </div>
-      <div class="q-feature">
-        <div class="q-feature__icon">📆</div>
-        <h5>VALIDEZ DE LA OFERTA</h5>
-        <p>La presente cotización tiene validez hasta la fecha indicada</p>
-      </div>
+    <div class="q-terms">
+      <div class="q-term">${icon('clock')}<h5>Tiempo de entrega</h5><p>Según cronograma acordado y explicado</p></div>
+      <div class="q-term">${icon('card')}<h5>Forma de pago</h5><p>Medios de pago según convenga al cliente</p></div>
+      <div class="q-term">${icon('shield')}<h5>Garantía</h5><p>Garantizamos todo mediante un contrato</p></div>
+      <div class="q-term">${icon('calendar')}<h5>Validez de la oferta</h5><p>La cotización tiene validez hasta la fecha indicada</p></div>
     </div>
   </div>
 
   <footer class="q-foot">
-    <div class="q-foot__block">
-      <h6>DATOS DE LA EMPRESA</h6>
-      <div>🏢 <strong>${esc(COMPANY.legalName)}</strong></div>
-      <div>🆔 RUC: ${esc(COMPANY.ruc)}</div>
-      <div>📍 ${esc(COMPANY.address)}<br>&nbsp;&nbsp;&nbsp;${esc(COMPANY.addressCity)}</div>
-      <div>📞 ${esc(COMPANY.phone)}</div>
-      <div>✉️ ${esc(COMPANY.email)}</div>
-      <div>🌐 ${esc(COMPANY.website)}</div>
+    <div>
+      <h6>Datos de la empresa</h6>
+      <div class="q-foot__list">
+        <div class="q-row">${icon('career')}<span><strong>${esc(COMPANY.legalName)}</strong></span></div>
+        <div class="q-row">${icon('doc')}<span>RUC: ${esc(COMPANY.ruc)}</span></div>
+        <div class="q-row">${icon('user')}<span>${esc(COMPANY.address)}, ${esc(COMPANY.addressCity)}</span></div>
+        <div class="q-row">${icon('phone')}<span>${esc(COMPANY.phone)}</span></div>
+        <div class="q-row">${icon('mail')}<span>${esc(COMPANY.email)}</span></div>
+        <div class="q-row">${icon('career')}<span>${esc(COMPANY.website)}</span></div>
+      </div>
     </div>
-    <div class="q-foot__block">
-      <h6>MÉTODOS DE PAGO</h6>
+    <div>
+      <h6>Métodos de pago</h6>
       ${PAYMENT_METHODS.map((m) => `
-        <div class="q-foot__pay">
-          <strong>${esc(m.bank)}</strong><br>
-          ${esc(m.account)}<br>
-          ${esc(m.cci)}
+        <div class="q-pay">
+          <span class="q-pay__bank">
+            <span class="q-pay__chip" style="background:${m.accent}">${esc(m.short)}</span>
+            <span>${esc(m.bank)}</span>
+          </span>
+          <div class="q-pay__line">${esc(m.account)}<br>${esc(m.cci)}</div>
         </div>`).join('')}
     </div>
-    ${watermarkMark('ag-foot-mark')}
+    ${monogram('q-foot-mark')}
   </footer>
 
 </div>
