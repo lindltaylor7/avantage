@@ -1324,6 +1324,7 @@ async function onDrop(targetColKey) {
   try {
     const res = await apiFetch(`/api/leads/${leadToMove.id}/status`, {
       method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: targetColKey })
     });
     if (!res.ok) {
@@ -1352,6 +1353,7 @@ async function updateLeadStatusFromSelect(leadId, newStatus) {
   try {
     const res = await apiFetch(`/api/leads/${leadId}/status`, {
       method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: newStatus })
     });
     if (!res.ok) throw new Error('Error al actualizar');
@@ -1496,6 +1498,7 @@ async function confirmDeleteColumn() {
       lead.status = targetKey;
       apiFetch(`/api/leads/${lead.id}/status`, {
         method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: targetKey })
       }).catch(console.error);
     }
