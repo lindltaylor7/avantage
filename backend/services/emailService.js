@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
+import { buildQuotationDocument, formatQuoteNumber } from './quotationDocument.js';
 dotenv.config();
 
 /**
@@ -185,65 +186,30 @@ export class EmailService {
   }
 
   /**
-   * Genera el contenido HTML de una cotización enviada a un lead
+   * Genera el contenido HTML de una cotización enviada a un lead, con la
+   * identidad de marca de Avantage Group (mismo documento que la vista
+   * imprimible del Funnel de Ventas).
    */
-  buildHtmlQuote({ topic, amount, currency, notes }) {
-    const dateFormatted = new Date().toLocaleDateString('es-PE', {
-      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
-    });
-    const amountFormatted = new Intl.NumberFormat('es-PE', { style: 'currency', currency }).format(amount);
-
-    return `
-    <!DOCTYPE html>
-    <html lang="es">
-    <head>
-      <meta charset="UTF-8">
-    </head>
-    <body style="background-color: #F8FAFC; color: #0F172A; margin: 0; padding: 20px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
-      <div style="max-width: 640px; margin: 0 auto; background-color: #FFFFFF; border-radius: 16px; overflow: hidden; border: 1px solid #E2E8F0; color: #0F172A;">
-        <div style="background: linear-gradient(135deg, #105EFF 0%, #1B1B1B 100%); padding: 32px 24px; text-align: center; color: #FFFFFF;">
-          <h1 style="margin: 0; font-size: 22px; color: #FFFFFF !important; font-weight: 700;">Cotización de Servicio</h1>
-          <p style="margin: 6px 0 0 0; color: #FFFFFF !important; font-size: 14px;">Asesoría y Desarrollo de Tesis — Perú</p>
-        </div>
-        <div style="padding: 28px 24px; background-color: #FFFFFF; color: #0F172A;">
-          <div style="background-color: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 12px; padding: 18px; margin-bottom: 20px;">
-            <h3 style="font-size: 16px; font-weight: 700; color: #105EFF !important; margin: 0 0 10px 0;">📌 Proyecto</h3>
-            <p style="font-size: 15px; font-weight: 600; color: #0F172A !important; margin: 0; line-height: 1.4;">"${topic}"</p>
-            <p style="font-size: 13px; color: #475569 !important; margin-top: 8px;">Fecha de cotización: ${dateFormatted}</p>
-          </div>
-          <div style="text-align: center; padding: 22px; background-color: #F8FAFC; border-radius: 12px; border: 3px solid #10B981; margin-bottom: 20px;">
-            <div style="font-size: 40px; font-weight: 800; color: #10B981 !important; line-height: 1;">${amountFormatted}</div>
-            <div style="font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: #334155 !important; margin-top: 6px; font-weight: 700;">Monto Cotizado</div>
-          </div>
-          ${notes ? `
-          <div style="background-color: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 12px; padding: 18px; margin-bottom: 20px;">
-            <h3 style="font-size: 16px; font-weight: 700; color: #105EFF !important; margin: 0 0 10px 0;">📝 Detalle</h3>
-            <p style="font-size: 14px; color: #0F172A !important; margin: 0; line-height: 1.6; white-space: pre-line;">${notes}</p>
-          </div>` : ''}
-          <p style="font-size: 12px; color: #64748B !important; text-align: center;">Esta cotización es referencial y válida por 15 días calendario.</p>
-        </div>
-        <div style="text-align: center; padding: 20px; font-size: 12px; color: #64748B !important; border-top: 1px solid #E2E8F0; background-color: #F8FAFC;">
-          <p style="margin: 0; color: #64748B !important;">Avantage Group © ${new Date().getFullYear()}</p>
-        </div>
-      </div>
-    </body>
-    </html>
-    `;
+  buildHtmlQuote({ quote, lead }) {
+    return buildQuotationDocument({ quote, lead, forPrint: false });
   }
 
   /**
-   * Envía la cotización al lead por correo electrónico
+   * Envía la cotización al lead por correo electrónico.
+   * @param {string} recipientEmail
+   * @param {{ quote: object, lead: object }} quoteData
    */
   async sendQuoteEmail(recipientEmail, quoteData) {
     await this.initPromise;
 
     const fromAddress = process.env.SMTP_FROM || '"Avantage Group" <tesis@avantagegroup.pe>';
     const htmlContent = this.buildHtmlQuote(quoteData);
+    const quoteNumber = formatQuoteNumber(quoteData.quote);
 
     const mailOptions = {
       from: fromAddress,
       to: recipientEmail,
-      subject: `💰 Cotización: "${quoteData.topic.substring(0, 50)}..."`,
+      subject: `💰 Cotización ${quoteNumber} — Avantage Group`,
       html: htmlContent
     };
 

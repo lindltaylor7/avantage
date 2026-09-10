@@ -10,6 +10,9 @@ import { FunnelColumnService } from './services/funnelColumnService.js';
 import { ProjectService } from './services/projectService.js';
 import { TaskService } from './services/taskService.js';
 import { QuoteService } from './services/quoteService.js';
+import { buildQuotationDocument } from './services/quotationDocument.js';
+import { CampaignService } from './services/campaignService.js';
+import { MetaAdsService } from './services/metaAdsService.js';
 import { UserService } from './services/userService.js';
 import { RoleService } from './services/roleService.js';
 import { ProjectUpdateService } from './services/projectUpdateService.js';
@@ -36,9 +39,6 @@ import { uploadProjectUpdateAttachment, uploadDir, uploadFinanceReceipt, uploadF
 // Estado del funnel Kanban que marca el fin del proceso comercial: al llegar
 // aquí se genera automáticamente el proyecto asociado al lead.
 const FUNNEL_FINAL_STATUS = 'ganado';
-
-// Etapas del funnel en las que un lead ya puede recibir una cotización.
-const QUOTE_ELIGIBLE_STATUSES = ['contactado', 'en_negociacion'];
 
 // Frecuencia del sondeo del conteo de seguidores de la página (Meta no lo
 // notifica por webhook), 1 hora por defecto.
@@ -96,6 +96,8 @@ const funnelColumnService = new FunnelColumnService();
 const projectService = new ProjectService();
 const taskService = new TaskService();
 const quoteService = new QuoteService();
+const campaignService = new CampaignService();
+const metaAdsService = new MetaAdsService();
 const userService = new UserService();
 const roleService = new RoleService();
 const projectUpdateService = new ProjectUpdateService();
@@ -1349,6 +1351,29 @@ app.get('/api/whatsapp/conversations', requireAuth, requirePermission('leads.vie
 });
 
 /**
+ * Exporta todas las conversaciones de WhatsApp de un día (hoy por defecto, o
+ * ?date=YYYY-MM-DD) como un archivo de texto plano descargable.
+ */
+app.get('/api/whatsapp/conversations/export', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const raw = (req.query.date || '').trim();
+    if (raw && !/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+      return res.status(400).json({ error: 'El parámetro "date" debe tener el formato YYYY-MM-DD.' });
+    }
+
+    const { filename, content } = raw
+      ? await whatsappMessageService.buildDayTranscript(raw)
+      : await whatsappMessageService.buildDayTranscript();
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(content);
+  } catch (error) {
+    console.error('❌ Error al exportar las conversaciones de WhatsApp:', error);
+    res.status(500).json({ error: 'Error al exportar las conversaciones de WhatsApp.', details: error.message });
+  }
+});
+
+/**
  * Hilo completo (entrantes + salientes) de un contacto de WhatsApp.
  */
 app.get('/api/whatsapp/conversations/:waId/messages', requireAuth, requirePermission('leads.view'), async (req, res) => {
@@ -1620,13 +1645,22 @@ app.delete('/api/funnel-columns/:key', requireAuth, requirePermission('leads.vie
 });
 
 /**
- * Genera y envía por correo una cotización para un lead en etapa
- * "contactado" o "en_negociacion" del funnel de ventas.
+ * Genera y envía por correo una cotización para un lead del funnel de ventas
+ * (disponible en cualquier etapa, ya que las columnas del funnel son
+ * configurables por el equipo).
  */
 app.post('/api/leads/:id/quote', requireAuth, requirePermission('leads.view'), async (req, res) => {
   try {
-    const { amount, currency = 'PEN', notes } = req.body;
+    const {
+      amount,
+      currency = 'PEN',
+      notes,
+      conceptTitle,
+      quantity,
+      scopeItems
+    } = req.body;
     const parsedAmount = Number(amount);
+    const parsedQuantity = Number(quantity) > 0 ? Math.floor(Number(quantity)) : 1;
 
     if (!amount || Number.isNaN(parsedAmount) || parsedAmount <= 0) {
       return res.status(400).json({ error: 'Proporcione un monto válido para la cotización.' });
@@ -1637,12 +1671,20 @@ app.post('/api/leads/:id/quote', requireAuth, requirePermission('leads.view'), a
       return res.status(404).json({ error: 'Lead no encontrado.' });
     }
 
-    if (!QUOTE_ELIGIBLE_STATUSES.includes(lead.status)) {
-      return res.status(400).json({ error: 'Solo se puede cotizar a leads en estado "Contactado" o "En Negociación".' });
-    }
+    // La cotización es válida por 10 días calendario desde su emisión.
+    const validUntil = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
-    const quote = await quoteService.createQuote({ leadId: lead.id, amount: parsedAmount, currency, notes });
-    const emailStatus = await emailService.sendQuoteEmail(lead.email, { topic: lead.topic, amount: parsedAmount, currency, notes });
+    const quote = await quoteService.createQuote({
+      leadId: lead.id,
+      amount: parsedAmount,
+      currency,
+      notes,
+      conceptTitle,
+      quantity: parsedQuantity,
+      scopeItems,
+      validUntil
+    });
+    const emailStatus = await emailService.sendQuoteEmail(lead.email, { quote, lead });
 
     console.log(`💰 [Cotizaciones] Cotización #${quote.id} generada para el lead #${lead.id} (${lead.email})`);
 
@@ -1650,6 +1692,141 @@ app.post('/api/leads/:id/quote', requireAuth, requirePermission('leads.view'), a
   } catch (error) {
     console.error('❌ Error al generar la cotización:', error);
     res.status(500).json({ error: 'Error al generar la cotización.', details: error.message });
+  }
+});
+
+/**
+ * Devuelve el documento HTML imprimible de una cotización con la marca de
+ * Avantage Group, listo para "Guardar como PDF" desde el navegador.
+ */
+app.get('/api/quotes/:id/document', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const data = await quoteService.getQuoteWithLead(req.params.id);
+    if (!data || !data.quote || !data.lead) {
+      return res.status(404).json({ error: 'Cotización no encontrada.' });
+    }
+
+    const html = buildQuotationDocument({ quote: data.quote, lead: data.lead, forPrint: true });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (error) {
+    console.error('❌ Error al generar el documento de la cotización:', error);
+    res.status(500).json({ error: 'Error al generar el documento de la cotización.', details: error.message });
+  }
+});
+
+/* ===================================================================== */
+/* Campañas de marketing digital                                          */
+/* ===================================================================== */
+
+/** Rendimiento en vivo de todas las campañas (embudo real + costos manuales). */
+app.get('/api/campaigns/performance', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const { from = null, to = null } = req.query;
+    const report = await campaignService.getPerformance({ from, to });
+    res.json(report);
+  } catch (error) {
+    console.error('❌ Error al calcular el rendimiento de campañas:', error);
+    res.status(500).json({ error: 'Error al calcular el rendimiento de campañas.', details: error.message });
+  }
+});
+
+/** Lista de campañas con su mapeo de anuncios. */
+app.get('/api/campaigns', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    res.json({ campaigns: await campaignService.listCampaigns() });
+  } catch (error) {
+    console.error('❌ Error al listar campañas:', error);
+    res.status(500).json({ error: 'Error al listar campañas.', details: error.message });
+  }
+});
+
+app.post('/api/campaigns', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    if (!req.body?.name || !String(req.body.name).trim()) {
+      return res.status(400).json({ error: 'La campaña necesita un nombre.' });
+    }
+    const campaign = await campaignService.createCampaign(req.body);
+    res.status(201).json({ campaign });
+  } catch (error) {
+    console.error('❌ Error al crear la campaña:', error);
+    res.status(500).json({ error: 'Error al crear la campaña.', details: error.message });
+  }
+});
+
+app.put('/api/campaigns/:id', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const campaign = await campaignService.updateCampaign(req.params.id, req.body);
+    if (!campaign) return res.status(404).json({ error: 'Campaña no encontrada.' });
+    res.json({ campaign });
+  } catch (error) {
+    console.error('❌ Error al actualizar la campaña:', error);
+    res.status(500).json({ error: 'Error al actualizar la campaña.', details: error.message });
+  }
+});
+
+app.delete('/api/campaigns/:id', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    await campaignService.deleteCampaign(req.params.id);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error al eliminar la campaña:', error);
+    res.status(500).json({ error: 'Error al eliminar la campaña.', details: error.message });
+  }
+});
+
+/** Asocia un ID de anuncio (source_id del referral) a una campaña. */
+app.post('/api/campaigns/:id/ads', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const campaign = await campaignService.addAdMapping(req.params.id, {
+      adSourceId: req.body?.adSourceId,
+      adLabel: req.body?.adLabel
+    });
+    if (!campaign) return res.status(404).json({ error: 'Campaña no encontrada.' });
+    res.status(201).json({ campaign });
+  } catch (error) {
+    console.error('❌ Error al mapear el anuncio:', error);
+    res.status(400).json({ error: error.message || 'Error al mapear el anuncio.' });
+  }
+});
+
+app.delete('/api/campaigns/ads/:mappingId', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    await campaignService.removeAdMapping(req.params.mappingId);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error al quitar el mapeo del anuncio:', error);
+    res.status(500).json({ error: 'Error al quitar el mapeo del anuncio.', details: error.message });
+  }
+});
+
+/** Estado de la integración con la Meta Marketing API (Ads). */
+app.get('/api/campaigns/meta/status', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    res.json(await metaAdsService.status());
+  } catch (error) {
+    res.json({ configured: false, reason: 'error', error: error.message });
+  }
+});
+
+/**
+ * Sincroniza las campañas de Meta Ads: importa campañas, mapea sus anuncios
+ * (para atribuir el tráfico Click-to-WhatsApp) y trae las métricas de
+ * rendimiento (gasto, impresiones, alcance, clics, CPM, CTR).
+ */
+app.post('/api/campaigns/meta/sync', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const datePreset = ['last_7d', 'last_14d', 'last_30d', 'last_90d', 'maximum'].includes(req.body?.datePreset)
+      ? req.body.datePreset
+      : 'last_30d';
+    const summary = await metaAdsService.sync({ datePreset });
+    console.log(`📊 [Campañas] Sync Meta: ${summary.campaigns} campañas, ${summary.adsMapped} anuncios, ${summary.insightsUpdated} con métricas.`);
+    res.json({ summary });
+  } catch (error) {
+    console.error('❌ Error al sincronizar con Meta Ads:', error);
+    const configErrors = ['NOT_CONFIGURED', 'NO_TOKEN', 'NO_AD_ACCOUNT'];
+    const status = configErrors.includes(error.code) ? 400 : 502;
+    res.status(status).json({ error: error.message, code: error.code || null, metaCode: error.metaCode || null });
   }
 });
 
