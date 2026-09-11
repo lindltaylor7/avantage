@@ -630,7 +630,7 @@
     <!-- MODAL 4: Detalle del Lead y Acciones                              -->
     <!-- ================================================================= -->
     <div v-if="selectedLead" class="modal-overlay" @click.self="selectedLead = null">
-      <div class="modal-content lead-detail-card">
+      <div class="modal-content lead-detail-card" :class="{ 'has-chat': showBotChat }">
         <div class="modal-header">
           <div style="display: flex; align-items: center; gap: 0.6rem;">
             <span class="lead-id-tag">Lead #{{ selectedLead.id }}</span>
@@ -641,7 +641,8 @@
           <button class="modal-close-btn" @click="selectedLead = null">✕</button>
         </div>
 
-        <div class="modal-body">
+        <div class="modal-body" :class="{ 'modal-body-split': showBotChat }">
+         <div class="lead-modal-primary">
           <div class="modal-lead-title-area">
             <h3 class="modal-lead-name">👤 {{ getLeadFullName(selectedLead) }}</h3>
             <p v-if="selectedLead.topic && selectedLead.topic.trim().toLowerCase() !== (selectedLead.full_name || '').trim().toLowerCase()" class="modal-lead-topic-sub">
@@ -730,31 +731,6 @@
               💬 {{ showBotChat ? 'Ocultar conversación con el bot' : 'Ver conversación con el bot' }}
               <span class="bot-chat-toggle-phone">{{ selectedLead.phone }}</span>
             </button>
-
-            <div v-if="showBotChat" class="bot-chat-panel">
-              <header class="bot-chat-head">
-                <span>💬 Conversación con Avan</span>
-                <button type="button" class="bot-chat-refresh" :disabled="botChatLoading" @click="loadBotChat()">
-                  {{ botChatLoading ? '…' : '⟳' }}
-                </button>
-              </header>
-              <div ref="botChatScrollEl" class="bot-chat-scroll custom-scrollbar">
-                <p v-if="botChatError" class="bot-chat-empty">⚠️ {{ botChatError }}</p>
-                <p v-else-if="botChatLoading && !botChatMessages.length" class="bot-chat-empty">Cargando conversación…</p>
-                <p v-else-if="!botChatMessages.length" class="bot-chat-empty">Sin mensajes registrados con este contacto.</p>
-                <div
-                  v-for="msg in botChatMessages"
-                  :key="msg.id"
-                  class="bot-bubble"
-                  :class="msg.direction === 'outbound' ? 'outbound' : 'inbound'"
-                >
-                  <p class="bot-bubble-text">{{ msg.body }}</p>
-                  <span class="bot-bubble-time">
-                    {{ msg.direction === 'outbound' ? 'Avan' : 'Contacto' }} · {{ formatClock(msg.received_at) }}
-                  </span>
-                </div>
-              </div>
-            </div>
           </div>
 
           <!-- Botones de Contacto y Cotización -->
@@ -871,6 +847,33 @@
               {{ quoteDocLoading ? 'Abriendo…' : '📄 Ver / Descargar cotización (PDF)' }}
             </button>
           </div>
+         </div>
+
+          <!-- Panel lateral: conversación con el bot de WhatsApp (Avan) -->
+          <aside v-if="showBotChat" class="bot-chat-panel">
+            <header class="bot-chat-head">
+              <span>💬 Conversación con Avan</span>
+              <button type="button" class="bot-chat-refresh" :disabled="botChatLoading" @click="loadBotChat()">
+                {{ botChatLoading ? '…' : '⟳' }}
+              </button>
+            </header>
+            <div ref="botChatScrollEl" class="bot-chat-scroll custom-scrollbar">
+              <p v-if="botChatError" class="bot-chat-empty">⚠️ {{ botChatError }}</p>
+              <p v-else-if="botChatLoading && !botChatMessages.length" class="bot-chat-empty">Cargando conversación…</p>
+              <p v-else-if="!botChatMessages.length" class="bot-chat-empty">Sin mensajes registrados con este contacto.</p>
+              <div
+                v-for="msg in botChatMessages"
+                :key="msg.id"
+                class="bot-bubble"
+                :class="msg.direction === 'outbound' ? 'outbound' : 'inbound'"
+              >
+                <p class="bot-bubble-text">{{ msg.body }}</p>
+                <span class="bot-bubble-time">
+                  {{ msg.direction === 'outbound' ? 'Avan' : 'Contacto' }} · {{ formatClock(msg.received_at) }}
+                </span>
+              </div>
+            </div>
+          </aside>
         </div>
       </div>
     </div>
@@ -2636,6 +2639,28 @@ onMounted(() => {
 
 .lead-detail-card {
   max-width: 580px;
+  transition: max-width 0.2s ease;
+}
+
+.lead-detail-card.has-chat {
+  max-width: 960px;
+}
+
+.modal-body-split {
+  display: flex;
+  align-items: stretch;
+  gap: 1.25rem;
+}
+
+.lead-modal-primary {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .modal-body-split {
+    flex-direction: column;
+  }
 }
 
 .modal-title {
@@ -2895,13 +2920,19 @@ onMounted(() => {
 }
 
 .bot-chat-panel {
-  margin-top: 0.6rem;
+  flex: 0 0 320px;
   display: flex;
   flex-direction: column;
   background: var(--surface-1);
   border: 1px solid var(--border-color);
   border-radius: 12px;
   overflow: hidden;
+}
+
+@media (max-width: 900px) {
+  .bot-chat-panel {
+    flex-basis: auto;
+  }
 }
 
 .bot-chat-head {
