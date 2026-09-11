@@ -8,9 +8,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Después de completar un cambio** (o un conjunto de cambios relacionados), crea automáticamente
   un commit con un mensaje descriptivo en español que explique el *qué* y el *porqué* del cambio,
   siguiendo el estilo de los commits existentes (`feat(alcance): descripción`, `fix(alcance): ...`,
-  `refactor(alcance): ...`). No pidas confirmación para el `git pull` ni para el commit salvo que el
-  usuario indique lo contrario explícitamente en la conversación.
-- No hagas `git push` automáticamente salvo que el usuario lo pida.
+  `refactor(alcance): ...`), y a continuación haz `git push` a la rama actual.
+- No pidas confirmación para el `git pull`, el commit ni el `push` salvo que el usuario indique lo
+  contrario explícitamente en la conversación.
+- Si el `push` es rechazado (la rama remota avanzó), haz `git pull` (o `git pull --rebase`) para
+  integrar los cambios remotos y reintenta el `push` — nunca uses `--force` salvo que el usuario lo
+  pida explícitamente.
 
 ## Comandos
 
