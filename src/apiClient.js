@@ -10,6 +10,12 @@ export async function apiFetch(url, options = {}) {
   if (authState.token) {
     headers['Authorization'] = `Bearer ${authState.token}`;
   }
+  // Si el body es un string (JSON serializado) y no se especificó Content-Type,
+  // asumir application/json — sin esta cabecera express.json() no parsea el body
+  // y el backend recibe req.body vacío.
+  if (typeof options.body === 'string' && !headers['Content-Type'] && !headers['content-type']) {
+    headers['Content-Type'] = 'application/json';
+  }
 
   const response = await fetch(url, { ...options, headers });
 
