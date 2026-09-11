@@ -44,6 +44,8 @@
     <p v-if="errorMessage" class="info-box alert-box">⚠️ {{ errorMessage }}</p>
     <p v-if="resetMessage" class="info-box success-box">✅ {{ resetMessage }}</p>
 
+    <WhatsAppEmbeddedSignup />
+
     <!-- Estado de credenciales: por qué el bot podría no estar respondiendo -->
     <section v-if="configStatus" class="config-status-banner" :class="{ 'is-ok': allWhatsappConfigOk }">
       <h4>{{ allWhatsappConfigOk ? '✅ Envío de WhatsApp configurado' : '⚠️ El bot no puede enviar mensajes reales todavía' }}</h4>
@@ -413,6 +415,7 @@
 <script setup>
 import { nextTick, onMounted, onUnmounted, computed, ref } from 'vue';
 import { apiFetch } from '../apiClient.js';
+import WhatsAppEmbeddedSignup from '../components/WhatsAppEmbeddedSignup.vue';
 
 const conversations = ref([]);
 const stats = ref({ total: 0, contacts: 0 });

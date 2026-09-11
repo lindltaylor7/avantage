@@ -24,6 +24,7 @@ import { WhatsappWebhookService } from './services/whatsappWebhookService.js';
 import { WhatsappMessageService } from './services/whatsappMessageService.js';
 import { WhatsappBotService } from './services/whatsappBotService.js';
 import { WhatsappBotSettingsService } from './services/whatsappBotSettingsService.js';
+import { MetaEmbeddedSignupService } from './services/metaEmbeddedSignupService.js';
 import { AdvisorAvailabilityService } from './services/advisorAvailabilityService.js';
 import { InstagramService } from './services/instagramService.js';
 import { InstagramWebhookService } from './services/instagramWebhookService.js';
@@ -107,6 +108,7 @@ const pageMessageService = new PageMessageService();
 const pageFollowerService = new PageFollowerService();
 const whatsappMessageService = new WhatsappMessageService();
 const whatsappBotSettingsService = new WhatsappBotSettingsService();
+const metaEmbeddedSignupService = new MetaEmbeddedSignupService();
 const googleCalendarService = new GoogleCalendarService();
 const scheduledMeetingService = new ScheduledMeetingService();
 const notificationService = new NotificationService();
@@ -1526,6 +1528,58 @@ app.get('/api/whatsapp/config-status', requireAuth, requirePermission('leads.vie
       chatModel: process.env.OLLAMA_CHAT_MODEL || 'llama3:latest'
     }
   });
+});
+
+/**
+ * Configuración pública (App ID + Configuration ID, ninguno secreto) que el
+ * frontend necesita para inicializar el SDK de Facebook y abrir el pop-up de
+ * Embedded Signup.
+ */
+app.get('/api/whatsapp/embedded-signup/config', requireAuth, requirePermission('leads.view'), (req, res) => {
+  res.json(metaEmbeddedSignupService.getPublicConfig());
+});
+
+/**
+ * Recibe el `code` que devuelve el pop-up de Embedded Signup (Facebook Login
+ * for Business), lo cambia por un access_token, verifica a qué WABA da
+ * acceso, resuelve el phone_number_id, suscribe la app a los webhooks de esa
+ * WABA y guarda las credenciales. `wabaId`/`phoneNumberId`/`businessId` son
+ * pistas opcionales que llegan del evento `postMessage` WA_EMBEDDED_SIGNUP
+ * capturado en el frontend — el backend igual las valida contra lo que el
+ * propio token de Meta autorizó antes de confiar en ellas.
+ */
+app.post('/api/whatsapp/embedded-callback', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const { code, wabaId, phoneNumberId, businessId, mode } = req.body || {};
+    if (!code) {
+      return res.status(400).json({ error: 'El parámetro "code" es obligatorio.' });
+    }
+    const account = await metaEmbeddedSignupService.completeSignup({
+      code,
+      wabaIdHint: wabaId,
+      phoneNumberIdHint: phoneNumberId,
+      businessIdHint: businessId,
+      mode: mode === 'full_migration' ? 'full_migration' : 'coexistence'
+    });
+    res.json({ success: true, account });
+  } catch (error) {
+    console.error('❌ Error al completar el Embedded Signup de WhatsApp:', error);
+    res.status(500).json({ error: 'No se pudo completar el registro de WhatsApp.', details: error.message });
+  }
+});
+
+/**
+ * Cuentas de WhatsApp vinculadas por Embedded Signup (sin exponer el
+ * access_token), para mostrarlas en el panel.
+ */
+app.get('/api/whatsapp/embedded-accounts', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const accounts = await metaEmbeddedSignupService.listAccounts();
+    res.json({ accounts });
+  } catch (error) {
+    console.error('❌ Error al listar las cuentas de WhatsApp vinculadas:', error);
+    res.status(500).json({ error: 'No se pudieron obtener las cuentas vinculadas.', details: error.message });
+  }
 });
 
 /**
