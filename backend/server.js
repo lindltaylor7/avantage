@@ -21,6 +21,7 @@ import { PageInteractionService } from './services/pageInteractionService.js';
 import { PageMessageService } from './services/pageMessageService.js';
 import { PageFollowerService } from './services/pageFollowerService.js';
 import { WhatsappWebhookService } from './services/whatsappWebhookService.js';
+import { YCloudWebhookService } from './services/ycloudWebhookService.js';
 import { WhatsappMessageService } from './services/whatsappMessageService.js';
 import { WhatsappBotService } from './services/whatsappBotService.js';
 import { WhatsappBotSettingsService } from './services/whatsappBotSettingsService.js';
@@ -116,6 +117,7 @@ const financeService = new FinanceService();
 const financeLedgerService = new FinanceLedgerService();
 const whatsappBotService = new WhatsappBotService({ ollamaService, emailService, leadService, whatsappMessageService, settingsService: whatsappBotSettingsService, googleCalendarService, scheduledMeetingService, notificationService });
 const whatsappWebhookService = new WhatsappWebhookService({ botService: whatsappBotService });
+const ycloudWebhookService = new YCloudWebhookService({ botService: whatsappBotService });
 const advisorAvailabilityService = new AdvisorAvailabilityService();
 const instagramService = new InstagramService();
 const instagramWebhookService = new InstagramWebhookService();
@@ -1318,6 +1320,52 @@ app.get('/api/webhooks/whatsapp/events', requireAuth, requirePermission('leads.v
  */
 app.delete('/api/webhooks/whatsapp/events', requireAuth, requirePermission('leads.view'), (req, res) => {
   whatsappWebhookService.clearRecentEvents();
+  res.json({ success: true });
+});
+
+/**
+ * Recepción de eventos del webhook de YCloud (proveedor alternativo de
+ * WhatsApp Business Platform en modo coexistencia — ver WHATSAPP_PROVIDER en
+ * whatsappMessageService.js). A diferencia del de Meta, no hay verificación
+ * GET por "hub.challenge": YCloud firma cada POST con "YCloud-Signature" y el
+ * secret configurado al crear el endpoint (dashboard.ycloud.com > Developer >
+ * Webhooks > Add Endpoint, con URL .../api/webhooks/ycloud y los eventos
+ * whatsapp.inbound_message.received y whatsapp.message.updated).
+ */
+app.post('/api/webhooks/ycloud', (req, res) => {
+  const signature = req.headers['ycloud-signature'];
+  const hasSecret = !!process.env.YCLOUD_WEBHOOK_SECRET;
+  const signatureValid = hasSecret ? ycloudWebhookService.verifySignature(req.rawBody, signature) : null;
+
+  console.log(`📩 [YCloud Webhook] POST recibido. type=${req.body?.type} firma=${hasSecret ? (signatureValid ? 'válida' : 'inválida') : 'sin verificar'}`);
+
+  ycloudWebhookService.recordEvent({ body: req.body, signatureValid, hasSecret });
+
+  if (hasSecret && !signatureValid) {
+    console.warn('⚠️ [YCloud Webhook] Firma de la solicitud inválida, se rechaza el evento.');
+    return res.sendStatus(403);
+  }
+
+  res.sendStatus(200);
+
+  ycloudWebhookService.handleEvent(req.body || {}).catch((error) => {
+    console.error('❌ [YCloud Webhook] Error al procesar el evento del webhook:', error);
+  });
+});
+
+/**
+ * Últimos eventos crudos recibidos en el webhook de YCloud, para verificar en
+ * la UI que la suscripción está realmente conectada.
+ */
+app.get('/api/webhooks/ycloud/events', requireAuth, requirePermission('leads.view'), (req, res) => {
+  res.json({ events: ycloudWebhookService.getRecentEvents() });
+});
+
+/**
+ * Limpia el historial de eventos de prueba del webhook de YCloud.
+ */
+app.delete('/api/webhooks/ycloud/events', requireAuth, requirePermission('leads.view'), (req, res) => {
+  ycloudWebhookService.clearRecentEvents();
   res.json({ success: true });
 });
 

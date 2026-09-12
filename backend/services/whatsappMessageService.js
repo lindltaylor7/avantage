@@ -3,6 +3,16 @@ import path from 'path';
 import { db } from '../db/connection.js';
 
 const GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v21.0';
+// "meta" (Graph API directa) o "ycloud" (proveedor usado tras vincular el
+// número en modo coexistencia vía YCloud, cuando no se llegó a completar el
+// alta como Tech Provider de Meta). Ver .env.example.
+const WHATSAPP_PROVIDER = (process.env.WHATSAPP_PROVIDER || 'meta').toLowerCase();
+const YCLOUD_API_BASE = 'https://api.ycloud.com/v2/whatsapp';
+
+/** YCloud exige el número en formato internacional con "+"; el wa_id de Meta no lo trae. */
+function toE164(waId) {
+  return waId.startsWith('+') ? waId : `+${waId}`;
+}
 
 /** Fecha de hoy ("YYYY-MM-DD") en el calendario de Lima, sin importar la zona horaria del servidor. */
 function limaTodayIso() {
@@ -87,6 +97,31 @@ export class WhatsappMessageService {
   }
 
   /**
+   * Inserta un mensaje entrante ya normalizado, para proveedores que no usan
+   * el formato nativo de webhook de la Graph API (p. ej. YCloud, ver
+   * YCloudWebhookService). Mismo contrato de retorno que createFromMessage().
+   */
+  async recordInboundMessage({ waId, contactName, messageId, messageType, body, channel, receivedAt, rawPayload }) {
+    const [id] = await db('whatsapp_messages')
+      .insert({
+        wa_id: waId,
+        contact_name: contactName || null,
+        message_id: messageId,
+        message_type: messageType,
+        body,
+        direction: 'inbound',
+        channel,
+        raw_payload: rawPayload ? JSON.stringify(rawPayload) : null,
+        received_at: receivedAt || new Date()
+      })
+      .onConflict('message_id')
+      .ignore();
+
+    if (!id) return { record: await this.getByMessageId(messageId), isNew: false };
+    return { record: await this.getById(id), isNew: true };
+  }
+
+  /**
    * Inserta un mensaje entrante simulado (usado por el simulador de pruebas
    * del panel admin, que no pasa por el webhook real de Meta) para que el
    * motor conversacional del bot pueda reconstruir el hilo con el historial
@@ -117,6 +152,8 @@ export class WhatsappMessageService {
    * https://developers.facebook.com/documentation/business-messaging/whatsapp/business-scoped-user-ids/
    */
   async sendTextMessage(waId, body) {
+    if (WHATSAPP_PROVIDER === 'ycloud') return this.sendTextMessageViaYCloud(waId, body);
+
     const phoneNumberId = process.env.META_WHATSAPP_PHONE_NUMBER_ID;
     const accessToken = process.env.META_WHATSAPP_ACCESS_TOKEN || process.env.META_PAGE_ACCESS_TOKEN;
     if (!phoneNumberId) {
@@ -165,12 +202,60 @@ export class WhatsappMessageService {
   }
 
   /**
+   * Envía un mensaje de texto libre vía la API de YCloud (WHATSAPP_PROVIDER=ycloud).
+   * https://docs.ycloud.com/reference/whatsapp-message-sending-guide
+   */
+  async sendTextMessageViaYCloud(waId, body) {
+    const apiKey = process.env.YCLOUD_API_KEY;
+    const from = process.env.YCLOUD_WHATSAPP_FROM;
+    if (!apiKey) throw new Error('YCLOUD_API_KEY no está configurado en el servidor.');
+    if (!from) throw new Error('YCLOUD_WHATSAPP_FROM no está configurado en el servidor.');
+
+    const response = await fetch(`${YCLOUD_API_BASE}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
+      body: JSON.stringify({ from, to: toE164(waId), type: 'text', text: { body, preview_url: false } })
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      const reason = data?.message || data?.error?.message || JSON.stringify(data);
+      throw new Error(`YCloud rechazó el envío: ${reason}`);
+    }
+
+    // Se guarda el "wamid" (no el "id" interno de YCloud) como message_id
+    // para que quede en el mismo formato que usan las actualizaciones de
+    // estado del webhook "whatsapp.message.updated" (ver YCloudWebhookService).
+    const [id] = await db('whatsapp_messages').insert({
+      wa_id: waId,
+      contact_name: null,
+      message_id: data.wamid,
+      message_type: 'text',
+      body,
+      direction: 'outbound',
+      status: 'sent',
+      raw_payload: JSON.stringify(data)
+    });
+
+    return this.getById(id);
+  }
+
+  /**
    * Envía un archivo (imagen o documento) a un contacto vía la Graph API:
    * primero sube el fichero al endpoint /media para obtener un media id y
    * luego manda el mensaje referenciándolo. Igual que el texto libre, solo
    * funciona dentro de la ventana de 24h desde el último mensaje del cliente.
    */
   async sendMediaMessage(waId, { filePath, filename, mimeType, caption }) {
+    // YCloud envía adjuntos por URL pública o subiéndolos antes a su propio
+    // storage (no acepta un archivo local como Meta) y esta app hoy no expone
+    // los archivos por una URL pública — hace falta resolver eso antes de
+    // soportar este método con WHATSAPP_PROVIDER=ycloud.
+    // https://docs.ycloud.com/reference/whatsapp-message-sending-guide
+    if (WHATSAPP_PROVIDER === 'ycloud') {
+      throw new Error('El envío de archivos por WhatsApp aún no está soportado con el proveedor YCloud.');
+    }
+
     const phoneNumberId = process.env.META_WHATSAPP_PHONE_NUMBER_ID;
     const accessToken = process.env.META_WHATSAPP_ACCESS_TOKEN || process.env.META_PAGE_ACCESS_TOKEN;
     if (!phoneNumberId) {
@@ -252,6 +337,8 @@ export class WhatsappMessageService {
    * WhatsApp no está configurado o no hay un id.
    */
   async sendTypingIndicator(messageId) {
+    if (WHATSAPP_PROVIDER === 'ycloud') return this.sendTypingIndicatorViaYCloud(messageId);
+
     const phoneNumberId = process.env.META_WHATSAPP_PHONE_NUMBER_ID;
     const accessToken = process.env.META_WHATSAPP_ACCESS_TOKEN || process.env.META_PAGE_ACCESS_TOKEN;
     if (!phoneNumberId || !accessToken || !messageId) return;
@@ -274,6 +361,33 @@ export class WhatsappMessageService {
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       throw new Error(data?.error?.message || `WhatsApp rechazó el indicador de escritura (HTTP ${response.status}).`);
+    }
+  }
+
+  /**
+   * Marca como leído un mensaje entrante y muestra "escribiendo..." vía YCloud.
+   * `inboundMessageId` es el "id" interno de YCloud del mensaje entrante (no
+   * el "wamid") — ver YCloudWebhookService.handleInboundMessage.
+   * Nota: el nombre exacto del campo del body para activar el indicador de
+   * escritura no está confirmado en la documentación pública de YCloud; si
+   * difiere, en el peor caso YCloud igual marca el mensaje como leído y
+   * solo se pierde el indicador visual (falla silenciosa, sin romper el bot:
+   * quien llama a este método ya captura sus errores).
+   * https://docs.ycloud.com/reference/whatsapp_inbound_message-typing-indicator
+   */
+  async sendTypingIndicatorViaYCloud(inboundMessageId) {
+    const apiKey = process.env.YCLOUD_API_KEY;
+    if (!apiKey || !inboundMessageId) return;
+
+    const response = await fetch(`${YCLOUD_API_BASE}/inboundMessages/${inboundMessageId}/markAsRead`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
+      body: JSON.stringify({ typingIndicator: { type: 'text' } })
+    });
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data?.message || `YCloud rechazó el indicador de escritura (HTTP ${response.status}).`);
     }
   }
 
