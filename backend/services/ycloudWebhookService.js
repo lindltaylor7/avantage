@@ -45,7 +45,8 @@ export class YCloudWebhookService {
   /**
    * Valida la firma "YCloud-Signature: t={timestamp},s={signature}" de cada
    * evento con el secret generado al crear el endpoint (dashboard.ycloud.com
-   * > Developer > Webhooks). Payload firmado: "{timestamp}.{rawBody}.".
+   * > Developer > Webhooks). Payload firmado: "{timestamp}.{rawBody}" (sin
+   * punto final).
    * https://docs.ycloud.com/reference/webhook-integration-guide
    */
   verifySignature(rawBody, signatureHeader) {
@@ -58,7 +59,7 @@ export class YCloudWebhookService {
     const { t: timestamp, s: signature } = parts;
     if (!timestamp || !signature) return false;
 
-    const signedPayload = `${timestamp}.${rawBody.toString('utf8')}.`;
+    const signedPayload = `${timestamp}.${rawBody.toString('utf8')}`;
     const expected = crypto.createHmac('sha256', secret).update(signedPayload).digest('hex');
 
     const expectedBuf = Buffer.from(expected, 'hex');
