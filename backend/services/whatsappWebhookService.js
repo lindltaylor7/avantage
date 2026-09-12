@@ -4,6 +4,16 @@ import { LeadService } from './leadService.js';
 
 const MAX_RECENT_EVENTS = 50;
 
+// En modo coexistencia (número vinculado también a la app de WhatsApp
+// Business del celular vía Embedded Signup), Meta puede reenviar como
+// mensajes entrantes del historial del teléfono al sincronizar — no solo
+// mensajes que el contacto acaba de escribir. Si se procesaran igual como
+// disparador del bot, este le respondería (o le borraría el recordatorio de
+// inactividad ya mandado, nudge_sent_at) a partir de un mensaje de hace rato.
+// Se descarta como disparador cualquier mensaje cuyo "timestamp" real sea más
+// viejo que esta ventana (igual se guarda en el historial de mensajes).
+const COEXISTENCE_SYNC_MAX_AGE_MS = 2 * 60 * 1000;
+
 /**
  * Recepción de eventos del webhook de WhatsApp Business Platform: mensajes
  * entrantes (campo "messages") y actualizaciones de estado de los mensajes
@@ -78,6 +88,10 @@ export class WhatsappWebhookService {
         const senderId = message.from || message.from_user_id;
         if (!senderId) continue;
 
+        const isFreshMessage = message.timestamp
+          ? Date.now() - Number(message.timestamp) * 1000 <= COEXISTENCE_SYNC_MAX_AGE_MS
+          : true;
+
         try {
           const { isNew } = await this.messageService.createFromMessage(value, message);
 
@@ -99,7 +113,7 @@ export class WhatsappWebhookService {
           // Solo ante mensajes de texto, y solo si el mensaje es realmente
           // nuevo (Meta puede reenviar el mismo evento por reintentos; sin
           // este chequeo el bot procesaría el mismo mensaje dos veces).
-          if (isNew && this.botService && message.type === 'text' && message.text?.body) {
+          if (isNew && isFreshMessage && this.botService && message.type === 'text' && message.text?.body) {
             await this.botService.handleIncomingMessage(senderId, message.text.body, message.id);
           }
         } catch (error) {

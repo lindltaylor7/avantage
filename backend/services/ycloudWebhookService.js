@@ -4,6 +4,18 @@ import { LeadService } from './leadService.js';
 
 const MAX_RECENT_EVENTS = 50;
 
+// En modo coexistencia (número vinculado también a la app de WhatsApp
+// Business del celular), YCloud puede reenviar como
+// "whatsapp.inbound_message.received" mensajes viejos del historial del
+// teléfono al sincronizar — no solo mensajes que el contacto acaba de
+// escribir. Si se procesaran igual como disparador del bot, este le
+// respondería (o le borraría el recordatorio de inactividad ya mandado,
+// nudge_sent_at) a partir de un mensaje de hace rato, sin que el contacto
+// haya escrito nada de verdad. Se descarta como disparador cualquier mensaje
+// cuyo "sendTime" real sea más viejo que esta ventana (igual se guarda en el
+// historial de mensajes).
+const COEXISTENCE_SYNC_MAX_AGE_MS = 2 * 60 * 1000;
+
 /**
  * Recepción de eventos del webhook de YCloud: proveedor de WhatsApp Business
  * Platform usado en modo coexistencia cuando el número se vinculó por YCloud
@@ -85,6 +97,9 @@ export class YCloudWebhookService {
     const senderId = message.from;
     if (!senderId) return;
 
+    const sentAt = message.sendTime ? new Date(message.sendTime) : new Date();
+    const isFreshMessage = Date.now() - sentAt.getTime() <= COEXISTENCE_SYNC_MAX_AGE_MS;
+
     try {
       const { isNew } = await this.messageService.recordInboundMessage({
         waId: senderId,
@@ -95,7 +110,7 @@ export class YCloudWebhookService {
         // YCloud no reenvía el "referral" de anuncios de Meta que sí trae el
         // webhook nativo — no hay forma de distinguir el canal de origen aquí.
         channel: 'WhatsApp Directo',
-        receivedAt: message.sendTime ? new Date(message.sendTime) : new Date(),
+        receivedAt: sentAt,
         rawPayload: message
       });
 
@@ -105,7 +120,7 @@ export class YCloudWebhookService {
         source: 'WhatsApp Directo'
       });
 
-      if (isNew && this.botService && message.type === 'text' && message.text?.body) {
+      if (isNew && isFreshMessage && this.botService && message.type === 'text' && message.text?.body) {
         // Se pasa el "id" interno de YCloud (no el "wamid") porque el
         // indicador de leído/escribiendo lo referencia así:
         // POST /whatsapp/inboundMessages/{id}/markAsRead — ver
