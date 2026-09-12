@@ -2519,9 +2519,20 @@ export class WhatsappBotService {
       const silentMs = now - new Date(session.updated_at).getTime();
       if (silentMs < INACTIVITY_NUDGE_MS) continue;
 
+      // Reserva la fila ANTES de enviar (con la condición nudge_sent_at IS
+      // NULL en el propio UPDATE) para que dos barridos que se solapen
+      // (p. ej. si el barrido anterior aún no terminó cuando arranca el
+      // siguiente) no puedan mandar el mismo recordatorio dos veces: solo
+      // uno de los dos logra actualizar la fila, el otro ve 0 filas
+      // afectadas y no manda nada.
+      const claimed = await db('whatsapp_bot_sessions')
+        .where({ id: session.id })
+        .whereNull('nudge_sent_at')
+        .update({ nudge_sent_at: db.fn.now() });
+      if (!claimed) continue;
+
       try {
         await this.send(session.wa_id, '¿Estás ahí? Seguimos esperando tu respuesta 👀');
-        await db('whatsapp_bot_sessions').where({ id: session.id }).update({ nudge_sent_at: db.fn.now() });
         this.logActivity({ type: 'inactivity_nudge', waId: session.wa_id });
       } catch (error) {
         console.error(`❌ [WhatsApp Bot] Error al mandar el recordatorio de inactividad a ${session.wa_id}:`, error);
