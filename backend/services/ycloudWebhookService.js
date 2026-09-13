@@ -140,7 +140,7 @@ export class YCloudWebhookService {
 
     console.log(`📶 [YCloud Webhook] Actualización de estado: mensaje ${message.wamid} → ${message.status}${statusError ? ` (${statusError})` : ''}`);
     try {
-      await this.messageService.updateStatus(message.wamid, message.status, statusError);
+      await this.messageService.updateStatus(message.wamid, message.status, statusError, message.id);
     } catch (error) {
       console.error(`❌ [YCloud Webhook] Error al actualizar el estado del mensaje ${message.wamid}:`, error);
     }

@@ -186,11 +186,17 @@ export class WhatsappMessageService {
       throw new Error(`WhatsApp rechazó el envío: ${reason}`);
     }
 
+    // "message_id" es NOT NULL + unique: si la Graph API alguna vez no trae
+    // "messages[0].id" (respuesta parcial, cambio de formato), sin este
+    // respaldo el insert fallaría o, peor, colisionaría con otro mensaje que
+    // haya caído en el mismo vacío — y el mensaje se perdería del CRM aunque
+    // ya se haya entregado de verdad (ver el mismo respaldo en
+    // sendTextMessageViaYCloud, donde se confirmó el problema).
     const messageId = data.messages?.[0]?.id;
     const [id] = await db('whatsapp_messages').insert({
       wa_id: waId,
       contact_name: null,
-      message_id: messageId,
+      message_id: messageId || `meta-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       message_type: 'text',
       body,
       direction: 'outbound',
@@ -226,10 +232,19 @@ export class WhatsappMessageService {
     // Se guarda el "wamid" (no el "id" interno de YCloud) como message_id
     // para que quede en el mismo formato que usan las actualizaciones de
     // estado del webhook "whatsapp.message.updated" (ver YCloudWebhookService).
+    // "message_id" es NOT NULL + unique en la tabla: si la respuesta de YCloud
+    // no trae "wamid" en la forma esperada (campo movido, respuesta parcial,
+    // etc.), el insert de abajo reventaba y el mensaje se perdía del CRM
+    // aunque WhatsApp ya lo hubiera entregado de verdad — se detectó porque
+    // varios mensajes salientes (recordatorios de inactividad incluidos)
+    // llegaban al contacto pero nunca aparecían en el panel. Con un id de
+    // respaldo generado acá, el mensaje siempre queda guardado (con su
+    // "raw_payload" completo para poder ubicar el campo correcto después).
+    const providerMessageId = data.wamid || data.id || data.whatsappMessage?.wamid || data.whatsappMessage?.id;
     const [id] = await db('whatsapp_messages').insert({
       wa_id: waId,
       contact_name: null,
-      message_id: data.wamid,
+      message_id: providerMessageId || `ycloud-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       message_type: 'text',
       body,
       direction: 'outbound',
@@ -395,9 +410,20 @@ export class WhatsappMessageService {
    * Actualiza el estado (sent/delivered/read/failed) de un mensaje saliente a
    * partir de las actualizaciones de estado recibidas por webhook, guardando
    * el motivo del fallo si WhatsApp lo reporta.
+   *
+   * `fallbackId` cubre el envío por YCloud: la respuesta de
+   * sendTextMessageViaYCloud() no trae el "wamid" (solo su "id" interno de
+   * YCloud), así que el mensaje queda guardado con ese id interno como
+   * message_id. Cuando llega esta actualización de estado — que sí trae
+   * ambos, "wamid" e "id" — si no hay match por wamid se reintenta por el id
+   * interno y, de encontrarlo, se corrige message_id al wamid real para que
+   * quede correlacionado con el resto de actualizaciones futuras.
    */
-  async updateStatus(messageId, status, statusError = null) {
-    await db('whatsapp_messages').where({ message_id: messageId }).update({ status, status_error: statusError });
+  async updateStatus(messageId, status, statusError = null, fallbackId = null) {
+    const updated = await db('whatsapp_messages').where({ message_id: messageId }).update({ status, status_error: statusError });
+    if (!updated && fallbackId) {
+      await db('whatsapp_messages').where({ message_id: fallbackId }).update({ message_id: messageId, status, status_error: statusError });
+    }
   }
 
   async getById(id) {
