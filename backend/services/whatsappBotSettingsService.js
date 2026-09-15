@@ -11,6 +11,25 @@ const MAX_RULES = 40;
 const MIN_MEETING_MINUTES = 5;
 const MAX_MEETING_MINUTES = 180;
 
+// Límites defensivos para los rangos de precio (soles) que Avan cita cuando
+// preguntan por el costo — evitan que un valor mal tipeado en el panel
+// termine citándose tal cual a un lead.
+const MIN_PRICE = 0;
+const MAX_PRICE = 100000;
+const PRICE_FIELDS = [
+  'pricePregradoMin', 'pricePregradoMax',
+  'priceMaestriaMin', 'priceMaestriaMax',
+  'priceDoctoradoMin', 'priceDoctoradoMax'
+];
+const PRICE_FIELD_TO_COLUMN = {
+  pricePregradoMin: 'price_pregrado_min',
+  pricePregradoMax: 'price_pregrado_max',
+  priceMaestriaMin: 'price_maestria_min',
+  priceMaestriaMax: 'price_maestria_max',
+  priceDoctoradoMin: 'price_doctorado_min',
+  priceDoctoradoMax: 'price_doctorado_max'
+};
+
 function clampText(value, max = MAX_TEXT_LEN) {
   const trimmed = String(value ?? '').trim();
   return trimmed.slice(0, max);
@@ -78,9 +97,18 @@ export class WhatsappBotSettingsService {
     shortRepliesEnabled,
     typingIndicatorEnabled,
     messageGapSeconds,
-    salesNotificationPhone
+    salesNotificationPhone,
+    pricePregradoMin,
+    pricePregradoMax,
+    priceMaestriaMin,
+    priceMaestriaMax,
+    priceDoctoradoMin,
+    priceDoctoradoMax
   }) {
     const current = await db('whatsapp_bot_settings').orderBy('id', 'asc').first();
+    const priceInput = {
+      pricePregradoMin, pricePregradoMax, priceMaestriaMin, priceMaestriaMax, priceDoctoradoMin, priceDoctoradoMax
+    };
 
     let gap = current.message_gap_seconds;
     if (messageGapSeconds !== undefined) {
@@ -107,6 +135,28 @@ export class WhatsappBotSettingsService {
       sanitizedSalesPhone = digits ? `${raw.startsWith('+') ? '+' : ''}${digits}` : null;
     }
 
+    // Cada monto se clampea individualmente a [0, MAX_PRICE]; si el par
+    // queda invertido (min > max) tras la edición, se intercambian en vez de
+    // guardar un rango sin sentido.
+    const priceUpdates = {};
+    for (const field of PRICE_FIELDS) {
+      if (priceInput[field] === undefined) continue;
+      const parsed = Number(priceInput[field]);
+      priceUpdates[field] = Number.isFinite(parsed)
+        ? Math.min(Math.max(Math.round(parsed), MIN_PRICE), MAX_PRICE)
+        : current[PRICE_FIELD_TO_COLUMN[field]];
+    }
+    for (const [minField, maxField] of [
+      ['pricePregradoMin', 'pricePregradoMax'],
+      ['priceMaestriaMin', 'priceMaestriaMax'],
+      ['priceDoctoradoMin', 'priceDoctoradoMax']
+    ]) {
+      if (priceUpdates[minField] === undefined && priceUpdates[maxField] === undefined) continue;
+      const min = priceUpdates[minField] ?? current[PRICE_FIELD_TO_COLUMN[minField]];
+      const max = priceUpdates[maxField] ?? current[PRICE_FIELD_TO_COLUMN[maxField]];
+      if (min > max) { priceUpdates[minField] = max; priceUpdates[maxField] = min; }
+    }
+
     await db('whatsapp_bot_settings').where({ id: current.id }).update({
       tone_instructions: toneInstructions ?? current.tone_instructions,
       // Los bloques de personalidad se guardan null cuando quedan vacíos: el
@@ -129,6 +179,12 @@ export class WhatsappBotSettingsService {
       typing_indicator_enabled: typingIndicatorEnabled === undefined ? current.typing_indicator_enabled : !!typingIndicatorEnabled,
       sales_notification_phone: sanitizedSalesPhone === undefined ? current.sales_notification_phone : sanitizedSalesPhone,
       message_gap_seconds: gap,
+      price_pregrado_min: priceUpdates.pricePregradoMin ?? current.price_pregrado_min,
+      price_pregrado_max: priceUpdates.pricePregradoMax ?? current.price_pregrado_max,
+      price_maestria_min: priceUpdates.priceMaestriaMin ?? current.price_maestria_min,
+      price_maestria_max: priceUpdates.priceMaestriaMax ?? current.price_maestria_max,
+      price_doctorado_min: priceUpdates.priceDoctoradoMin ?? current.price_doctorado_min,
+      price_doctorado_max: priceUpdates.priceDoctoradoMax ?? current.price_doctorado_max,
       updated_at: db.fn.now()
     });
     return this.get();

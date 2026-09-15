@@ -1565,14 +1565,18 @@ app.put('/api/whatsapp/bot-settings', requireAuth, requirePermission('leads.view
       faqKnowledge, meetingDurationMinutes,
       defaultAcademicLevel, defaultFieldOfStudy, defaultLocation,
       shortRepliesEnabled, typingIndicatorEnabled, messageGapSeconds,
-      salesNotificationPhone
+      salesNotificationPhone,
+      pricePregradoMin, pricePregradoMax, priceMaestriaMin, priceMaestriaMax,
+      priceDoctoradoMin, priceDoctoradoMax
     } = req.body || {};
     const settings = await whatsappBotSettingsService.update({
       toneInstructions, botIdentity, botObjective, promptRules,
       faqKnowledge, meetingDurationMinutes,
       defaultAcademicLevel, defaultFieldOfStudy, defaultLocation,
       shortRepliesEnabled, typingIndicatorEnabled, messageGapSeconds,
-      salesNotificationPhone
+      salesNotificationPhone,
+      pricePregradoMin, pricePregradoMax, priceMaestriaMin, priceMaestriaMax,
+      priceDoctoradoMin, priceDoctoradoMax
     });
     res.json({ settings });
   } catch (error) {

@@ -231,8 +231,16 @@ function handleSendInput() {
     answers.phone = text;
     isFinished.value = true;
 
-    // Formular el tema sintetizado
-    const synthesizedTopic = `${answers.problem}: Caso de estudio y propuesta en ${answers.location}`;
+    // Formular el tema sintetizado. Se sanea (trim + colapsar "en en"/"en En")
+    // porque `problem`/`location` a veces ya llegan con espacios sueltos o
+    // conteniendo su propia preposición, produciendo artefactos como
+    // "...en En minería" al combinarlos con la preposición fija de abajo.
+    const problem = String(answers.problem || '').trim();
+    const location = String(answers.location || '').trim();
+    const synthesizedTopic = `${problem}: Caso de estudio y propuesta en ${location}`
+      .replace(/\ben\s+en\b/gi, 'en')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
 
     setTimeout(() => {
       chatMessages.value.push({

@@ -3,6 +3,8 @@ import { db } from '../db/connection.js';
 import { WhatsappBotSettingsService } from './whatsappBotSettingsService.js';
 import { buildKnowledgeBlock } from './whatsappBotPromptDefaults.js';
 import { MIN_BOOKING_LEAD_MINUTES } from './googleCalendarService.js';
+import { normalizeUniversity } from './universityNormalizer.js';
+import * as whatsappBotCopy from '../copy/whatsappBotCopy.js';
 
 const MAX_ACTIVITY_LOG = 100;
 
@@ -116,6 +118,15 @@ function stripOpeningGreeting(reply) {
 function isGreetingOnly(text) {
   const clean = String(text || '').replace(/\s+/g, ' ').trim();
   return clean.length > 0 && clean.length <= 40 && GREETING_ONLY_RE.test(clean);
+}
+
+// F4 — Bug real detectado en producción: una plantilla o el propio LLM
+// interpolando un `location`/`field` ya extraído (que a veces empieza con
+// "en...") después de la preposición fija "en" del texto produce artefactos
+// como "...en En minería". Se colapsa esa preposición duplicada antes de
+// mandar cualquier texto que combine estos campos.
+function collapseDuplicatePreposition(text) {
+  return String(text || '').replace(/\ben\s+en\b/gi, 'en').replace(/\s{2,}/g, ' ').trim();
 }
 
 // Seguimiento por inactividad: si el contacto deja a Avan "en visto" 1 hora,
@@ -408,9 +419,6 @@ const SCHEDULE_CHANGE_HINT_RE = /\b(hoy|ma[ñn]ana|pasado\s+ma[ñn]ana|lunes|mar
  * dura la reunión?", que no tiene nada que ver con el costo.
  */
 const PRICE_QUESTION_RE = /(precio|costo|coste|tarifa|cotiza|presupuesto|inversi[oó]n)|cu[aá]nt[oa]s?\s+(?:me\s+)?(?:cuesta|sale|vale|ser[ií]a|es|est[aá])/i;
-
-/** ¿La respuesta que se le mandó habla del costo? */
-const PRICE_ANSWER_RE = /(precio|costo|coste|tarifa|inversi[oó]n|presupuesto|cuesta)/i;
 
 // Formas en que el LLM pregunta por la carrera o la universidad. Se usan para
 // detectar que está preguntando por algo que la persona YA respondió.
@@ -975,6 +983,7 @@ export class WhatsappBotService {
     // Red de seguridad contra la segunda apertura: la conversación ya estaba
     // abierta, así que un "Hola, <nombre>." al inicio de la respuesta sobra.
     if (!isFirstTurn && result.reply) result.reply = stripOpeningGreeting(result.reply);
+    if (result.reply) result.reply = collapseDuplicatePreposition(result.reply);
 
     const extracted = result.extracted || {};
     if (extracted.problem) answers.problem = extracted.problem;
@@ -982,31 +991,31 @@ export class WhatsappBotService {
     if (extracted.level) answers.level = extracted.level;
     if (extracted.field) answers.field = extracted.field;
     if (extracted.university && extracted.university !== answers.university) {
-      // Las siglas peruanas se confunden fácil (el LLM del turno leyó "UNAC"
-      // como "Universidad Nacional del Centro" cuando es la del Callao): se
-      // resuelve el nombre oficial en una llamada aparte, con contexto de
-      // universidades de Perú. Si la sigla es ambigua o no se reconoce, se
-      // guarda lo que escribió el contacto tal cual.
+      // F4 — Las siglas peruanas se confunden fácil (casos reales: "UNAC"
+      // leído como "Universidad Nacional del Centro" en vez de la del Callao,
+      // "Villarreal" confirmado como "San Marcos"). normalizeUniversity()
+      // prioriza un catálogo cerrado y determinístico sobre cualquier
+      // respuesta del LLM — solo confía en el modelo cuando el catálogo no
+      // reconoce nada, y aun así valida su respuesta contra el mismo
+      // catálogo antes de aceptarla como confianza alta.
       const rawUniversity = extracted.university;
-      if (shouldResolveUniversity(rawUniversity)) {
-        try {
-          const resolved = await this.ollamaService.resolveUniversity(rawUniversity);
-          answers.university = (resolved.confident && resolved.name) ? resolved.name : rawUniversity;
-          this.logActivity({
-            type: 'university_resolved',
-            waId,
-            raw: rawUniversity,
-            resolved: answers.university,
-            confident: !!resolved.confident,
-            source: resolved.source
-          });
-        } catch (error) {
-          answers.university = rawUniversity;
-          this.logActivity({ type: 'university_resolve_failed', waId, raw: rawUniversity, error: error.message });
-        }
-      } else {
-        answers.university = rawUniversity;
-      }
+      const resolved = await normalizeUniversity(rawUniversity, {
+        resolveWithLLM: shouldResolveUniversity(rawUniversity)
+          ? (text) => this.ollamaService.resolveUniversity(text)
+          : undefined
+      });
+      // Confianza media/baja: no se reemplaza lo que escribió el contacto por
+      // una corrección sin verificar — es preferible guardar su texto tal
+      // cual que confirmar una universidad equivocada.
+      answers.university = resolved.confidence === 'alta' ? resolved.name : rawUniversity;
+      this.logActivity({
+        type: 'university_resolved',
+        waId,
+        raw: rawUniversity,
+        resolved: resolved.name,
+        confidence: resolved.confidence,
+        source: resolved.source
+      });
     }
     // Se guarda solo la dirección, aunque el LLM devuelva la frase completa.
     const extractedEmail = extractEmail(extracted.email);
@@ -1015,19 +1024,6 @@ export class WhatsappBotService {
     // Lo que dijo sobre cuándo quiere la reunión ("a las 5 hoy") se guarda para
     // no volver a preguntárselo cuando toque elegir día y hora.
     if (result.preferredWhen) answers.__when = result.preferredWhen;
-
-    // Preguntó por el precio y la respuesta no se lo contestó. Pasa sobre todo
-    // en el PRIMER mensaje ("hola, cuánto está la tesis desde cero"), donde la
-    // regla del prompt manda saludar y preguntar por el tema: sin esta marca,
-    // la pregunta con la que el contacto abrió la conversación no se
-    // respondía nunca — y aun así se le ofrecía un descuento "sobre el precio
-    // final". Se salda al proponer la reunión (ver `offerScheduling`).
-    if (PRICE_QUESTION_RE.test(incomingText || '')) {
-      if (PRICE_ANSWER_RE.test(result.reply || '')) delete answers.__pendingPriceAsk;
-      else answers.__pendingPriceAsk = true;
-    } else if (answers.__pendingPriceAsk && PRICE_ANSWER_RE.test(result.reply || '')) {
-      delete answers.__pendingPriceAsk;
-    }
 
     await this.updateSession(waId, { answers: JSON.stringify(answers) });
 
@@ -1039,24 +1035,25 @@ export class WhatsappBotService {
       return;
     }
 
-    // PRECIO: no se insiste. La primera vez la responde el LLM (y se salda al
-    // proponer la reunión). Si el contacto VUELVE a preguntar por el precio, se
-    // deja de recolectar datos: si ya hay tema, se pasa directo a ofrecerle la
-    // reunión con el asesor (que es donde se lo detallan); si todavía no dio ni
-    // el tema, se le pasa a un asesor. Repetir la misma frase de "el asesor te
-    // lo detalla" tres veces es lo que hace que el contacto se vaya.
+    // F1 — Ancla de precio: la primera vez que preguntan por el precio, la
+    // respuesta es SIEMPRE el mismo texto determinístico (rango real por
+    // nivel + "la reunión es gratis") — nunca lo redacta el LLM, porque es
+    // información de negocio, no algo para parafrasear turno a turno. La
+    // segunda vez, un texto DISTINTO + handoff inmediato: no se repite la
+    // misma evasiva dos veces (principio de diseño no negociable).
     if (PRICE_QUESTION_RE.test(incomingText || '')) {
       answers.__priceAsks = (answers.__priceAsks || 0) + 1;
       await this.updateSession(waId, { answers: JSON.stringify(answers) });
+
       if (answers.__priceAsks >= 2) {
         this.logActivity({ type: 'price_insist_shortcut', waId, priceAsks: answers.__priceAsks, hasProblem: !!answers.problem });
-        if (answers.problem) {
-          await this.finalize(waId, answers);
-        } else {
-          await this.handOffToAdvisor(waId, 'El lead insistió con el precio antes de dar su tema: se pasa a un asesor.');
-        }
+        await this.send(waId, whatsappBotCopy.priceInsistedHandoff());
+        await this.handOffToAdvisor(waId, 'El lead insistió con el precio antes de dar su tema: se pasa a un asesor.');
         return;
       }
+
+      await this.send(waId, whatsappBotCopy.priceAnchor(settings, isFirstTurn ? contactName : null));
+      return;
     }
 
     // Para pasar a la reunión hacen falta los tres datos: tema, carrera y
@@ -1166,14 +1163,18 @@ export class WhatsappBotService {
   async finalize(waId, answers) {
     const settings = await this.settingsService.get();
 
-    const problem = answers.problem || 'Tema de tesis por definir';
-    const location = answers.location || settings.default_location || 'Perú';
+    // F4 — trim explícito: `problem`/`location` vienen de extracción del LLM
+    // y llegaban con espacios sueltos o ya conteniendo "en ..." al final, lo
+    // que combinado con la preposición fija de abajo producía artefactos
+    // como "...en En minería" (bug real detectado en producción).
+    const problem = (answers.problem || 'Tema de tesis por definir').trim();
+    const location = (answers.location || settings.default_location || 'Perú').trim();
     const level = answers.level || settings.default_academic_level || 'Pregrado (Bachiller/Título)';
     const field = answers.field || settings.default_field_of_study || 'Ingeniería de Sistemas y Computación';
     const university = answers.university || null;
     const email = answers.email || '';
 
-    const synthesizedTopic = `${problem}: Caso de estudio y propuesta en ${location}`;
+    const synthesizedTopic = collapseDuplicatePreposition(`${problem}: Caso de estudio y propuesta en ${location}`);
     const additionalNotes = `Problema: ${problem} | Ámbito: ${location}` +
       (answers.field ? ` | Carrera: ${answers.field}` : '') +
       (university ? ` | Universidad: ${university}` : '') +
@@ -1330,16 +1331,6 @@ export class WhatsappBotService {
       const session = await this.getSession(waId);
       const answers = typeof session.answers === 'string' ? JSON.parse(session.answers) : (session.answers || {});
       answers.__scheduling = { topic, email: email || null, mode: null, phone: null, discount: 0, when: when || answers.__when || null };
-
-      // Si preguntó por el precio y todavía nadie se lo contestó, se salda
-      // aquí: llegar al menú de modalidad —y a un "descuento sobre el precio
-      // final"— sin una sola palabra sobre el precio es lo que hace que el
-      // contacto sienta que le esquivaron la única pregunta que hizo. Se borra
-      // la marca ANTES de guardar, para no repetir la explicación si vuelve a
-      // pasar por aquí.
-      const owesPriceAnswer = !!answers.__pendingPriceAsk;
-      delete answers.__pendingPriceAsk;
-
       await this.updateSession(waId, { status: 'scheduling_mode', answers: JSON.stringify(answers) });
 
       // Devolverle lo que entendimos antes de saltar a agendar: es el único
@@ -1349,22 +1340,17 @@ export class WhatsappBotService {
       const understood = [answers.field, answers.university].filter(Boolean).join(' en ');
       const opener = understood ? `Perfecto: ${understood}. ` : '';
 
-      const priceNote = owesPriceAnswer
-        ? 'Sobre el costo: depende de tu carrera, tu nivel académico y el alcance de la tesis, así que te lo detalla el asesor. '
-        : '';
       // "Revisar tu tema" da a entender que ya hay uno: si el lead dijo
       // explícitamente que no tiene tema (finalize() sigue adelante igual,
       // con un placeholder, para no perderlo insistiendo), decírselo así se
       // lee como que nadie escuchó "no tengo tema" — de ahí salía el reclamo
       // repetido en plena elección de modalidad.
       const hasTopic = !!answers.problem;
-      const closing = owesPriceAnswer
-        ? 'Justo para eso es la reunión 🙌 ¿Cómo la prefieres?'
-        : (hasTopic
-          ? 'Coordinemos una reunión con nuestro asesor para revisar tu tema 🙌 ¿Cómo prefieres la reunión?'
-          : 'Coordinemos una reunión con nuestro asesor para ayudarte a definir tu tema 🙌 ¿Cómo prefieres la reunión?');
+      const closing = hasTopic
+        ? 'Coordinemos una reunión con nuestro asesor para revisar tu tema 🙌 ¿Cómo prefieres la reunión?'
+        : 'Coordinemos una reunión con nuestro asesor para ayudarte a definir tu tema 🙌 ¿Cómo prefieres la reunión?';
 
-      await this.send(waId, `${opener}${priceNote}${closing}\n\n1. Telefónica\n2. Por Google Meet (con ${MEET_DISCOUNT_PCT}% de descuento sobre el precio final)`);
+      await this.send(waId, `${opener}${closing}\n\n1. Telefónica\n2. Por Google Meet (con ${MEET_DISCOUNT_PCT}% de descuento sobre el precio final)`);
     } catch (error) {
       // Si la conexión de Google Calendar del asesor caducó, avisar al equipo
       // en el panel para que la reconecte — si no, todos los leads que
@@ -1532,7 +1518,7 @@ export class WhatsappBotService {
       if (live.priceAsks >= 2) {
         delete current.__scheduling;
         await this.updateSession(waId, { answers: JSON.stringify(current) });
-        await this.send(waId, 'El precio y las formas de pago te los explica el asesor con calma. Te lo paso ahora para que lo coordinen directamente 🙌');
+        await this.send(waId, whatsappBotCopy.priceInsistedDuringScheduling());
         await this.handOffToAdvisor(waId, 'El lead insistió con el precio durante el agendamiento.');
         return;
       }
