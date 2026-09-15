@@ -90,6 +90,8 @@ export class YCloudWebhookService {
       await this.handleInboundMessage(event.whatsappInboundMessage || {});
     } else if (event?.type === 'whatsapp.message.updated') {
       await this.handleStatusUpdate(event.whatsappMessage || {});
+    } else if (event?.type === 'whatsapp.smb.message.echoes') {
+      await this.handleOutboundEcho(event.whatsappMessage || {});
     }
   }
 
@@ -137,6 +139,39 @@ export class YCloudWebhookService {
       }
     } catch (error) {
       console.error(`❌ [YCloud Webhook] Error al guardar el mensaje ${message.id}:`, error);
+    }
+  }
+
+  /**
+   * Un asesor puede responder directo desde la app de WhatsApp Business
+   * vinculada al número (modo coexistencia) o desde el inbox propio de
+   * YCloud, sin pasar por este panel. YCloud reenvía esos envíos como
+   * "whatsapp.smb.message.echoes" para que no se pierdan del historial — sin
+   * esto, el hilo del panel se veía con saltos respecto a lo que el contacto
+   * realmente recibió. Se guardan igual que un mensaje saliente y se pausa el
+   * bot para ese contacto, igual que si hubiera respondido desde el botón
+   * "Enviar" de este panel: evita que Avan le siga escribiendo encima de un
+   * humano que ya está atendiendo.
+   */
+  async handleOutboundEcho(message) {
+    const waId = message.to;
+    if (!waId) return;
+
+    try {
+      const { isNew } = await this.messageService.recordOutboundEcho({
+        waId,
+        messageId: message.wamid || message.id,
+        messageType: message.type,
+        body: message.text?.body || '',
+        sentAt: message.sendTime ? new Date(message.sendTime) : new Date(),
+        rawPayload: message
+      });
+
+      if (isNew && this.botService) {
+        await this.botService.setBotEnabled(waId, false);
+      }
+    } catch (error) {
+      console.error(`❌ [YCloud Webhook] Error al guardar el eco saliente ${message.id}:`, error);
     }
   }
 

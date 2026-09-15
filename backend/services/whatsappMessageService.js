@@ -123,6 +123,34 @@ export class WhatsappMessageService {
   }
 
   /**
+   * Guarda un mensaje saliente que no se envió desde este panel — p. ej. un
+   * asesor respondiendo directo desde la app de WhatsApp Business vinculada
+   * (modo coexistencia) o desde el inbox propio de YCloud — a partir del eco
+   * que el proveedor reenvía por webhook (ver YCloudWebhookService). Sin
+   * esto, esos mensajes no quedaban guardados y el hilo del panel se veía con
+   * saltos respecto a lo que el contacto realmente recibió.
+   */
+  async recordOutboundEcho({ waId, messageId, messageType, body, sentAt, rawPayload }) {
+    const [id] = await db('whatsapp_messages')
+      .insert({
+        wa_id: waId,
+        contact_name: null,
+        message_id: messageId,
+        message_type: messageType,
+        body,
+        direction: 'outbound',
+        status: 'sent',
+        raw_payload: rawPayload ? JSON.stringify(rawPayload) : null,
+        received_at: sentAt || new Date()
+      })
+      .onConflict('message_id')
+      .ignore();
+
+    if (!id) return { record: await this.getByMessageId(messageId), isNew: false };
+    return { record: await this.getById(id), isNew: true };
+  }
+
+  /**
    * Inserta un mensaje entrante simulado (usado por el simulador de pruebas
    * del panel admin, que no pasa por el webhook real de Meta) para que el
    * motor conversacional del bot pueda reconstruir el hilo con el historial
