@@ -6,29 +6,18 @@
  * exacta importa (precio, handoffs, etc.) — se va completando fase a fase.
  */
 
-function formatSoles(amount) {
-  return `S/${Number(amount).toLocaleString('en-US')}`;
-}
-
-function formatRange(min, max) {
-  return `${formatSoles(min)} - ${formatSoles(max)}`;
-}
-
 /**
- * F1 — Primera vez que un lead pregunta por el precio: rango real por nivel
- * académico + aclara que la reunión con el asesor es gratis. Los montos
- * salen de `whatsapp_bot_settings` (editables desde el panel), nunca los
- * redacta el LLM.
+ * F1 — Primera vez que un lead pregunta por el precio: NO se da un número ni
+ * un rango (decisión del equipo comercial: el precio se reserva y el foco
+ * pasa a conseguir la reunión) — se explica que depende del caso y se pone
+ * el peso en agendar la reunión gratuita con el asesor, que es quien lo
+ * detalla.
  */
-export function priceAnchor(settings, contactName) {
+export function priceAnchor(contactName) {
   const hello = contactName ? `¡Hola, ${contactName}! ` : '';
   return (
-    `${hello}Te paso rangos reales para que tengas una idea 🙌\n\n` +
-    `• Pregrado (bachiller/título): ${formatRange(settings.price_pregrado_min, settings.price_pregrado_max)}\n` +
-    `• Maestría: ${formatRange(settings.price_maestria_min, settings.price_maestria_max)}\n` +
-    `• Doctorado: ${formatRange(settings.price_doctorado_min, settings.price_doctorado_max)}\n\n` +
-    'El costo final depende de tu carrera, tu nivel y el alcance de tu tesis — eso te lo detalla el asesor. ' +
-    'Y esa reunión es *totalmente gratis*, dura 20 min y no te compromete a nada.'
+    `${hello}El costo depende de tu carrera, tu nivel académico y el alcance de tu tesis, así que prefiero que te lo detalle el asesor con el número exacto para tu caso 🙌\n\n` +
+    'Para eso es justo la reunión: es *totalmente gratis*, dura 20 min y no te compromete a nada — ahí te resuelve el precio y todas tus dudas. ¿Coordinamos?'
   );
 }
 

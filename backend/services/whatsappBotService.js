@@ -1052,7 +1052,7 @@ export class WhatsappBotService {
         return;
       }
 
-      await this.send(waId, whatsappBotCopy.priceAnchor(settings, isFirstTurn ? contactName : null));
+      await this.send(waId, whatsappBotCopy.priceAnchor(isFirstTurn ? contactName : null));
       return;
     }
 

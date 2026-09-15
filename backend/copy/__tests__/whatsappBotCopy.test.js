@@ -2,24 +2,20 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { priceAnchor, priceInsistedHandoff, priceInsistedDuringScheduling } from '../whatsappBotCopy.js';
 
-const settings = {
-  price_pregrado_min: 3000, price_pregrado_max: 6000,
-  price_maestria_min: 6000, price_maestria_max: 10000,
-  price_doctorado_min: 10000, price_doctorado_max: 15000
-};
-
-test('priceAnchor incluye los tres rangos reales y aclara que la reunión es gratis', () => {
-  const text = priceAnchor(settings, null);
-  assert.match(text, /S\/3,000 - S\/6,000/);
-  assert.match(text, /S\/6,000 - S\/10,000/);
-  assert.match(text, /S\/10,000 - S\/15,000/);
+// El precio se reserva: priceAnchor nunca debe mencionar un monto o rango en
+// soles, solo aclarar que depende del caso y poner el foco en agendar la
+// reunión (gratuita) con el asesor.
+test('priceAnchor no menciona montos y aclara que la reunión es gratis', () => {
+  const text = priceAnchor(null);
+  assert.doesNotMatch(text, /S\/\d/);
+  assert.doesNotMatch(text, /\d{3,}/);
   assert.match(text, /gratis/i);
   assert.match(text, /20 min/);
 });
 
 test('priceAnchor saluda por nombre solo cuando se pasa un contactName', () => {
-  const withName = priceAnchor(settings, 'Frank');
-  const withoutName = priceAnchor(settings, null);
+  const withName = priceAnchor('Frank');
+  const withoutName = priceAnchor(null);
   assert.match(withName, /Frank/);
   assert.doesNotMatch(withoutName, /¡Hola/);
 });
@@ -29,7 +25,7 @@ test('priceAnchor saluda por nombre solo cuando se pasa un contactName', () => {
 // ancla, 2º handoff en conversación libre, 2º/3º handoff durante el
 // agendamiento) deben ser todos distintos entre sí.
 test('los tres mensajes de precio son todos distintos entre sí (nunca se repite la misma evasiva)', () => {
-  const anchor = priceAnchor(settings, null);
+  const anchor = priceAnchor(null);
   const handoff = priceInsistedHandoff();
   const schedulingHandoff = priceInsistedDuringScheduling();
 
@@ -38,6 +34,6 @@ test('los tres mensajes de precio son todos distintos entre sí (nunca se repite
   assert.notEqual(handoff, schedulingHandoff);
 });
 
-test('priceAnchor es estable: mismos settings producen siempre el mismo texto (no lo redacta el LLM)', () => {
-  assert.equal(priceAnchor(settings, 'Ana'), priceAnchor(settings, 'Ana'));
+test('priceAnchor es estable: mismo contactName produce siempre el mismo texto (no lo redacta el LLM)', () => {
+  assert.equal(priceAnchor('Ana'), priceAnchor('Ana'));
 });
