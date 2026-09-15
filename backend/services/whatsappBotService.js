@@ -1731,7 +1731,27 @@ export class WhatsappBotService {
         BOOKING_ADVISOR_USER_ID, parsed.preferredTime, { limit: SLOTS_TO_OFFER, days: BOOKING_WINDOW_DAYS }
       );
       const nearSlots = orderSlotsForDisplay(ranked);
-      if (nearSlots.length === 0) return false;
+      if (nearSlots.length === 0) {
+        // Se entendió el pedido (un momento del día, sin fecha concreta) pero
+        // no hay ningún bloque que se le acerque: un "no te entendí" acá
+        // sería falso — el problema no es que no se haya entendido, es que no
+        // hay nada que ofrecer. Igual que con `deniedDays`: si ya se le
+        // explicó esto mismo una vez, la segunda vez se pasa a un asesor en
+        // vez de repetir la misma negativa.
+        if ((scheduling.deniedTimes || []).includes(parsed.preferredTime)) {
+          delete answers.__scheduling;
+          await this.updateSession(waId, { answers: JSON.stringify(answers) });
+          await this.handOffToAdvisor(waId, `El lead insiste con un horario sin espacio cercano (${parsed.preferredTime}).`);
+          return true;
+        }
+        scheduling.deniedTimes = [...(scheduling.deniedTimes || []), parsed.preferredTime];
+        await this.updateSession(waId, { answers: JSON.stringify(answers) });
+        await this.send(
+          waId,
+          `Por ahora no tengo ningún horario libre que se acerque a eso 🙏 ¿Te sirve alguna de estas opciones, o prefieres que te contacten después?\n\n${numberedList(fullSlotLabels(scheduling.slots))}`
+        );
+        return true;
+      }
 
       scheduling.slots = nearSlots;
       scheduling.attempts = 0;

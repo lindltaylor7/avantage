@@ -852,9 +852,28 @@ Responde ÚNICAMENTE en JSON válido: {"date": "YYYY-MM-DD" o null, "preferredTi
       }
     }
 
-    // Sin IA solo se llega hasta aquí con horas escritas de forma inequívoca,
-    // pero se calcula igual para que el contrato de la función sea el mismo
-    // que el del camino con LLM.
+    // Sin hora exacta, un MOMENTO del día también cuenta (igual que en el
+    // prompt del LLM de arriba) — sobre todo importa acá porque esta rama
+    // solo corre cuando la llamada al LLM falló o no hay API key: sin esto,
+    // "¿no habría otro día en las tardes?" no reconocía "tardes" como nada y
+    // el bot repetía la lista de horarios de la mañana con un "no te entendí"
+    // que sí había entendido, solo no lo estaba buscando. "mañana" como
+    // momento del día (a secas, sin "en la"/"por la") se deja sin resolver a
+    // propósito: ya es ambigua con "mañana" como DÍA (ver hasExplicitDayMention)
+    // y aquí, sin LLM, no hay forma de distinguirlas.
+    if (preferredTime === null) {
+      if (/\ben\s+las?\s+tardes?\b|\bpor\s+las?\s+tardes?\b/.test(normalized)) {
+        preferredTime = '15:00';
+      } else if (/\ben\s+la\s+noche\b|\bpor\s+la\s+noche\b|\bde\s+noche\b/.test(normalized)) {
+        preferredTime = '20:00';
+      } else if (/\btemprano\b|\ben\s+la\s+ma[ñn]ana\b|\bpor\s+la\s+ma[ñn]ana\b/.test(normalized)) {
+        preferredTime = '09:00';
+      }
+    }
+
+    // Sin IA solo se llega hasta aquí con horas escritas de forma inequívoca
+    // o un momento del día reconocido arriba, pero se calcula igual para que
+    // el contrato de la función sea el mismo que el del camino con LLM.
     const timePrecision = preferredTime ? (hasExplicitClockMention(text) ? 'exact' : 'vague') : null;
 
     if (/\bhoy\b/.test(normalized)) {
