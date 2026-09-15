@@ -296,32 +296,57 @@
 
     <section v-else class="whatsapp-inbox">
       <aside class="contacts-panel">
-        <p class="contacts-count">{{ conversations.length }} {{ conversations.length === 1 ? 'conversación' : 'conversaciones' }}</p>
-        <button
-          v-for="c in conversations"
-          :key="c.wa_id"
-          class="contact-item"
-          :class="{ 'is-active': c.wa_id === selectedWaId }"
-          @click="selectConversation(c.wa_id)"
-        >
-          <span class="contact-avatar" aria-hidden="true">{{ initialsOf(c.contact_name || c.wa_id) }}</span>
-          <span class="contact-info">
-            <span class="contact-name">{{ c.contact_name || c.wa_id }}</span>
-            <span class="contact-preview">{{ c.direction === 'outbound' ? 'Tú: ' : '' }}{{ truncate(c.body, 42) }}</span>
-          </span>
-          <span class="contact-side">
-            <span class="contact-time">{{ formatShortTime(c.received_at) }}</span>
-            <span class="channel-badge" :class="channelBadgeClass(c.origin_channel)" :title="c.origin_channel">
-              {{ channelIcon(c.origin_channel) }}
+        <div class="contacts-panel-head">
+          <p class="contacts-count">
+            {{ filteredConversations.length }}<template v-if="contactSearch"> de {{ conversations.length }}</template>
+            {{ filteredConversations.length === 1 ? 'conversación' : 'conversaciones' }}
+          </p>
+          <div class="contact-search">
+            <span class="contact-search-icon" aria-hidden="true">🔍</span>
+            <input
+              v-model="contactSearch"
+              type="text"
+              class="contact-search-input"
+              placeholder="Buscar por nombre o número..."
+            />
+          </div>
+        </div>
+
+        <div class="contacts-list">
+          <p v-if="filteredConversations.length === 0" class="contacts-empty">
+            Sin resultados para "{{ contactSearch }}".
+          </p>
+
+          <button
+            v-for="c in filteredConversations"
+            :key="c.wa_id"
+            class="contact-item"
+            :class="{ 'is-active': c.wa_id === selectedWaId }"
+            @click="selectConversation(c.wa_id)"
+          >
+            <span class="contact-avatar" :style="{ background: avatarColor(c.wa_id) }" aria-hidden="true">
+              {{ initialsOf(c.contact_name || c.wa_id) }}
             </span>
-          </span>
-        </button>
+            <span class="contact-info">
+              <span class="contact-name">{{ c.contact_name || c.wa_id }}</span>
+              <span class="contact-preview">{{ c.direction === 'outbound' ? 'Tú: ' : '' }}{{ truncate(c.body, 42) }}</span>
+            </span>
+            <span class="contact-side">
+              <span class="contact-time">{{ formatShortTime(c.received_at) }}</span>
+              <span class="channel-badge" :class="channelBadgeClass(c.origin_channel)" :title="c.origin_channel">
+                {{ channelIcon(c.origin_channel) }}
+              </span>
+            </span>
+          </button>
+        </div>
       </aside>
 
       <div class="thread-panel">
         <template v-if="selectedWaId">
           <header class="thread-header">
-            <span class="thread-avatar" aria-hidden="true">{{ initialsOf(selectedContactName) }}</span>
+            <span class="thread-avatar" :style="{ background: avatarColor(selectedWaId) }" aria-hidden="true">
+              {{ initialsOf(selectedContactName) }}
+            </span>
             <div class="thread-identity">
               <strong class="thread-name">{{ selectedContactName }}</strong>
               <span class="thread-sub">
@@ -331,16 +356,18 @@
                 </span>
               </span>
             </div>
+            <span v-if="botSession" class="bot-status" :class="{ 'is-paused': !botSession.bot_enabled }" :title="botStatusHint">
+              {{ botStatusIcon }} {{ botStatusLabel }}
+            </span>
             <div class="thread-actions">
-              <span v-if="botSession" class="bot-status" :title="botStatusHint">
-                {{ botStatusIcon }} {{ botStatusLabel }}
-              </span>
-              <button type="button" class="btn-thread-action" @click="toggleBot">
-                {{ botSession?.bot_enabled ? 'Pausar bot' : 'Activar bot' }}
-              </button>
-              <button type="button" class="btn-thread-action" @click="resetBotSession" title="Borra el estado del bot para este contacto: su próximo mensaje se procesará como si fuera nuevo.">
-                Reiniciar
-              </button>
+              <div class="thread-actions-group">
+                <button type="button" class="btn-thread-action" @click="toggleBot">
+                  {{ botSession?.bot_enabled ? '⏸️ Pausar bot' : '▶️ Activar bot' }}
+                </button>
+                <button type="button" class="btn-thread-action" @click="resetBotSession" title="Borra el estado del bot para este contacto: su próximo mensaje se procesará como si fuera nuevo.">
+                  ↺ Reiniciar
+                </button>
+              </div>
               <button type="button" class="btn-thread-action btn-thread-danger" @click="openDeleteConfirm" title="Elimina esta conversación por completo. Queda registrado quién la eliminó.">
                 🗑️ Eliminar
               </button>
@@ -416,8 +443,9 @@
               rows="1"
               @keydown.enter.exact.prevent="sendReply"
             ></textarea>
-            <button type="submit" class="btn-send" :disabled="isSending || !replyText.trim()">
-              {{ isSending ? 'Enviando…' : 'Enviar' }}
+            <button type="submit" class="btn-send" :disabled="isSending || !replyText.trim()" title="Enviar (Enter)">
+              <span v-if="isSending">Enviando…</span>
+              <span v-else>Enviar <span aria-hidden="true">➤</span></span>
             </button>
           </form>
         </template>
@@ -454,6 +482,7 @@ import { nextTick, onMounted, onUnmounted, computed, ref } from 'vue';
 import { apiFetch } from '../apiClient.js';
 
 const conversations = ref([]);
+const contactSearch = ref('');
 const stats = ref({ total: 0, contacts: 0 });
 const rawEvents = ref([]);
 const isLoading = ref(false);
@@ -528,6 +557,25 @@ const selectedContactName = computed(() => {
   const conv = conversations.value.find((c) => c.wa_id === selectedWaId.value);
   return conv?.contact_name || selectedWaId.value;
 });
+
+const filteredConversations = computed(() => {
+  const q = contactSearch.value.trim().toLowerCase();
+  if (!q) return conversations.value;
+  return conversations.value.filter((c) => (c.contact_name || '').toLowerCase().includes(q) || c.wa_id.includes(q));
+});
+
+/**
+ * Color de avatar determinista por contacto (mismo wa_id → mismo color
+ * siempre), tomado solo de los acentos ya definidos en la identidad de marca
+ * — así la bandeja gana variedad visual sin salirse de la paleta "vivero".
+ */
+const AVATAR_COLORS = ['var(--primary)', 'var(--cta)', 'var(--accent-emerald)', 'var(--accent-pink)', 'var(--accent-cyan)', 'var(--accent-amber)'];
+function avatarColor(id) {
+  const str = String(id || '');
+  let hash = 0;
+  for (let i = 0; i < str.length; i += 1) hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
+  return AVATAR_COLORS[hash % AVATAR_COLORS.length];
+}
 
 const threadOriginChannel = computed(() => {
   const conv = conversations.value.find((c) => c.wa_id === selectedWaId.value);
@@ -1263,20 +1311,33 @@ onUnmounted(() => {
    quede con metros de aire entre la cabecera y el compositor. */
 .whatsapp-inbox {
   display: flex;
-  gap: 1rem;
+  gap: 1.1rem;
   height: clamp(560px, 76vh, 860px);
 }
 
+/* La bandeja de contactos es una sola tarjeta elevada (cabecera fija +
+   lista con su propio scroll), no filas sueltas flotando sobre el fondo de
+   la página — el mismo lenguaje visual que .thread-panel, para que ambas
+   mitades se lean como un único panel de aplicación. */
 .contacts-panel {
   width: 320px;
   flex-shrink: 0;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  padding-right: 0.3rem;
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.contacts-panel-head {
+  flex-shrink: 0;
+  padding: 0.9rem 0.95rem 0.7rem;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
 }
 
 .contacts-count {
@@ -1285,37 +1346,90 @@ onUnmounted(() => {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-muted);
-  padding: 0.1rem 0.3rem 0.45rem;
+}
+
+.contact-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.contact-search-icon {
+  position: absolute;
+  left: 0.7rem;
+  font-size: 0.72rem;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.contact-search-input {
+  width: 100%;
+  background: var(--surface-1);
+  border: 1px solid var(--border-color);
+  border-radius: 9999px;
+  padding: 0.45rem 0.8rem 0.45rem 1.95rem;
+  font-size: 0.8rem;
+  font-family: var(--font-body);
+  color: var(--text-main);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.contact-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.contact-search-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  background: var(--bg-card-solid);
+}
+
+.contacts-list {
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.contacts-empty {
+  padding: 2rem 1rem;
+  text-align: center;
+  font-size: 0.82rem;
+  color: var(--text-muted);
 }
 
 .contact-item {
+  width: 100%;
   display: flex;
   align-items: center;
   gap: 0.7rem;
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: 0.7rem 0.8rem;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border-color);
+  padding: 0.75rem 0.95rem;
   cursor: pointer;
   text-align: left;
   color: var(--text-main);
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: background 0.15s ease;
+}
+
+.contact-item:last-child {
+  border-bottom: none;
 }
 
 .contact-item:hover {
-  background: var(--bg-card-hover);
+  background: var(--surface-1);
 }
 
 .contact-item:focus-visible {
   outline: 2px solid var(--primary);
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
 
 /* El contacto abierto se marca con una barra de tinta a la izquierda en vez de
    teñir toda la fila: se distingue de un vistazo sin competir con el hilo. */
 .contact-item.is-active {
-  border-color: var(--border-strong);
-  background: var(--bg-card-hover);
+  background: var(--surface-2);
   box-shadow: inset 3px 0 0 var(--primary);
 }
 
@@ -1326,17 +1440,11 @@ onUnmounted(() => {
   display: grid;
   place-items: center;
   border-radius: 50%;
-  background: var(--surface-2);
-  color: var(--text-sub);
+  color: #ffffff;
   font-family: var(--font-mono);
   font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.02em;
-}
-
-.contact-item.is-active .contact-avatar {
-  background: var(--primary);
-  color: #ffffff;
 }
 
 .contact-info {
@@ -1489,15 +1597,16 @@ onUnmounted(() => {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: 14px;
+  box-shadow: var(--shadow-sm);
   overflow: hidden;
 }
 
 .thread-header {
-  padding: 0.75rem 1rem;
+  padding: 0.85rem 1.15rem;
   border-bottom: 1px solid var(--border-color);
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.85rem;
   flex-wrap: wrap;
   background: var(--bg-card);
 }
@@ -1540,8 +1649,31 @@ onUnmounted(() => {
 .thread-actions {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.5rem;
   flex-wrap: wrap;
+}
+
+/* Agrupa los controles del bot en una sola píldora (mismo lenguaje que un
+   toolbar de inbox profesional) y deja "Eliminar" suelto y con más peso
+   visual, separado — es la única acción destructiva del encabezado. */
+.thread-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+  background: var(--surface-1);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  padding: 0.2rem;
+}
+
+.thread-actions-group .btn-thread-action {
+  border: none;
+  border-radius: 999px;
+}
+
+.thread-actions-group .btn-thread-action:hover {
+  background: var(--surface-3);
+  border-color: transparent;
 }
 
 .bot-status {
@@ -1555,12 +1687,18 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
+.bot-status.is-paused {
+  color: var(--text-sub);
+  background: var(--surface-2);
+  border-color: var(--border-color);
+}
+
 .btn-thread-action {
   background: transparent;
   color: var(--text-sub);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  padding: 0.35rem 0.7rem;
+  padding: 0.4rem 0.75rem;
   font-family: var(--font-body);
   font-size: 0.75rem;
   font-weight: 600;
@@ -1757,8 +1895,8 @@ onUnmounted(() => {
 .reply-box {
   display: flex;
   align-items: flex-end;
-  gap: 0.6rem;
-  padding: 0.75rem;
+  gap: 0.65rem;
+  padding: 0.85rem 1rem;
   border-top: 1px solid var(--border-color);
   background: var(--bg-card);
 }
@@ -1766,16 +1904,17 @@ onUnmounted(() => {
 .reply-input {
   flex: 1;
   resize: none;
-  min-height: 42px;
+  min-height: 44px;
   max-height: 140px;
   background: var(--surface-1);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: 0.65rem 0.85rem;
+  border-radius: 22px;
+  padding: 0.7rem 1.1rem;
   color: var(--text-main);
   font-family: var(--font-body);
   font-size: 0.855rem;
   line-height: 1.5;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
 .reply-input:focus {
@@ -1785,21 +1924,25 @@ onUnmounted(() => {
 }
 
 .btn-send {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
   background: var(--primary);
   color: #ffffff;
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: 22px;
   padding: 0 1.3rem;
-  min-height: 42px;
+  min-height: 44px;
   font-weight: 600;
   font-family: var(--font-heading);
   font-size: 0.85rem;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, transform 0.1s ease;
 }
 
 .btn-send:hover:not(:disabled) {
   background: var(--primary-hover);
+  transform: translateY(-1px);
 }
 
 .btn-send:disabled {
