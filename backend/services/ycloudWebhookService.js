@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { WhatsappMessageService } from './whatsappMessageService.js';
+import { WhatsappMessageService, detectWhatsappChannel } from './whatsappMessageService.js';
 import { LeadService } from './leadService.js';
 
 const MAX_RECENT_EVENTS = 50;
@@ -101,15 +101,23 @@ export class YCloudWebhookService {
     const isFreshMessage = Date.now() - sentAt.getTime() <= COEXISTENCE_SYNC_MAX_AGE_MS;
 
     try {
+      // Cuando el contacto escribió tras tocar un anuncio "Click to WhatsApp",
+      // YCloud sí reenvía el "referral" (igual que el webhook nativo de Meta),
+      // solo que dentro del mensaje entrante y no documentado en el ejemplo
+      // genérico de su guía — se confirmó en la doc específica de "Inbound
+      // Text message triggered by click to WhatsApp Ads". Si no vino (mensaje
+      // orgánico), detectWhatsappChannel() cae a "WhatsApp Directo" igual que
+      // con Meta.
+      const channel = detectWhatsappChannel(message.referral);
+
       const { isNew } = await this.messageService.recordInboundMessage({
         waId: senderId,
         contactName: message.customerProfile?.name,
         messageId: message.wamid,
         messageType: message.type,
         body: message.text?.body || '',
-        // YCloud no reenvía el "referral" de anuncios de Meta que sí trae el
-        // webhook nativo — no hay forma de distinguir el canal de origen aquí.
-        channel: 'WhatsApp Directo',
+        channel,
+        referral: message.referral || null,
         receivedAt: sentAt,
         rawPayload: message
       });
@@ -117,7 +125,7 @@ export class YCloudWebhookService {
       await this.leadService.findOrCreateFromWhatsApp({
         phone: senderId,
         fullName: message.customerProfile?.name,
-        source: 'WhatsApp Directo'
+        source: channel
       });
 
       if (isNew && isFreshMessage && this.botService && message.type === 'text' && message.text?.body) {

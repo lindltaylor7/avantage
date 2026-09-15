@@ -101,7 +101,7 @@ export class WhatsappMessageService {
    * el formato nativo de webhook de la Graph API (p. ej. YCloud, ver
    * YCloudWebhookService). Mismo contrato de retorno que createFromMessage().
    */
-  async recordInboundMessage({ waId, contactName, messageId, messageType, body, channel, receivedAt, rawPayload }) {
+  async recordInboundMessage({ waId, contactName, messageId, messageType, body, channel, referral, receivedAt, rawPayload }) {
     const [id] = await db('whatsapp_messages')
       .insert({
         wa_id: waId,
@@ -111,6 +111,7 @@ export class WhatsappMessageService {
         body,
         direction: 'inbound',
         channel,
+        referral: referral ? JSON.stringify(referral) : null,
         raw_payload: rawPayload ? JSON.stringify(rawPayload) : null,
         received_at: receivedAt || new Date()
       })
