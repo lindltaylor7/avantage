@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractLeadFormFields } from '../whatsappBotService.js';
+import { extractLeadFormFields, detectRedundantAsk } from '../whatsappBotService.js';
 
 // Mensaje real (anonimizado) de un lead de Meta Ads con formulario propio:
 // llega como líneas "¿Pregunta?: Respuesta" que el LLM de conversación a
@@ -37,4 +37,32 @@ test('extractLeadFormFields devuelve objeto vacío para un mensaje conversaciona
 test('extractLeadFormFields no confunde una frase con dos puntos con un campo del formulario', () => {
   const fields = extractLeadFormFields('Te cuento: no tengo tema todavía');
   assert.deepEqual(fields, {});
+});
+
+// Caso real: el formulario de Meta Ads responde la pregunta de avance con
+// "Todavía no empiezo" — la misma señal que el prompt del LLM ya trata como
+// "sin tema, empieza de cero" cuando la persona lo escribe a mano en el chat.
+test('extractLeadFormFields lee "sin tema" de la pregunta de avance del formulario', () => {
+  const fields = extractLeadFormFields(META_AD_FORM_MESSAGE);
+  assert.equal(fields.problem, 'Sin tema definido (desde cero)');
+});
+
+test('extractLeadFormFields no marca "sin tema" cuando la persona SÍ tiene avance', () => {
+  const fields = extractLeadFormFields('¿En qué punto estás?: Ya tengo avance, voy por el capítulo 2');
+  assert.equal(fields.problem, undefined);
+});
+
+// F1/F4 — Red de seguridad: si el tema ya se dio por resuelto (sea porque la
+// persona lo dijo o porque el formulario ya lo insinuó), un mensaje del LLM
+// que vuelve a preguntar por el tema se detecta como redundante — salvo en
+// el primer turno, cuyo saludo de apertura pregunta por el tema siempre, por
+// diseño, y no debe perderse.
+test('detectRedundantAsk detecta que se repite la pregunta por el tema (turnos después del primero)', () => {
+  const answers = { problem: 'Sin tema definido (desde cero)' };
+  assert.equal(detectRedundantAsk('¿Ya tienes un tema en mente para tu tesis?', answers, false), 'problem');
+});
+
+test('detectRedundantAsk NO marca redundante la pregunta por el tema en el primer turno', () => {
+  const answers = { problem: 'Sin tema definido (desde cero)' };
+  assert.equal(detectRedundantAsk('¡Hola, Mario! ¿Ya tienes un tema en mente para tu tesis?', answers, true), null);
 });

@@ -251,6 +251,14 @@ function mapAcademicLevel(value) {
 const FORM_LEVEL_LABEL_RE = /sacando|nivel\s+acad[eé]mico|grado\s+acad[eé]mico/i;
 const FORM_UNIVERSITY_LABEL_RE = /universidad/i;
 const FORM_FIELD_LABEL_RE = /carrera/i;
+// "¿En qué punto estás (con tu tesis)?" — pregunta de avance del formulario.
+const FORM_PROGRESS_LABEL_RE = /en\s+qu[eé]\s+punto|qu[eé]\s+tan\s+avanzado|avance\s+(?:de\s+)?(?:tu\s+)?tesis|estado\s+de\s+(?:tu\s+)?tesis/i;
+// Mismas frases que el prompt del LLM ya trata como "no tiene tema, empieza
+// de cero" cuando la persona las escribe directamente en el chat (ver
+// ollamaService.js): si el formulario la responde así de entrada, es la
+// misma señal y evita la pregunta redundante "¿ya tienes un tema en mente?"
+// seguida, turnos después, de la misma respuesta escrita a mano.
+const FORM_NO_PROGRESS_VALUE_RE = /todav[ií]a\s*no\s*empiez\w*|a[uú]n\s*no\s*empiez\w*|no\s*he\s*empezado|sin\s*empezar|desde\s*cero|sin\s*avance|no\s*tengo\s*avance/i;
 
 export function extractLeadFormFields(text) {
   const fields = {};
@@ -262,6 +270,8 @@ export function extractLeadFormFields(text) {
       fields.university = value;
     } else if (!fields.field && FORM_FIELD_LABEL_RE.test(label)) {
       fields.field = value;
+    } else if (!fields.problem && FORM_PROGRESS_LABEL_RE.test(label) && FORM_NO_PROGRESS_VALUE_RE.test(value)) {
+      fields.problem = 'Sin tema definido (desde cero)';
     }
   }
   return fields;
@@ -472,8 +482,11 @@ const SCHEDULE_CHANGE_HINT_RE = /\b(hoy|ma[ñn]ana|pasado\s+ma[ñn]ana|lunes|mar
  */
 const PRICE_QUESTION_RE = /(precio|costo|coste|tarifa|cotiza|presupuesto|inversi[oó]n)|cu[aá]nt[oa]s?\s+(?:me\s+)?(?:cuesta|sale|vale|ser[ií]a|es|est[aá])/i;
 
-// Formas en que el LLM pregunta por la carrera o la universidad. Se usan para
-// detectar que está preguntando por algo que la persona YA respondió.
+// Formas en que el LLM pregunta por el tema, la carrera o la universidad. Se
+// usan para detectar que está preguntando por algo que la persona YA
+// respondió (o que ya vino en el formulario de un anuncio, ver
+// extractLeadFormFields).
+const ASKS_PROBLEM_RE = /tema\s+en\s+mente|qu[eé]\s+tema|alg[uú]n\s+tema|tu\s+tema\s+de\s+tesis/i;
 const ASKS_FIELD_RE = /(?:de|en)\s+qu[eé]\s+carrera|qu[eé]\s+carrera\s+(?:estudias|est[aá]s|cursas|llevas|sigues)|cu[aá]l\s+es\s+tu\s+carrera/i;
 const ASKS_UNIVERSITY_RE = /(?:de|en)\s+qu[eé]\s+universidad|qu[eé]\s+universidad\s+(?:estudias|est[aá]s|cursas)|cu[aá]l\s+es\s+tu\s+universidad|d[oó]nde\s+estudias/i;
 
@@ -483,11 +496,19 @@ const ASKS_UNIVERSITY_RE = /(?:de|en)\s+qu[eé]\s+universidad|qu[eé]\s+universi
  * Pasa porque el bloque "lo que te falta preguntar" del prompt se arma con lo
  * que se sabía ANTES de leer el mensaje nuevo: si ese mensaje traía el dato
  * ("sobre arquitectura de la continental"), el modelo a veces lo extrae
- * correctamente pero igual hace la pregunta que tenía pendiente. Devuelve
- * 'field' | 'university' | null.
+ * correctamente pero igual hace la pregunta que tenía pendiente. También pasa
+ * con leads de un formulario de Meta Ads cuya respuesta de avance ya implica
+ * "sin tema" (extractLeadFormFields) pero el mensaje de apertura, que SIEMPRE
+ * pregunta por el tema por diseño, ya salió: el turno siguiente no debe
+ * repetir la misma pregunta. La del tema NO aplica en el primer turno: ese
+ * mensaje de apertura pregunta por el tema siempre, por diseño (es el que
+ * decide si el contacto responde), aunque el formulario ya haya insinuado
+ * que no tiene uno — reemplazarlo perdería el saludo obligatorio de
+ * apertura. Devuelve 'problem' | 'field' | 'university' | null.
  */
-function detectRedundantAsk(reply, answers) {
+export function detectRedundantAsk(reply, answers, isFirstTurn = false) {
   const text = String(reply || '');
+  if (!isFirstTurn && answers.problem && ASKS_PROBLEM_RE.test(text)) return 'problem';
   if (answers.field && ASKS_FIELD_RE.test(text)) return 'field';
   if (answers.university && ASKS_UNIVERSITY_RE.test(text)) return 'university';
   return null;
@@ -1047,6 +1068,10 @@ export class WhatsappBotService {
     if (formFields.level) extracted.level = formFields.level;
     if (formFields.university) extracted.university = formFields.university;
     if (formFields.field) extracted.field = formFields.field;
+    // "problem" es una señal más débil (interpretación de "sin avance", no un
+    // dato literal como la universidad): solo se usa si el LLM no encontró un
+    // tema real en el mismo mensaje, para no pisar un tema que sí dio.
+    if (formFields.problem && !extracted.problem) extracted.problem = formFields.problem;
 
     if (extracted.problem) answers.problem = extracted.problem;
     if (extracted.location) answers.location = extracted.location;
@@ -1124,7 +1149,7 @@ export class WhatsappBotService {
     // Red de seguridad contra la pregunta repetida: si el LLM pidió un dato que
     // la conversación ya tiene, se cambia su respuesta por la del dato que sí
     // falta (o se pasa a agendar, si ya no falta ninguno).
-    const redundantAsk = detectRedundantAsk(result.reply, answers);
+    const redundantAsk = detectRedundantAsk(result.reply, answers, isFirstTurn);
     if (redundantAsk) {
       // Carrera y universidad se piden juntas: son un solo turno.
       const nextQuestion = !answers.problem
