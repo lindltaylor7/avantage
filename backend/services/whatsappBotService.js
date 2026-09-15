@@ -215,6 +215,58 @@ function looksLikeEmail(value) {
   return !!extractEmail(value);
 }
 
+/**
+ * Los leads que llegan de un anuncio de Meta con formulario ("Click to
+ * WhatsApp" + preguntas propias) abren la conversación con un mensaje
+ * armado por Meta, no escrito por la persona: varias líneas "¿Pregunta?:
+ * Respuesta" (nivel académico, universidad, nombre, teléfono...) en vez de
+ * una frase natural. El LLM de conversación, ocupado en redactar el saludo
+ * de apertura, a veces no extrae estos datos aunque estén ahí explícitos —
+ * visto en producción con leads reales cuya universidad y nivel quedaban
+ * sin guardar. Se parsean acá, determinísticamente, línea por línea, como
+ * red de seguridad: sea cual sea lo que devuelva el LLM, si el patrón
+ * matchea, estos datos SIEMPRE quedan guardados.
+ */
+function parseFormAnswerLines(text) {
+  return String(text || '')
+    .split(/\n+/)
+    .map((line) => line.match(/^[^\S\n]*[¿"'“]*\s*(.+?)\s*[?"'”]*\s*:\s*(.+)$/))
+    .filter(Boolean)
+    .map((match) => ({ label: match[1].trim(), value: match[2].trim() }))
+    .filter((pair) => pair.label && pair.value);
+}
+
+/** "Título profesional" / "Maestría" / etc. -> uno de los tres niveles canónicos, o null. */
+function mapAcademicLevel(value) {
+  const v = normalize(String(value || ''));
+  if (/doctorado/.test(v)) return 'Posgrado (Doctorado)';
+  if (/maestria|magister|master/.test(v)) return 'Posgrado (Maestría)';
+  if (/bachiller|titulo|pregrado|licenciatura/.test(v)) return 'Pregrado (Bachiller/Título)';
+  return null;
+}
+
+// Palabras clave por campo, no el texto exacto de la pregunta: el equipo de
+// Ads cambia la redacción de las preguntas del formulario sin avisar al
+// código.
+const FORM_LEVEL_LABEL_RE = /sacando|nivel\s+acad[eé]mico|grado\s+acad[eé]mico/i;
+const FORM_UNIVERSITY_LABEL_RE = /universidad/i;
+const FORM_FIELD_LABEL_RE = /carrera/i;
+
+export function extractLeadFormFields(text) {
+  const fields = {};
+  for (const { label, value } of parseFormAnswerLines(text)) {
+    if (!fields.level && FORM_LEVEL_LABEL_RE.test(label)) {
+      const level = mapAcademicLevel(value);
+      if (level) fields.level = level;
+    } else if (!fields.university && FORM_UNIVERSITY_LABEL_RE.test(label)) {
+      fields.university = value;
+    } else if (!fields.field && FORM_FIELD_LABEL_RE.test(label)) {
+      fields.field = value;
+    }
+  }
+  return fields;
+}
+
 /** Interpreta la elección de modalidad de llamada: 'phone' | 'meet' | null. */
 function parseCallMode(text) {
   const n = normalize(text || '');
@@ -986,6 +1038,16 @@ export class WhatsappBotService {
     if (result.reply) result.reply = collapseDuplicatePreposition(result.reply);
 
     const extracted = result.extracted || {};
+
+    // Red de seguridad: si este mensaje trae el patrón de un formulario de
+    // Meta Ads ("¿Pregunta?: Respuesta" línea a línea), esos datos priman
+    // sobre lo que el LLM haya extraído — es texto literal del formulario,
+    // no algo sujeto a interpretación, y el LLM a veces lo pasa por alto.
+    const formFields = extractLeadFormFields(incomingText);
+    if (formFields.level) extracted.level = formFields.level;
+    if (formFields.university) extracted.university = formFields.university;
+    if (formFields.field) extracted.field = formFields.field;
+
     if (extracted.problem) answers.problem = extracted.problem;
     if (extracted.location) answers.location = extracted.location;
     if (extracted.level) answers.level = extracted.level;
