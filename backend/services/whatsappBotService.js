@@ -1244,7 +1244,17 @@ export class WhatsappBotService {
    */
   async handOffToAdvisor(waId, reason) {
     this.logActivity({ type: 'scheduling_offer_skipped', waId, reason });
-    await this.updateSession(waId, { status: 'completed' });
+
+    // Se marca la sesión como transferida (no solo "completed", que también
+    // se usa para una reunión agendada con éxito) para que el panel pueda
+    // distinguir "hay que actuar ya" de "ya quedó resuelto" — ver
+    // notifySalesperson() y GET /api/whatsapp/conversations.
+    const session = await this.getSession(waId);
+    const answers = typeof session?.answers === 'string' ? JSON.parse(session.answers) : (session?.answers || {});
+    answers.__handedOffAt = new Date().toISOString();
+    answers.__handedOffReason = reason || null;
+
+    await this.updateSession(waId, { status: 'completed', answers: JSON.stringify(answers) });
     await this.moveFunnelStage(waId, 'transferido_closer');
     // "El asesor se pondrá en contacto contigo pronto" sonaba a una llamada
     // agendada a futuro, no a "dejo de responderte yo, ahora te escribe una
@@ -1253,6 +1263,50 @@ export class WhatsappBotService {
     // con alguien" justo después de este mensaje, sin darse cuenta de que ya
     // se le había transferido.
     await this.send(waId, 'Te paso con un asesor para que te ayude directamente 🙌 En breve te escribe por aquí para coordinar todo.');
+    await this.notifySalesperson(waId, reason);
+  }
+
+  /**
+   * Avisa al equipo que un lead se transfirió a seguimiento manual: siempre
+   * queda una notificación en el panel (la campana del navbar, confiable sin
+   * importar nada más), y además se intenta avisar por WhatsApp al número
+   * configurado en "Configuración del bot" — ese envío puede fallar si el
+   * vendedor no le escribió al número de negocio en las últimas 24h (límite
+   * de WhatsApp para mensajes que el negocio inicia sin plantilla aprobada);
+   * si falla, no bloquea nada, la notificación del panel ya quedó registrada.
+   */
+  async notifySalesperson(waId, reason) {
+    let contactLabel = waId;
+    try {
+      const lead = await this.leadService.findByPhone(waId);
+      if (lead?.full_name) contactLabel = `${lead.full_name} (${waId})`;
+    } catch {
+      // El nombre es solo para que la notificación sea más legible; sin
+      // lead encontrado se avisa igual con el número.
+    }
+
+    const body = `🆘 Lead transferido a un asesor: ${contactLabel}.${reason ? ` Motivo: ${reason}` : ''}`;
+
+    if (this.notificationService) {
+      try {
+        await this.notificationService.create({
+          type: 'whatsapp_lead_handed_off',
+          title: 'Lead de WhatsApp transferido a un asesor',
+          body,
+          link: '/admin/whatsapp'
+        });
+      } catch (error) {
+        console.error('❌ [WhatsApp Bot] Error al crear la notificación de transferencia:', error);
+      }
+    }
+
+    try {
+      const settings = await this.settingsService.get();
+      const salesPhone = settings.sales_notification_phone;
+      if (salesPhone) await this.whatsappMessageService.sendTextMessage(salesPhone, body);
+    } catch (error) {
+      console.error(`❌ [WhatsApp Bot] No se pudo avisar por WhatsApp al vendedor sobre ${waId}:`, error.message);
+    }
   }
 
   /**

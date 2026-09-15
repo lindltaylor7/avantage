@@ -321,14 +321,17 @@
             v-for="c in filteredConversations"
             :key="c.wa_id"
             class="contact-item"
-            :class="{ 'is-active': c.wa_id === selectedWaId }"
+            :class="{ 'is-active': c.wa_id === selectedWaId, 'is-urgent': c.handed_off_at }"
             @click="selectConversation(c.wa_id)"
           >
             <span class="contact-avatar" :style="{ background: avatarColor(c.wa_id) }" aria-hidden="true">
               {{ initialsOf(c.contact_name || c.wa_id) }}
             </span>
             <span class="contact-info">
-              <span class="contact-name">{{ c.contact_name || c.wa_id }}</span>
+              <span class="contact-name">
+                <span v-if="c.handed_off_at" class="urgent-flag" title="Avan lo transfirió a un asesor">🆘</span>
+                {{ c.contact_name || c.wa_id }}
+              </span>
               <span class="contact-preview">{{ c.direction === 'outbound' ? 'Tú: ' : '' }}{{ truncate(c.body, 42) }}</span>
             </span>
             <span class="contact-side">
@@ -1431,6 +1434,23 @@ onUnmounted(() => {
 .contact-item.is-active {
   background: var(--surface-2);
   box-shadow: inset 3px 0 0 var(--primary);
+}
+
+/* Conversación que Avan transfirió a un asesor: se resalta para que no se
+   pierda entre el resto mientras nadie la atiende. Se apaga sola apenas
+   alguien del equipo responde desde el panel (ver clearHandoffMark). */
+.contact-item.is-urgent {
+  background: rgba(200, 85, 50, 0.07);
+  border-bottom-color: rgba(200, 85, 50, 0.18);
+}
+
+.contact-item.is-urgent.is-active {
+  background: rgba(200, 85, 50, 0.12);
+  box-shadow: inset 3px 0 0 var(--accent-rose);
+}
+
+.urgent-flag {
+  margin-right: 0.3rem;
 }
 
 .contact-avatar {

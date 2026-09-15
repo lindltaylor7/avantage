@@ -77,7 +77,8 @@ export class WhatsappBotSettingsService {
     defaultLocation,
     shortRepliesEnabled,
     typingIndicatorEnabled,
-    messageGapSeconds
+    messageGapSeconds,
+    salesNotificationPhone
   }) {
     const current = await db('whatsapp_bot_settings').orderBy('id', 'asc').first();
 
@@ -97,6 +98,14 @@ export class WhatsappBotSettingsService {
 
     const sanitizedRules = promptRules === undefined ? undefined : sanitizeTextList(promptRules);
     const sanitizedFaq = faqKnowledge === undefined ? undefined : sanitizeTextList(faqKnowledge);
+    // Se guarda solo dígitos (y un "+" inicial opcional): lo que espera la
+    // Graph API como destinatario de un envío de WhatsApp.
+    let sanitizedSalesPhone;
+    if (salesNotificationPhone !== undefined) {
+      const raw = clampText(salesNotificationPhone, 30);
+      const digits = raw.replace(/\D/g, '');
+      sanitizedSalesPhone = digits ? `${raw.startsWith('+') ? '+' : ''}${digits}` : null;
+    }
 
     await db('whatsapp_bot_settings').where({ id: current.id }).update({
       tone_instructions: toneInstructions ?? current.tone_instructions,
@@ -118,6 +127,7 @@ export class WhatsappBotSettingsService {
       default_location: defaultLocation || current.default_location,
       short_replies_enabled: shortRepliesEnabled === undefined ? current.short_replies_enabled : !!shortRepliesEnabled,
       typing_indicator_enabled: typingIndicatorEnabled === undefined ? current.typing_indicator_enabled : !!typingIndicatorEnabled,
+      sales_notification_phone: sanitizedSalesPhone === undefined ? current.sales_notification_phone : sanitizedSalesPhone,
       message_gap_seconds: gap,
       updated_at: db.fn.now()
     });

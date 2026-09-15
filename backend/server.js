@@ -1487,8 +1487,10 @@ app.post('/api/whatsapp/conversations/:waId/messages', requireAuth, requirePermi
 
     // Si un asesor responde manualmente, se pausa Avan para esa
     // conversación (evita que el bot automático interrumpa a un humano
-    // que ya está atendiendo al contacto).
+    // que ya está atendiendo al contacto) y se borra la marca de "urgente"
+    // si la tenía: alguien del equipo ya la está atendiendo.
     await whatsappBotService.setBotEnabled(req.params.waId, false);
+    await whatsappMessageService.clearHandoffMark(req.params.waId);
 
     res.status(201).json({ message });
   } catch (error) {
@@ -1562,13 +1564,15 @@ app.put('/api/whatsapp/bot-settings', requireAuth, requirePermission('leads.view
       toneInstructions, botIdentity, botObjective, promptRules,
       faqKnowledge, meetingDurationMinutes,
       defaultAcademicLevel, defaultFieldOfStudy, defaultLocation,
-      shortRepliesEnabled, typingIndicatorEnabled, messageGapSeconds
+      shortRepliesEnabled, typingIndicatorEnabled, messageGapSeconds,
+      salesNotificationPhone
     } = req.body || {};
     const settings = await whatsappBotSettingsService.update({
       toneInstructions, botIdentity, botObjective, promptRules,
       faqKnowledge, meetingDurationMinutes,
       defaultAcademicLevel, defaultFieldOfStudy, defaultLocation,
-      shortRepliesEnabled, typingIndicatorEnabled, messageGapSeconds
+      shortRepliesEnabled, typingIndicatorEnabled, messageGapSeconds,
+      salesNotificationPhone
     });
     res.json({ settings });
   } catch (error) {

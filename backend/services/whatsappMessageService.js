@@ -507,7 +507,40 @@ export class WhatsappMessageService {
       }
     }
 
+    // Marca las conversaciones que Avan transfirió a un asesor (ver
+    // handOffToAdvisor en whatsappBotService.js), para que el panel pueda
+    // resaltarlas como urgentes en vez de que se pierdan entre el resto.
+    const waIds = conversations.map((c) => c.wa_id);
+    if (waIds.length > 0) {
+      const sessions = await db('whatsapp_bot_sessions').whereIn('wa_id', waIds).select('wa_id', 'answers');
+      const handoffMap = new Map();
+      for (const session of sessions) {
+        try {
+          const answers = typeof session.answers === 'string' ? JSON.parse(session.answers) : (session.answers || {});
+          if (answers.__handedOffAt) handoffMap.set(session.wa_id, answers.__handedOffAt);
+        } catch {
+          // Sesión con JSON corrupto: se ignora, no bloquea la bandeja.
+        }
+      }
+      for (const conversation of conversations) {
+        conversation.handed_off_at = handoffMap.get(conversation.wa_id) || null;
+      }
+    }
+
     return conversations;
+  }
+
+  /** Borra la marca de "transferido a un asesor" de una conversación (ver
+   * getConversations) — se usa cuando alguien del equipo ya la atendió,
+   * respondiendo desde el panel. */
+  async clearHandoffMark(waId) {
+    const session = await db('whatsapp_bot_sessions').where({ wa_id: waId }).first();
+    if (!session) return;
+    const answers = typeof session.answers === 'string' ? JSON.parse(session.answers) : (session.answers || {});
+    if (!answers.__handedOffAt) return;
+    delete answers.__handedOffAt;
+    delete answers.__handedOffReason;
+    await db('whatsapp_bot_sessions').where({ wa_id: waId }).update({ answers: JSON.stringify(answers) });
   }
 
   /**

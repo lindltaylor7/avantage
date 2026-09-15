@@ -200,6 +200,25 @@
         </div>
       </section>
 
+      <section class="glass-panel bot-settings-panel">
+        <h3 class="bot-info-title">🆘 Aviso al vendedor</h3>
+        <div class="form-group">
+          <label class="form-label">WhatsApp del vendedor/asesor a avisar</label>
+          <input
+            v-model="form.salesNotificationPhone"
+            type="text"
+            class="form-input"
+            placeholder="Ej: 51987654321"
+          />
+          <p class="bot-field-hint">
+            Cuando Avan transfiere una conversación a un asesor (el lead pidió hablar con alguien, insistió con el
+            precio, o quedó dando vueltas sin elegir horario), se le manda un aviso a este número además de
+            registrarlo en las notificaciones del panel. El envío por WhatsApp solo funciona si este número le
+            escribió al bot en las últimas 24 horas — si no, igual queda el aviso en el panel (🔔 arriba).
+          </p>
+        </div>
+      </section>
+
       <section class="glass-panel bot-info-panel">
         <h3 class="bot-info-title">⚙️ Cómo funciona ahora</h3>
         <div class="bot-info-grid">
@@ -248,7 +267,8 @@ const form = reactive({
   defaultLocation: '',
   shortRepliesEnabled: true,
   typingIndicatorEnabled: true,
-  messageGapSeconds: 5
+  messageGapSeconds: 5,
+  salesNotificationPhone: ''
 });
 
 function toForm(settings) {
@@ -264,7 +284,8 @@ function toForm(settings) {
     defaultLocation: settings.default_location || '',
     shortRepliesEnabled: settings.short_replies_enabled == null ? true : !!settings.short_replies_enabled,
     typingIndicatorEnabled: settings.typing_indicator_enabled == null ? true : !!settings.typing_indicator_enabled,
-    messageGapSeconds: settings.message_gap_seconds == null ? 5 : Number(settings.message_gap_seconds)
+    messageGapSeconds: settings.message_gap_seconds == null ? 5 : Number(settings.message_gap_seconds),
+    salesNotificationPhone: settings.sales_notification_phone || ''
   };
 }
 
