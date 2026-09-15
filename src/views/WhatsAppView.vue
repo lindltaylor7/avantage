@@ -49,45 +49,6 @@
     <p v-if="errorMessage" class="info-box alert-box">⚠️ {{ errorMessage }}</p>
     <p v-if="resetMessage" class="info-box success-box">✅ {{ resetMessage }}</p>
 
-    <WhatsAppEmbeddedSignup />
-
-    <!-- Estado de credenciales: por qué el bot podría no estar respondiendo -->
-    <section v-if="configStatus" class="config-status-banner" :class="{ 'is-ok': allWhatsappConfigOk }">
-      <h4>{{ allWhatsappConfigOk ? '✅ Envío de WhatsApp configurado' : '⚠️ El bot no puede enviar mensajes reales todavía' }}</h4>
-      <ul class="config-status-list">
-        <li :class="configStatus.whatsapp.hasPhoneNumberId ? 'ok' : 'missing'">
-          {{ configStatus.whatsapp.hasPhoneNumberId ? '✅' : '❌' }} <code>META_WHATSAPP_PHONE_NUMBER_ID</code>
-        </li>
-        <li :class="configStatus.whatsapp.hasAccessToken ? 'ok' : 'missing'">
-          {{ configStatus.whatsapp.hasAccessToken ? '✅' : '❌' }} <code>META_WHATSAPP_ACCESS_TOKEN</code> (o <code>META_PAGE_ACCESS_TOKEN</code>)
-        </li>
-        <li :class="configStatus.whatsapp.hasAppSecret ? 'ok' : 'missing'">
-          {{ configStatus.whatsapp.hasAppSecret ? '✅' : '❌' }} <code>META_APP_SECRET</code> (firma del webhook)
-        </li>
-        <li :class="configStatus.ollama.hasApiKey ? 'ok' : 'missing'">
-          {{ configStatus.ollama.hasApiKey ? '✅' : '⚠️' }} <code>OLLAMA_API_KEY</code>
-          <span class="config-status-hint">({{ configStatus.ollama.chatModel }} en {{ configStatus.ollama.host }}{{ configStatus.ollama.hasApiKey ? '' : ', usará el saludo de respaldo' }})</span>
-        </li>
-      </ul>
-      <p v-if="!allWhatsappConfigOk" class="config-status-note">
-        Mientras falten las variables de WhatsApp, el bot sí procesa los mensajes y sí llama al LLM
-        (puedes verlo abajo en "Actividad del bot"), pero la respuesta final falla al intentar
-        enviarse por la Graph API. Usa el simulador de abajo para probar el flujo sin depender del
-        envío real.
-      </p>
-    </section>
-
-    <section class="info-box">
-      <h4>📋 Configuración en Meta</h4>
-      <ul>
-        <li>URL de devolución de llamada: <code>https://{{ hostHint }}/api/webhooks/whatsapp</code></li>
-        <li>Identificador de verificación: el valor de <code>META_WHATSAPP_VERIFY_TOKEN</code> en tu <code>.env</code> de producción.</li>
-        <li>Para responder, necesitas configurar <code>META_WHATSAPP_PHONE_NUMBER_ID</code> y <code>META_WHATSAPP_ACCESS_TOKEN</code> (con permiso <code>whatsapp_business_messaging</code>).</li>
-        <li>Solo puedes enviar mensajes de texto libre dentro de las <strong>24 horas</strong> desde el último mensaje del cliente; fuera de esa ventana, WhatsApp exige una plantilla aprobada.</li>
-        <li>Cuando alguien escribe después de tocar "Enviar mensaje" en un anuncio o publicación de Facebook/Instagram, WhatsApp lo indica automáticamente en el mensaje — por eso cada conversación muestra su canal de origen (📘 Facebook, 📸 Instagram o 💬 directo).</li>
-      </ul>
-    </section>
-
     <!-- Stats -->
     <section class="stats-grid">
       <div class="stat-card">
@@ -386,14 +347,31 @@
             </div>
           </header>
 
-          <div v-if="threadReferral" class="origin-banner">
-            🎯 Este contacto escribió después de tocar
-            <strong>{{ threadReferral.source_type === 'post' ? 'una publicación' : 'un anuncio' }}</strong>
-            de Meta<span v-if="threadReferral.headline">: "{{ threadReferral.headline }}"</span>.
-          </div>
-
           <div class="thread-body">
             <div class="thread-messages" ref="threadScrollEl" @scroll.passive="onThreadScroll">
+              <div v-if="threadReferral" class="ad-referral-wrap">
+                <span class="ad-referral-opened">Conversación abierta · {{ formatTime(threadReferralAt) }}</span>
+                <div class="ad-referral-card">
+                  <img v-if="threadReferral.image_url" :src="threadReferral.image_url" alt="" class="ad-referral-image" />
+                  <div class="ad-referral-body">
+                    <div class="ad-referral-header">
+                      <strong class="ad-referral-title">
+                        {{ channelIcon(threadOriginChannel) }}
+                        {{ threadReferral.source_type === 'post' ? 'Publicación de Meta' : threadOriginChannel }}
+                      </strong>
+                      <a
+                        v-if="threadReferral.source_url"
+                        :href="threadReferral.source_url"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="ad-referral-link"
+                      >Ver anuncio ↗</a>
+                    </div>
+                    <p v-if="threadReferral.headline" class="ad-referral-headline">{{ threadReferral.headline }}</p>
+                  </div>
+                </div>
+              </div>
+
               <template v-for="group in threadGroups" :key="group.key">
                 <p class="day-divider"><span class="day-chip">{{ group.label }}</span></p>
                 <div v-for="run in group.runs" :key="run.key" class="msg-run" :class="run.direction">
@@ -474,7 +452,6 @@
 <script setup>
 import { nextTick, onMounted, onUnmounted, computed, ref } from 'vue';
 import { apiFetch } from '../apiClient.js';
-import WhatsAppEmbeddedSignup from '../components/WhatsAppEmbeddedSignup.vue';
 
 const conversations = ref([]);
 const stats = ref({ total: 0, contacts: 0 });
@@ -483,7 +460,6 @@ const isLoading = ref(false);
 const errorMessage = ref('');
 const resetMessage = ref('');
 const autoRefresh = ref(true);
-const hostHint = window.location.host;
 
 const selectedWaId = ref(null);
 const thread = ref([]);
@@ -502,7 +478,6 @@ const isDeletingConversation = ref(false);
 const isDeletionsLogOpen = ref(false);
 const deletionsLog = ref([]);
 
-const configStatus = ref(null);
 const botActivity = ref([]);
 const simWaId = ref(`test-${Math.floor(100000 + Math.random() * 900000)}`);
 const simText = ref('');
@@ -511,12 +486,6 @@ const simMessagesSent = ref([]);
 const isDownloading = ref(false);
 
 let pollHandle = null;
-
-const allWhatsappConfigOk = computed(() => {
-  if (!configStatus.value) return false;
-  const w = configStatus.value.whatsapp;
-  return w.hasPhoneNumberId && w.hasAccessToken && w.hasAppSecret;
-});
 
 const ACTIVITY_META = {
   buffer: { icon: '📥', label: 'Mensaje agrupado', className: 'activity-buffer' },
@@ -565,8 +534,10 @@ const threadOriginChannel = computed(() => {
   return conv?.origin_channel || null;
 });
 
+const threadReferralMessage = computed(() => thread.value.find((m) => m.direction === 'inbound' && m.referral) || null);
+
 const threadReferral = computed(() => {
-  const first = thread.value.find((m) => m.direction === 'inbound' && m.referral);
+  const first = threadReferralMessage.value;
   if (!first) return null;
   try {
     return typeof first.referral === 'string' ? JSON.parse(first.referral) : first.referral;
@@ -574,6 +545,8 @@ const threadReferral = computed(() => {
     return null;
   }
 });
+
+const threadReferralAt = computed(() => threadReferralMessage.value?.received_at || null);
 
 const SCHEDULING_STATUSES = new Set(['scheduling_date', 'scheduling_time']);
 
@@ -850,17 +823,6 @@ async function fetchRawEvents() {
   }
 }
 
-async function fetchConfigStatus() {
-  try {
-    const response = await apiFetch('/api/whatsapp/config-status');
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Error al obtener el estado de configuración.');
-    configStatus.value = data;
-  } catch (error) {
-    errorMessage.value = error.message;
-  }
-}
-
 async function fetchBotActivity() {
   try {
     const response = await apiFetch('/api/whatsapp/bot-activity');
@@ -965,7 +927,7 @@ async function fetchAll({ silent = false, full = true } = {}) {
 
   const tasks = [fetchConversations()];
   if (selectedWaId.value) tasks.push(fetchThread(selectedWaId.value), fetchBotSession(selectedWaId.value));
-  if (full) tasks.push(fetchStats(), fetchRawEvents(), fetchBotActivity(), fetchConfigStatus());
+  if (full) tasks.push(fetchStats(), fetchRawEvents(), fetchBotActivity());
 
   await Promise.all(tasks);
   if (!silent) isLoading.value = false;
@@ -1447,12 +1409,76 @@ onUnmounted(() => {
   color: #E0A362;
 }
 
-.origin-banner {
-  background: rgba(201, 146, 46, 0.1);
-  border-bottom: 1px solid var(--border-color);
+/* Tarjeta del anuncio/publicación de origen (estilo "Click to WhatsApp Ad"
+   de Meta, como la muestran las bandejas tipo Chatwoot): flota alineada a la
+   derecha arriba del hilo, con la imagen del anuncio si vino en el referral. */
+.ad-referral-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.35rem;
+  margin: 0 0 1.1rem;
+}
+
+.ad-referral-opened {
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.ad-referral-card {
+  width: min(320px, 100%);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.ad-referral-image {
+  width: 100%;
+  height: 140px;
+  object-fit: cover;
+  display: block;
+  background: var(--surface-2);
+}
+
+.ad-referral-body {
+  padding: 0.65rem 0.8rem 0.75rem;
+}
+
+.ad-referral-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.ad-referral-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.ad-referral-link {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--primary);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.ad-referral-link:hover {
+  text-decoration: underline;
+}
+
+.ad-referral-headline {
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
   color: var(--text-sub);
-  font-size: 0.78rem;
-  padding: 0.6rem 1.1rem;
+  line-height: 1.4;
 }
 
 .thread-panel {
@@ -1907,52 +1933,6 @@ onUnmounted(() => {
   white-space: pre;
   font-family: var(--font-mono);
   margin: 0;
-}
-
-/* Config status banner */
-.config-status-banner {
-  background: rgba(200, 85, 50, 0.08);
-  border: 1px solid rgba(200, 85, 50, 0.3);
-  border-radius: 14px;
-  padding: 1rem 1.1rem;
-}
-
-.config-status-banner.is-ok {
-  background: rgba(34, 197, 94, 0.08);
-  border-color: rgba(34, 197, 94, 0.3);
-}
-
-.config-status-banner h4 {
-  font-size: 0.9rem;
-  margin-bottom: 0.6rem;
-  color: var(--text-main);
-}
-
-.config-status-list {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  font-size: 0.82rem;
-}
-
-.config-status-list li.ok {
-  color: var(--accent-emerald);
-}
-
-.config-status-list li.missing {
-  color: #E0717C;
-}
-
-.config-status-hint {
-  color: var(--text-sub);
-  font-size: 0.78rem;
-}
-
-.config-status-note {
-  margin-top: 0.7rem;
-  font-size: 0.82rem;
-  color: var(--text-sub);
 }
 
 /* Simulator */
