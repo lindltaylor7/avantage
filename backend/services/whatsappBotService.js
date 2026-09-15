@@ -1246,7 +1246,13 @@ export class WhatsappBotService {
     this.logActivity({ type: 'scheduling_offer_skipped', waId, reason });
     await this.updateSession(waId, { status: 'completed' });
     await this.moveFunnelStage(waId, 'transferido_closer');
-    await this.send(waId, 'El asesor se pondrá en contacto contigo pronto para coordinar la reunión. ¡Gracias! 🙌');
+    // "El asesor se pondrá en contacto contigo pronto" sonaba a una llamada
+    // agendada a futuro, no a "dejo de responderte yo, ahora te escribe una
+    // persona" — un contacto que ya venía frustrado (repitiendo lo mismo sin
+    // que el bot lo resolviera) seguía pidiendo "apaga tu bot, quiero hablar
+    // con alguien" justo después de este mensaje, sin darse cuenta de que ya
+    // se le había transferido.
+    await this.send(waId, 'Te paso con un asesor para que te ayude directamente 🙌 En breve te escribe por aquí para coordinar todo.');
   }
 
   /**
@@ -1292,9 +1298,17 @@ export class WhatsappBotService {
       const priceNote = owesPriceAnswer
         ? 'Sobre el costo: depende de tu carrera, tu nivel académico y el alcance de la tesis, así que te lo detalla el asesor. '
         : '';
+      // "Revisar tu tema" da a entender que ya hay uno: si el lead dijo
+      // explícitamente que no tiene tema (finalize() sigue adelante igual,
+      // con un placeholder, para no perderlo insistiendo), decírselo así se
+      // lee como que nadie escuchó "no tengo tema" — de ahí salía el reclamo
+      // repetido en plena elección de modalidad.
+      const hasTopic = !!answers.problem;
       const closing = owesPriceAnswer
         ? 'Justo para eso es la reunión 🙌 ¿Cómo la prefieres?'
-        : 'Coordinemos una reunión con nuestro asesor para revisar tu tema 🙌 ¿Cómo prefieres la reunión?';
+        : (hasTopic
+          ? 'Coordinemos una reunión con nuestro asesor para revisar tu tema 🙌 ¿Cómo prefieres la reunión?'
+          : 'Coordinemos una reunión con nuestro asesor para ayudarte a definir tu tema 🙌 ¿Cómo prefieres la reunión?');
 
       await this.send(waId, `${opener}${priceNote}${closing}\n\n1. Telefónica\n2. Por Google Meet (con ${MEET_DISCOUNT_PCT}% de descuento sobre el precio final)`);
     } catch (error) {
@@ -1575,7 +1589,32 @@ export class WhatsappBotService {
     }
 
     const date = parsed?.date;
-    if (!date) return false;
+
+    // No nombró un día concreto ("otro día en las tardes", "cualquier día por
+    // la mañana"), pero sí un momento — antes esto se descartaba entero por no
+    // tener fecha, y la respuesta era repetir la MISMA lista del mismo día sin
+    // moverse un milímetro (el "no te entendí" de siempre). "Otro día" es
+    // justo lo contrario de eso: se busca en los próximos días disponibles el
+    // horario más cercano a lo que pidió, en vez de insistir con el día que ya
+    // rechazó.
+    if (!date) {
+      if (!parsed?.preferredTime) return false;
+
+      const ranked = await this.googleCalendarService.getFreeSlotsNearTime(
+        BOOKING_ADVISOR_USER_ID, parsed.preferredTime, { limit: SLOTS_TO_OFFER, days: BOOKING_WINDOW_DAYS }
+      );
+      const nearSlots = orderSlotsForDisplay(ranked);
+      if (nearSlots.length === 0) return false;
+
+      scheduling.slots = nearSlots;
+      scheduling.attempts = 0;
+      await this.updateSession(waId, { answers: JSON.stringify(answers) });
+      await this.send(
+        waId,
+        `Estos son los horarios más cercanos a lo que buscas:\n\n${numberedList(slotOptionLabels(nearSlots))}\n\nResponde con el número que prefieras, o "no" si prefieres que te contacten después.`
+      );
+      return true;
+    }
 
     // Lo que se le había ofrecido antes, para saber si está repreguntando por
     // el mismo día. Se guarda ahora porque `scheduling.slots` se reemplaza más
