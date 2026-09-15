@@ -509,6 +509,40 @@ export class WhatsappMessageService {
   }
 
   /**
+   * Elimina todos los mensajes de una conversación (y su sesión del bot, si
+   * existe) y deja un registro en `whatsapp_conversation_deletions` con quién
+   * la eliminó — la conversación en sí no deja rastro una vez borrada, así
+   * que esta tabla es la única forma de saber después quién la quitó.
+   */
+  async deleteConversation(waId, { deletedByUserId, deletedByName }) {
+    const lastMessage = await db('whatsapp_messages')
+      .where({ wa_id: waId })
+      .orderBy('received_at', 'desc')
+      .first();
+    if (!lastMessage) return null;
+
+    const [{ count }] = await db('whatsapp_messages').where({ wa_id: waId }).count('* as count');
+
+    await db('whatsapp_bot_sessions').where({ wa_id: waId }).delete();
+    await db('whatsapp_messages').where({ wa_id: waId }).delete();
+
+    const [id] = await db('whatsapp_conversation_deletions').insert({
+      wa_id: waId,
+      contact_name: lastMessage.contact_name || null,
+      message_count: Number(count),
+      deleted_by_user_id: deletedByUserId || null,
+      deleted_by_name: deletedByName || null
+    });
+
+    return db('whatsapp_conversation_deletions').where({ id }).first();
+  }
+
+  /** Últimas conversaciones eliminadas, para mostrar quién borró qué. */
+  async getRecentDeletions({ limit = 50 } = {}) {
+    return db('whatsapp_conversation_deletions').orderBy('deleted_at', 'desc').limit(limit);
+  }
+
+  /**
    * Todos los mensajes (entrantes + salientes) de un día del calendario de
    * Lima, en orden cronológico. Se usa para exportar la bitácora completa de
    * conversaciones a un archivo de texto. `dateStr` es "YYYY-MM-DD" en

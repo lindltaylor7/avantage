@@ -1424,6 +1424,42 @@ app.get('/api/whatsapp/conversations/export', requireAuth, requirePermission('le
 });
 
 /**
+ * Elimina por completo una conversación de WhatsApp (todos sus mensajes y su
+ * sesión del bot). Queda registrado en `whatsapp_conversation_deletions` qué
+ * usuario la eliminó, ya que los mensajes en sí no dejan rastro.
+ */
+app.delete('/api/whatsapp/conversations/:waId', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const log = await whatsappMessageService.deleteConversation(req.params.waId, {
+      deletedByUserId: req.user.id,
+      deletedByName: req.user.name
+    });
+    if (!log) {
+      return res.status(404).json({ error: 'No se encontró esa conversación.' });
+    }
+    console.log(`🗑️ [WhatsApp] Conversación con ${req.params.waId} eliminada por ${req.user.name} (#${req.user.id})`);
+    res.json({ success: true, deletion: log });
+  } catch (error) {
+    console.error('❌ Error al eliminar la conversación de WhatsApp:', error);
+    res.status(500).json({ error: 'Error al eliminar la conversación de WhatsApp.', details: error.message });
+  }
+});
+
+/**
+ * Registro de auditoría de conversaciones de WhatsApp eliminadas: qué
+ * contacto, cuántos mensajes y qué usuario la eliminó.
+ */
+app.get('/api/whatsapp/conversations/deletions', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const deletions = await whatsappMessageService.getRecentDeletions({ limit: 50 });
+    res.json({ deletions });
+  } catch (error) {
+    console.error('❌ Error al obtener el registro de conversaciones eliminadas:', error);
+    res.status(500).json({ error: 'Error al obtener el registro de conversaciones eliminadas.', details: error.message });
+  }
+});
+
+/**
  * Hilo completo (entrantes + salientes) de un contacto de WhatsApp.
  */
 app.get('/api/whatsapp/conversations/:waId/messages', requireAuth, requirePermission('leads.view'), async (req, res) => {

@@ -29,6 +29,11 @@
           Actividad del bot
           <span v-if="botActivity.length" class="btn-count">{{ botActivity.length }}</span>
         </button>
+        <button class="btn-action-secondary" @click="openDeletionsLog" title="Ver qué conversaciones se eliminaron y quién lo hizo">
+          <span class="btn-icon">🗑️</span>
+          Eliminadas
+          <span v-if="deletionsLog.length" class="btn-count">{{ deletionsLog.length }}</span>
+        </button>
         <button
           class="btn-action-secondary"
           @click="downloadTodayConversations"
@@ -267,6 +272,57 @@
       </div>
     </Teleport>
 
+    <!-- Confirmación de eliminar conversación: la acción es irreversible, así
+         que se pide un paso extra en vez de borrar directo al primer clic. -->
+    <Teleport to="body">
+      <div v-if="isDeleteConfirmOpen" class="activity-backdrop" @click.self="closeDeleteConfirm">
+        <section class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="delete-confirm-title">
+          <h3 id="delete-confirm-title" class="confirm-modal-title">🗑️ ¿Eliminar esta conversación?</h3>
+          <p class="confirm-modal-text">
+            Se borrarán todos los mensajes con <strong>{{ selectedContactName }}</strong> ({{ selectedWaId }}) y no se
+            pueden recuperar. Quedará registrado que tú la eliminaste, visible en "Eliminadas".
+          </p>
+          <div class="confirm-modal-actions">
+            <button type="button" class="btn-action-secondary" @click="closeDeleteConfirm" :disabled="isDeletingConversation">Cancelar</button>
+            <button type="button" class="btn-thread-danger btn-confirm-delete" @click="deleteConversation" :disabled="isDeletingConversation">
+              {{ isDeletingConversation ? 'Eliminando...' : 'Sí, eliminar' }}
+            </button>
+          </div>
+        </section>
+      </div>
+    </Teleport>
+
+    <!-- Registro de conversaciones eliminadas: quién las borró y cuándo. -->
+    <Teleport to="body">
+      <div v-if="isDeletionsLogOpen" class="activity-backdrop" @click.self="closeDeletionsLog">
+        <section class="activity-modal" role="dialog" aria-modal="true" aria-labelledby="deletions-modal-title">
+          <header class="activity-modal-header">
+            <div class="activity-modal-titles">
+              <h3 id="deletions-modal-title" class="activity-modal-title">Conversaciones eliminadas</h3>
+              <p class="activity-modal-sub">Qué contacto se borró, cuántos mensajes tenía y qué usuario lo hizo.</p>
+            </div>
+            <button type="button" class="btn-modal-close" @click="closeDeletionsLog" aria-label="Cerrar">✕</button>
+          </header>
+          <div class="activity-modal-body">
+            <p v-if="deletionsLog.length === 0" class="activity-empty">
+              Todavía no se ha eliminado ninguna conversación.
+            </p>
+            <article v-for="entry in deletionsLog" :key="entry.id" class="activity-card activity-error-card">
+              <header class="activity-card-header">
+                <span class="activity-type">🗑️ {{ entry.contact_name || entry.wa_id }}</span>
+                <span class="activity-wa">{{ entry.wa_id }}</span>
+                <span class="activity-time">{{ formatTime(entry.deleted_at) }}</span>
+              </header>
+              <p class="activity-text">
+                Eliminada por <strong>{{ entry.deleted_by_name || 'usuario desconocido' }}</strong>
+                <span class="activity-hint">({{ entry.message_count }} {{ entry.message_count === 1 ? 'mensaje' : 'mensajes' }})</span>
+              </p>
+            </article>
+          </div>
+        </section>
+      </div>
+    </Teleport>
+
     <!-- Bandeja de conversaciones -->
     <h3 class="subsection-title">Conversaciones</h3>
     <section v-if="!isLoading && conversations.length === 0" class="empty-state">
@@ -323,6 +379,9 @@
               </button>
               <button type="button" class="btn-thread-action" @click="resetBotSession" title="Borra el estado del bot para este contacto: su próximo mensaje se procesará como si fuera nuevo.">
                 Reiniciar
+              </button>
+              <button type="button" class="btn-thread-action btn-thread-danger" @click="openDeleteConfirm" title="Elimina esta conversación por completo. Queda registrado quién la eliminó.">
+                🗑️ Eliminar
               </button>
             </div>
           </header>
@@ -437,6 +496,11 @@ const isPinnedToBottom = ref(true);
 const unseenCount = ref(0);
 const isActivityOpen = ref(false);
 const activityOnlySelected = ref(true);
+
+const isDeleteConfirmOpen = ref(false);
+const isDeletingConversation = ref(false);
+const isDeletionsLogOpen = ref(false);
+const deletionsLog = ref([]);
 
 const configStatus = ref(null);
 const botActivity = ref([]);
@@ -688,7 +752,10 @@ function closeActivity() {
 }
 
 function onActivityKeydown(event) {
-  if (event.key === 'Escape' && isActivityOpen.value) closeActivity();
+  if (event.key !== 'Escape') return;
+  if (isActivityOpen.value) closeActivity();
+  else if (isDeletionsLogOpen.value) closeDeletionsLog();
+  else if (isDeleteConfirmOpen.value && !isDeletingConversation.value) closeDeleteConfirm();
 }
 
 async function sendReply() {
@@ -716,6 +783,60 @@ async function sendReply() {
   } finally {
     isSending.value = false;
   }
+}
+
+function openDeleteConfirm() {
+  if (!selectedWaId.value) return;
+  isDeleteConfirmOpen.value = true;
+}
+
+function closeDeleteConfirm() {
+  isDeleteConfirmOpen.value = false;
+}
+
+async function deleteConversation() {
+  if (!selectedWaId.value || isDeletingConversation.value) return;
+  isDeletingConversation.value = true;
+  errorMessage.value = '';
+  const waId = selectedWaId.value;
+  try {
+    const response = await apiFetch(`/api/whatsapp/conversations/${encodeURIComponent(waId)}`, { method: 'DELETE' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No se pudo eliminar la conversación.');
+
+    conversations.value = conversations.value.filter((c) => c.wa_id !== waId);
+    selectedWaId.value = null;
+    thread.value = [];
+    botSession.value = null;
+    isDeleteConfirmOpen.value = false;
+    resetMessage.value = `Conversación con ${waId} eliminada.`;
+    setTimeout(() => { resetMessage.value = ''; }, 4000);
+    await fetchDeletionsLog();
+  } catch (error) {
+    errorMessage.value = error.message;
+  } finally {
+    isDeletingConversation.value = false;
+  }
+}
+
+async function fetchDeletionsLog() {
+  try {
+    const response = await apiFetch('/api/whatsapp/conversations/deletions');
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Error al obtener las conversaciones eliminadas.');
+    assignIfChanged(deletionsLog, data.deletions || []);
+  } catch (error) {
+    errorMessage.value = error.message;
+  }
+}
+
+function openDeletionsLog() {
+  isDeletionsLogOpen.value = true;
+  fetchDeletionsLog();
+}
+
+function closeDeletionsLog() {
+  isDeletionsLogOpen.value = false;
 }
 
 async function fetchRawEvents() {
@@ -2099,5 +2220,63 @@ onUnmounted(() => {
   .whatsapp-page-wrapper {
     padding: 1rem;
   }
+}
+
+.btn-thread-danger {
+  background: transparent;
+  color: var(--accent-rose);
+  border: 1px solid rgba(200, 85, 50, 0.4);
+  border-radius: var(--radius-sm);
+  padding: 0.35rem 0.7rem;
+  font-family: var(--font-body);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.btn-thread-danger:hover:not(:disabled) {
+  background: rgba(200, 85, 50, 0.12);
+  border-color: var(--accent-rose);
+}
+
+.btn-thread-danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.confirm-modal {
+  width: min(420px, 100%);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 1.3rem 1.4rem;
+}
+
+.confirm-modal-title {
+  font-family: var(--font-heading);
+  font-size: 1.05rem;
+  margin: 0 0 0.6rem;
+}
+
+.confirm-modal-text {
+  font-size: 0.85rem;
+  color: var(--text-sub);
+  line-height: 1.5;
+  margin: 0 0 1.1rem;
+}
+
+.confirm-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+
+.btn-confirm-delete {
+  padding: 0.6rem 1.1rem;
+  border-radius: 10px;
+  font-family: var(--font-heading);
 }
 </style>
