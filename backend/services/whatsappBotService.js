@@ -34,6 +34,30 @@ const DEFAULT_MESSAGE_GAP_MS = (Number(process.env.WHATSAPP_BOT_MESSAGE_GAP_SECO
 // instantáneo tras una operación lenta como la llamada al LLM).
 const TYPING_PAUSE_MS = 1500;
 
+// Cuánto "tarda en escribir" Avan, por palabra. El gap configurable de arriba
+// existe por otra razón (no parecer spam ante WhatsApp) y es el mismo para
+// todos los mensajes; esto es lo que hace que el ritmo se sienta de una
+// persona: un mensaje largo tarda más en llegar que un "Perfecto 👀", porque
+// escribirlo toma más. Recibir cuatro renglones al mismo tiempo que un acuse
+// de dos palabras es de las cosas que más delatan a un bot.
+const WORD_TYPING_MS = 180;
+const MIN_TYPING_MS = 900;
+// Tope: pasado cierto punto la espera deja de leerse como que alguien está
+// escribiendo y empieza a leerse como que nadie contesta.
+const MAX_TYPING_MS = 4500;
+
+/**
+ * Tiempo verosímil de tecleo para un texto, con una variación aleatoria de
+ * ±15% para que dos mensajes del mismo largo no lleguen con el mismo retraso
+ * exacto — la regularidad milimétrica es, en sí misma, una señal de bot.
+ */
+function typingTimeFor(text) {
+  const words = String(text || '').trim().split(/\s+/).filter(Boolean).length;
+  const jitter = 0.85 + Math.random() * 0.3;
+  const ms = Math.round(words * WORD_TYPING_MS * jitter);
+  return Math.min(Math.max(ms, MIN_TYPING_MS), MAX_TYPING_MS);
+}
+
 // Asesor cuyo Google Calendar usa el bot para agendar las llamadas que
 // ofrece al terminar de calificar el tema (por ahora uno solo, fijo, en vez
 // de resolver dinámicamente a partir de "assigned_to" del lead).
@@ -729,9 +753,16 @@ export class WhatsappBotService {
       settings = await this.settingsService.get();
     } catch { /* si falla, se usan los valores por defecto de abajo */ }
 
-    const gapMs = settings.message_gap_seconds != null
+    const configuredGapMs = settings.message_gap_seconds != null
       ? Math.max(0, Number(settings.message_gap_seconds) * 1000)
       : DEFAULT_MESSAGE_GAP_MS;
+
+    // La espera real es la mayor de las dos: el mínimo antispam configurado y
+    // lo que tardaría una persona en TECLEAR este mensaje. Así un texto largo
+    // se hace esperar más que un acuse corto, que es como se comporta alguien
+    // del otro lado. El indicador de "escribiendo..." se manda justo abajo,
+    // antes de la espera, para que ese rato se vea como lo que simula ser.
+    const gapMs = Math.max(configuredGapMs, typingTimeFor(text));
 
     // Reserva el momento del próximo envío ANTES de esperar: si dos send()
     // corren casi a la vez, el segundo ve el timestamp reservado por el
