@@ -227,6 +227,15 @@
           <template v-if="entry.replacement">Se envió en su lugar: "{{ entry.replacement }}"</template>
           <template v-else>No se reenvió.</template>
         </p>
+        <p v-else-if="entry.type === 'critical_signal'" class="activity-text">
+          <span class="activity-error">🚨 {{ criticalSignalLabel(entry.signal) }}</span><br />
+          Escribió: "{{ entry.text }}"<br />
+          <span class="activity-hint">No pasó por el LLM: se le respondió reconociendo el problema y se transfirió a un asesor.</span>
+        </p>
+        <p v-else-if="entry.type === 'critical_signal_repeated'" class="activity-text activity-hint">
+          Volvió a escribir "{{ entry.text }}" después de que ya se le transfirió por lo mismo.
+          El bot no responde: ya está esperando a una persona.
+        </p>
             </article>
           </div>
         </section>
@@ -541,8 +550,24 @@ const ACTIVITY_META = {
   university_resolve_failed: { icon: '⚠️', label: 'No se pudo normalizar la universidad', className: 'activity-error-card' },
   price_insist_shortcut: { icon: '💸', label: 'Insistió con el precio: se ofrece el asesor', className: 'activity-ok' },
   buffer_extended: { icon: '⏳', label: 'Solo un saludo: se espera un poco más', className: 'activity-buffer' },
-  exact_time_booked: { icon: '⚡', label: 'La hora que pidió estaba libre: se agendó directo', className: 'activity-ok' }
+  exact_time_booked: { icon: '⚡', label: 'La hora que pidió estaba libre: se agendó directo', className: 'activity-ok' },
+  critical_signal: { icon: '🚨', label: 'Mensaje delicado: se transfirió a un asesor', className: 'activity-error-card' },
+  critical_signal_repeated: { icon: '🔕', label: 'Insistió tras la transferencia: el bot no responde', className: 'activity-hint' }
 };
+
+// Cómo se le explica al equipo cada señal crítica detectada (ver
+// backend/services/leadSignals.js). El texto se escribe desde el punto de
+// vista de quien va a retomar la conversación.
+const CRITICAL_SIGNAL_LABELS = {
+  noShow: 'Dice que se quedó esperando y el asesor no entró a la reunión.',
+  complaint: 'Puso una queja sobre el servicio.',
+  humanRequest: 'Pidió explícitamente hablar con una persona.',
+  frustration: 'Se quejó de que el bot no lo entiende o le repite las preguntas.'
+};
+
+function criticalSignalLabel(signal) {
+  return CRITICAL_SIGNAL_LABELS[signal] || 'Mensaje que necesita atención de una persona.';
+}
 
 function activityIcon(type) {
   return ACTIVITY_META[type]?.icon || '•';

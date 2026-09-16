@@ -4,7 +4,19 @@ import { WhatsappBotSettingsService } from './whatsappBotSettingsService.js';
 import { buildKnowledgeBlock } from './whatsappBotPromptDefaults.js';
 import { MIN_BOOKING_LEAD_MINUTES } from './googleCalendarService.js';
 import { normalizeUniversity } from './universityNormalizer.js';
+import { criticalSignal } from './leadSignals.js';
 import * as whatsappBotCopy from '../copy/whatsappBotCopy.js';
+
+// Motivo que ve el equipo en la notificación de transferencia, por señal
+// crítica detectada (ver `leadSignals.js`). Se redactan desde el punto de
+// vista de quien va a retomar la conversación: lo primero que necesita saber
+// es en qué estado emocional está el lead al que va a escribir.
+const CRITICAL_SIGNAL_REASONS = {
+  noShow: 'El lead dice que se quedó esperando y el asesor no entró a la reunión. URGENTE: contactarlo cuanto antes.',
+  complaint: 'El lead puso una queja sobre el servicio. URGENTE: revisar su caso antes de responderle.',
+  humanRequest: 'El lead pidió explícitamente hablar con una persona.',
+  frustration: 'El lead se quejó de que el bot no lo entiende o le repite las preguntas: la conversación automática ya no avanza.'
+};
 
 const MAX_ACTIVITY_LOG = 100;
 
@@ -968,6 +980,13 @@ export class WhatsappBotService {
   async runConversationTurn(waId, incomingText, inboundMark = null) {
     let session = await this.getSession(waId);
 
+    // Un plantón en la reunión, una queja o un "quiero hablar con alguien" se
+    // atienden antes que nada y sin importar en qué paso esté la conversación:
+    // seguir con el guion (otra pregunta, otro horario) a alguien que acaba de
+    // decir eso es la forma más rápida de perderlo. Sin sesión todavía no hay
+    // nada que escalar — ese caso sigue el flujo normal, que la crea.
+    if (session && await this._handleCriticalSignal(waId, session, incomingText)) return;
+
     // El estado pudo cambiar mientras este turno esperaba en la cola
     // serializada (p. ej. un turno anterior ya pasó a ofrecer agendar). En ese
     // caso no se corre otro turno de conversación libre: se redirige el
@@ -1322,6 +1341,42 @@ export class WhatsappBotService {
     }
 
     await this.offerScheduling(waId, { topic: synthesizedTopic, email, when: answers.__when || null });
+  }
+
+  /**
+   * Atiende las señales críticas de `leadSignals.js` (plantón en la reunión,
+   * queja, pedido de hablar con una persona, frustración con el propio bot).
+   *
+   * Corre ANTES de cualquier otra cosa y en CUALQUIER estado de la sesión, y
+   * sin pasar por el LLM: son los mensajes donde equivocarse cuesta más caro,
+   * así que no se deja la respuesta a criterio del modelo — se reconoce lo que
+   * la persona dijo con un texto fijo y se pasa a un asesor.
+   *
+   * Devuelve true si ya se atendió el mensaje (el turno no debe continuar).
+   */
+  async _handleCriticalSignal(waId, session, incomingText) {
+    const signal = criticalSignal(incomingText);
+    if (!signal) return false;
+
+    const answers = typeof session.answers === 'string' ? JSON.parse(session.answers) : (session.answers || {});
+
+    // Una misma señal no escala dos veces. Quien insiste después de que ya se
+    // le transfirió está esperando a la persona, no otra respuesta del bot:
+    // repetirle el acuse —y volver a avisar al equipo por cada mensaje— solo
+    // agrega ruido de los dos lados. Se calla, que es lo correcto aquí.
+    const escalated = answers.__signalsEscalated || [];
+    if (escalated.includes(signal)) {
+      this.logActivity({ type: 'critical_signal_repeated', waId, signal, text: incomingText });
+      return true;
+    }
+
+    answers.__signalsEscalated = [...escalated, signal];
+    await this.updateSession(waId, { answers: JSON.stringify(answers) });
+
+    this.logActivity({ type: 'critical_signal', waId, signal, text: incomingText });
+    await this.send(waId, whatsappBotCopy.criticalSignalAck(signal));
+    await this.handOffToAdvisor(waId, CRITICAL_SIGNAL_REASONS[signal]);
+    return true;
   }
 
   /**
