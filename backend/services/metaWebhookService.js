@@ -45,7 +45,7 @@ const PROGRESS_KEY_RE = /punto|avanzad|avance|estado.*tesis/;
  * y la ficha del lead se veía con los valores por defecto ("General", "No
  * especificada") aunque la persona sí los hubiera contestado.
  */
-function extractCustomFields(fieldData) {
+export function extractCustomFields(fieldData) {
   const extracted = {};
   for (const item of fieldData || []) {
     const key = normalizeFieldKey(item.name);

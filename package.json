@@ -16,7 +16,8 @@
     "migrate:status": "knex migrate:status --knexfile backend/db/knexfile.js",
     "migrate:make": "knex migrate:make --knexfile backend/db/knexfile.js -x js --migrations-directory backend/db/migrations",
     "seed": "knex seed:run --knexfile backend/db/knexfile.js",
-    "test": "node --test \"backend/**/*.test.js\""
+    "test": "node --test \"backend/**/*.test.js\"",
+    "backfill:meta-leadgen-fields": "node backend/scripts/backfillMetaLeadgenFields.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.126.0",
