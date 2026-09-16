@@ -96,7 +96,15 @@ export class YCloudWebhookService {
   }
 
   async handleInboundMessage(message) {
-    const senderId = message.from;
+    // Normalmente el remitente viene en "from" (teléfono). Un contacto que
+    // escribió tras tocar "Enviar mensaje" en un anuncio o publicación de
+    // Instagram/Facebook sin compartir su número real llega SOLO con
+    // "fromUserId" (un Business-Scoped User ID tipo "PE.xxxxx") — antes de
+    // este fix, esos mensajes se descartaban en silencio acá mismo: ni se
+    // guardaban, ni el bot se enteraba, y la conversación no aparecía en
+    // ningún lado del panel (caso real confirmado: un contacto identificado
+    // solo por fromUserId no dejó ningún rastro en el sistema).
+    const senderId = message.from || message.fromUserId;
     if (!senderId) return;
 
     const sentAt = message.sendTime ? new Date(message.sendTime) : new Date();

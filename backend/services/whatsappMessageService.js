@@ -369,10 +369,27 @@ export class WhatsappMessageService {
     if (!apiKey) throw new Error('YCLOUD_API_KEY no está configurado en el servidor.');
     if (!from) throw new Error('YCLOUD_WHATSAPP_FROM no está configurado en el servidor.');
 
+    // Un contacto que escribió sin compartir su número real (entró por
+    // "Enviar mensaje" en un anuncio/publicación de Instagram/Facebook)
+    // llega identificado solo por un Business-Scoped User ID ("PE.xxxxx",
+    // ver ycloudWebhookService.handleInboundMessage) — mandarlo por "to"
+    // como si fuera un teléfono lo convertía en "+PE.xxxxx", un número
+    // inválido que YCloud iba a rechazar. Se usa "recipient" en su lugar,
+    // el mismo campo que la Graph API nativa de Meta exige para este tipo
+    // de ID (YCloud reenvía a esa misma plataforma). OJO: esto NO está
+    // documentado en la guía pública de YCloud — si de todos modos lo
+    // rechaza, el error de abajo lo va a decir explícito.
+    const isBsuid = /^[A-Za-z]{2}\.[A-Za-z0-9]+$/.test(waId);
+
     const response = await fetch(`${YCLOUD_API_BASE}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
-      body: JSON.stringify({ from, to: toE164(waId), type: 'text', text: { body, preview_url: false } })
+      body: JSON.stringify({
+        from,
+        ...(isBsuid ? { recipient: waId } : { to: toE164(waId) }),
+        type: 'text',
+        text: { body, preview_url: false }
+      })
     });
     const data = await response.json();
 
