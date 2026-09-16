@@ -21,10 +21,16 @@
  * solo inyecta al proceso de la app.
  */
 import { db } from '../db/connection.js';
-import { extractCustomFields } from '../services/metaWebhookService.js';
+import { extractCustomFields, formatCustomFieldsNote } from '../services/metaWebhookService.js';
 
 const GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v21.0';
 const LEADGEN_MARKER_RE = /\[Meta leadgen_id=(\d+)\]/;
+// El encabezado ("[Meta leadgen_id=...] form_id=...") es lo único del
+// additional_notes original que se conserva siempre — el resto (el bloque
+// de respuestas del formulario) se reconstruye entero en cada corrida para
+// no arrastrar un formato viejo (p. ej. la primera versión de este backfill
+// guardaba el avance tal cual venía de Meta, a veces en snake_case).
+const HEADER_RE = /^\[Meta leadgen_id=\d+\]\s+form_id=\S+/;
 const DEFAULT_ACADEMIC_LEVEL = 'Pregrado (Bachiller/Título)';
 const DEFAULT_FIELD_OF_STUDY = 'General';
 
@@ -65,9 +71,21 @@ export async function runMetaLeadgenBackfill() {
       if (missingAcademicLevel && custom.academicLevel) patch.academic_level = custom.academicLevel;
       if (missingFieldOfStudy && custom.fieldOfStudy) patch.field_of_study = custom.fieldOfStudy;
       if (missingUniversity && custom.university) patch.university = custom.university;
-      if (custom.progressNote && !String(lead.additional_notes).includes('Avance declarado en el formulario:')) {
-        patch.additional_notes = `${lead.additional_notes} | Avance declarado en el formulario: ${custom.progressNote}`;
-      }
+
+      // Notas: se reconstruyen con lo que YA quedó bien en el lead (si no
+      // era el valor por defecto) más lo que se acaba de rescatar de Meta,
+      // para que el bloque de respuestas del formulario quede completo y
+      // legible sea cual sea el estado previo del lead.
+      const merged = {
+        academicLevel: patch.academic_level || (!missingAcademicLevel ? lead.academic_level : null),
+        fieldOfStudy: patch.field_of_study || (!missingFieldOfStudy ? lead.field_of_study : null),
+        university: patch.university || (!missingUniversity ? lead.university : null),
+        progressNote: custom.progressNote || null
+      };
+      const headerMatch = String(lead.additional_notes || '').match(HEADER_RE);
+      const header = headerMatch ? headerMatch[0] : `[Meta leadgen_id=${leadgenId}] form_id=desconocido`;
+      const rebuiltNotes = [header, formatCustomFieldsNote(merged)].filter(Boolean).join('\n');
+      if (rebuiltNotes !== lead.additional_notes) patch.additional_notes = rebuiltNotes;
 
       if (Object.keys(patch).length === 0) {
         result.skipped++;

@@ -27,6 +27,23 @@ function mapAcademicLevel(value) {
   return null;
 }
 
+/**
+ * Las respuestas de opción múltiple de un formulario de Meta Lead Ads a
+ * veces llegan como la CLAVE interna de la opción ("estoy_con_el_proyecto")
+ * en vez del texto que la persona vio y eligió ("Estoy con el proyecto") —
+ * caso real: la misma respuesta que en el visor nativo de Meta se ve
+ * legible llegaba así por la Graph API. Si el valor tiene esa forma
+ * (todo en snake_case/kebab-case, sin espacios ni mayúsculas), se convierte
+ * a texto legible; un valor que ya viene con espacios o mayúsculas propias
+ * (como "UNDAC" o "Título profesional") se deja tal cual.
+ */
+function prettifyFormValue(value) {
+  const v = String(value || '').trim();
+  if (!v || !/^[a-z0-9]+([_-][a-z0-9]+)+$/.test(v)) return v;
+  const words = v.replace(/[_-]+/g, ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 // Mismas preguntas que ya reconoce extractLeadFormFields() en
 // whatsappBotService.js para el resumen que llega por WhatsApp — acá se
 // comparan contra la CLAVE de cada pregunta del formulario de Meta Lead Ads
@@ -56,14 +73,30 @@ export function extractCustomFields(fieldData) {
       const level = mapAcademicLevel(value);
       if (level) extracted.academicLevel = level;
     } else if (!extracted.university && UNIVERSITY_KEY_RE.test(key)) {
-      extracted.university = value;
+      extracted.university = prettifyFormValue(value);
     } else if (!extracted.fieldOfStudy && FIELD_KEY_RE.test(key)) {
-      extracted.fieldOfStudy = value;
+      extracted.fieldOfStudy = prettifyFormValue(value);
     } else if (!extracted.progressNote && PROGRESS_KEY_RE.test(key)) {
-      extracted.progressNote = value;
+      extracted.progressNote = prettifyFormValue(value);
     }
   }
   return extracted;
+}
+
+/**
+ * Arma el bloque de notas legible con lo que se pudo extraer del
+ * formulario ("Grado académico: ...", "Universidad: ...", etc.) — mismo
+ * estilo de etiquetas que ya usa whatsappBotService.finalize() para las
+ * notas de un lead calificado por WhatsApp, para que el equipo vea el
+ * mismo formato sea cual sea el origen del lead.
+ */
+export function formatCustomFieldsNote(custom) {
+  const lines = [];
+  if (custom.academicLevel) lines.push(`Grado académico: ${custom.academicLevel}`);
+  if (custom.fieldOfStudy) lines.push(`Carrera: ${custom.fieldOfStudy}`);
+  if (custom.university) lines.push(`Universidad: ${custom.university}`);
+  if (custom.progressNote) lines.push(`Avance declarado: ${custom.progressNote}`);
+  return lines.join('\n');
 }
 
 /**
@@ -199,7 +232,8 @@ export class MetaWebhookService {
 
     const custom = extractCustomFields(data.field_data);
     const notesParts = [`${marker} form_id=${data.form_id || 'desconocido'}`];
-    if (custom.progressNote) notesParts.push(`Avance declarado en el formulario: ${custom.progressNote}`);
+    const customNote = formatCustomFieldsNote(custom);
+    if (customNote) notesParts.push(customNote);
 
     const prospect = await this.leadService.createProspect({
       fullName: fields.full_name || fields.nombre_completo || 'Prospecto de Facebook',
@@ -216,7 +250,7 @@ export class MetaWebhookService {
       // "graduar" directo al Funnel de Ventas (ver SETTER_ONLY_STATUSES en
       // LeadsView.vue).
       status: 'conversacion_abierta',
-      additionalNotes: notesParts.join(' | ')
+      additionalNotes: notesParts.join('\n')
     });
 
     console.log(`📥 [Meta Webhook] Lead importado como prospecto #${prospect.id} (leadgen_id=${leadgenId})`);
