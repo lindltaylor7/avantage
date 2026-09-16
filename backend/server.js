@@ -17,6 +17,7 @@ import { UserService } from './services/userService.js';
 import { RoleService } from './services/roleService.js';
 import { ProjectUpdateService } from './services/projectUpdateService.js';
 import { MetaWebhookService } from './services/metaWebhookService.js';
+import { runMetaLeadgenBackfill } from './scripts/backfillMetaLeadgenFields.js';
 import { PageInteractionService } from './services/pageInteractionService.js';
 import { PageMessageService } from './services/pageMessageService.js';
 import { PageFollowerService } from './services/pageFollowerService.js';
@@ -888,6 +889,25 @@ app.post('/api/leads', requireAuth, requirePermission('leads.view'), async (req,
   } catch (error) {
     console.error('❌ Error al registrar prospecto:', error);
     res.status(500).json({ error: 'Error al registrar el prospecto.', details: error.message });
+  }
+});
+
+/**
+ * Backfill de un solo uso: completa grado académico/universidad/carrera de
+ * los leads de un formulario de Meta Lead Ads importados ANTES de que
+ * metaWebhookService.importLead() empezara a guardar esas respuestas (ver
+ * backend/scripts/backfillMetaLeadgenFields.js). Se expone por HTTP en vez
+ * de solo como script de CLI porque corre dentro de este mismo proceso, que
+ * ya tiene DB_* y META_PAGE_ACCESS_TOKEN configurados correctamente — un
+ * script lanzado por SSH en hosting compartido no hereda esas variables.
+ */
+app.post('/api/leads/backfill-meta-fields', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const result = await runMetaLeadgenBackfill();
+    res.json(result);
+  } catch (error) {
+    console.error('❌ Error en el backfill de campos de Meta Lead Ads:', error);
+    res.status(500).json({ error: 'Error al ejecutar el backfill.', details: error.message });
   }
 });
 

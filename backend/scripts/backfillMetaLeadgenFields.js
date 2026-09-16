@@ -11,12 +11,15 @@
  * completa los campos que todavía están vacíos o en su valor por
  * defecto — nunca pisa un dato que el equipo ya haya corregido a mano.
  *
- * Uso: node backend/scripts/backfillMetaLeadgenFields.js
- * Requiere META_PAGE_ACCESS_TOKEN configurado en el .env del servidor.
+ * `runMetaLeadgenBackfill()` se reutiliza desde POST
+ * /api/leads/backfill-meta-fields (server.js) para que corra DENTRO del
+ * proceso de la app ya arrancado por Passenger/Hostinger — ahí `db` y
+ * `META_PAGE_ACCESS_TOKEN` ya están configurados correctamente. Correrlo
+ * como script suelto por SSH (`node backend/scripts/backfillMetaLeadgenFields.js`)
+ * requiere exportar esas mismas variables a mano en la sesión, porque un
+ * proceso lanzado por SSH no hereda las variables de entorno que Hostinger
+ * solo inyecta al proceso de la app.
  */
-import dotenv from 'dotenv';
-dotenv.config();
-
 import { db } from '../db/connection.js';
 import { extractCustomFields } from '../services/metaWebhookService.js';
 
@@ -33,30 +36,24 @@ async function fetchFieldData(leadgenId, token) {
   return data.field_data || [];
 }
 
-async function main() {
+export async function runMetaLeadgenBackfill() {
   const token = process.env.META_PAGE_ACCESS_TOKEN;
-  if (!token) {
-    console.error('❌ Falta META_PAGE_ACCESS_TOKEN en el .env — no se puede consultar la Graph API.');
-    process.exit(1);
-  }
+  if (!token) throw new Error('Falta META_PAGE_ACCESS_TOKEN en el entorno del servidor.');
 
   const leads = await db('leads').where('additional_notes', 'like', '%[Meta leadgen_id=%');
-  console.log(`🔍 ${leads.length} lead(s) con marca de formulario de Meta encontrados.`);
 
-  let updated = 0;
-  let skipped = 0;
-  let failed = 0;
+  const result = { totalFound: leads.length, updated: [], skipped: 0, failed: [] };
 
   for (const lead of leads) {
     const match = String(lead.additional_notes || '').match(LEADGEN_MARKER_RE);
-    if (!match) { skipped++; continue; }
+    if (!match) { result.skipped++; continue; }
     const leadgenId = match[1];
 
     const missingAcademicLevel = !lead.academic_level || lead.academic_level === DEFAULT_ACADEMIC_LEVEL;
     const missingFieldOfStudy = !lead.field_of_study || lead.field_of_study === DEFAULT_FIELD_OF_STUDY;
     const missingUniversity = !lead.university;
     if (!missingAcademicLevel && !missingFieldOfStudy && !missingUniversity) {
-      skipped++;
+      result.skipped++;
       continue;
     }
 
@@ -73,25 +70,37 @@ async function main() {
       }
 
       if (Object.keys(patch).length === 0) {
-        console.log(`↩️  Lead #${lead.id} (leadgen_id=${leadgenId}): la Graph API no trajo nada nuevo que completar.`);
-        skipped++;
+        result.skipped++;
         continue;
       }
 
       await db('leads').where({ id: lead.id }).update(patch);
-      console.log(`✅ Lead #${lead.id} (leadgen_id=${leadgenId}) actualizado:`, patch);
-      updated++;
+      result.updated.push({ id: lead.id, leadgenId, patch });
     } catch (error) {
-      console.error(`❌ Lead #${lead.id} (leadgen_id=${leadgenId}): ${error.message}`);
-      failed++;
+      result.failed.push({ id: lead.id, leadgenId, error: error.message });
     }
   }
 
-  console.log(`\nListo. Actualizados: ${updated} · Sin cambios: ${skipped} · Con error: ${failed}`);
-  await db.destroy();
+  return result;
 }
 
-main().catch((error) => {
-  console.error('❌ Error inesperado en el backfill:', error);
-  process.exit(1);
-});
+// Uso por CLI: node backend/scripts/backfillMetaLeadgenFields.js
+// (requiere exportar META_PAGE_ACCESS_TOKEN y las variables DB_* a mano en
+// la sesión — en Hostinger es más simple disparar esto por HTTP, ver arriba).
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const dotenv = await import('dotenv');
+  dotenv.config();
+
+  runMetaLeadgenBackfill()
+    .then((result) => {
+      console.log(`🔍 ${result.totalFound} lead(s) con marca de formulario de Meta encontrados.`);
+      for (const u of result.updated) console.log(`✅ Lead #${u.id} (leadgen_id=${u.leadgenId}) actualizado:`, u.patch);
+      for (const f of result.failed) console.error(`❌ Lead #${f.id} (leadgen_id=${f.leadgenId}): ${f.error}`);
+      console.log(`\nListo. Actualizados: ${result.updated.length} · Sin cambios: ${result.skipped} · Con error: ${result.failed.length}`);
+      return db.destroy();
+    })
+    .catch((error) => {
+      console.error('❌ Error inesperado en el backfill:', error);
+      process.exit(1);
+    });
+}
