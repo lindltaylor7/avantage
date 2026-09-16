@@ -1085,6 +1085,28 @@ export class WhatsappBotService {
     const lead = await this.leadService.findByPhone(waId);
     const contactName = firstNameOf(lead?.full_name);
 
+    // Lead que llegó del formulario de un anuncio de Meta: su primer mensaje
+    // ES el resumen del formulario ("¿Pregunta?: Respuesta" línea a línea),
+    // con grado académico, universidad y/o avance ya declarados. Repetirle
+    // "¿sobre qué tema te gustaría hacer tu tesis?" ahí ignora lo que acaba
+    // de contestar dos líneas arriba — con esos datos alcanza para ofrecerle
+    // la reunión de una vez, sin gastar el turno de apertura del LLM (que por
+    // diseño siempre pregunta el tema) en repetir algo del formulario.
+    if (isFirstTurn) {
+      const formFields = extractLeadFormFields(incomingText);
+      if (formFields.level || formFields.university || formFields.field || formFields.problem) {
+        if (formFields.level) answers.level = formFields.level;
+        if (formFields.university) answers.university = formFields.university;
+        if (formFields.field) answers.field = formFields.field;
+        if (formFields.problem) answers.problem = formFields.problem;
+        await this.updateSession(waId, { answers: JSON.stringify(answers) });
+
+        this.logActivity({ type: 'ad_form_lead_fast_track', waId, formFields });
+        await this.send(waId, `¡Hola${contactName ? `, ${contactName}` : ''}! Gracias por completar el formulario 🙌`);
+        return this.finalize(waId, answers);
+      }
+    }
+
     this.logActivity({
       type: 'llm_request',
       waId,
