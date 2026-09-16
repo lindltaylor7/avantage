@@ -1,0 +1,533 @@
+/* ===========================================================================
+   Libro contable — hoja compartida por las pestañas INGRESOS y LIBRO DIARIO.
+
+   El registro contable se lee por columnas, no por filas: la fecha, el monto y
+   el ITF van en mono con cifras tabulares para que los decimales queden
+   alineados de arriba a abajo, y cada fila lleva un filete de color en el
+   margen izquierdo — el equivalente al margen rayado de un libro mayor — que
+   dice de un vistazo si el asiento suma o resta (o si el ingreso está cobrado).
+   Ese filete es la única señal de color fuerte de la tabla; todo lo demás se
+   mantiene en gris para que la vista caiga en las cifras.
+   =========================================================================== */
+
+.ledger-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* ------------------------------------------------------------- Encabezado */
+
+.ledger-hint {
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+  max-width: 62ch;
+  margin: 0;
+}
+
+.ledger-hint code {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  background: var(--surface-2);
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+}
+
+.ledger-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.ledger-search {
+  position: relative;
+  flex: 1 1 260px;
+  min-width: 200px;
+  display: flex;
+  align-items: center;
+}
+
+.ledger-search-icon {
+  position: absolute;
+  left: 0.7rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.ledger-search-input {
+  width: 100%;
+  padding: 0.5rem 0.75rem 0.5rem 2rem;
+  font-family: var(--font-body);
+  font-size: 0.82rem;
+  color: var(--text-main);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.ledger-search-input::placeholder { color: var(--text-muted); }
+
+.ledger-search-input:focus,
+.ledger-filter:focus {
+  outline: 2px solid var(--border-glow);
+  outline-offset: 1px;
+  border-color: var(--primary);
+}
+
+.ledger-filter {
+  padding: 0.5rem 0.65rem;
+  font-family: var(--font-body);
+  font-size: 0.78rem;
+  color: var(--text-sub);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.ledger-tab .ledger-add-btn {
+  width: auto;
+  padding: 0.5rem 1rem;
+  font-size: 0.82rem;
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.ledger-tab .ledger-add-btn:hover:not(:disabled) {
+  transform: none;
+  box-shadow: 0 4px 12px -4px rgba(200, 85, 50, 0.5);
+}
+
+.ledger-tab .ledger-alert { border-color: rgba(200, 85, 50, 0.4); color: var(--accent-rose); }
+.ledger-tab .ledger-success { border-color: rgba(46, 125, 70, 0.4); color: var(--accent-emerald); }
+
+/* ------------------------------------------------------- Tira de totales */
+
+.ledger-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0;
+  margin: 0;
+  padding: 0.7rem 0.25rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+}
+
+.ledger-summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0 1.15rem;
+  border-left: 1px solid var(--border-color);
+}
+
+.ledger-summary-item:first-child { border-left: none; }
+
+.ledger-summary-item dt {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.ledger-summary-item dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-main);
+  white-space: nowrap;
+}
+
+.ledger-summary-item dd.is-in { color: var(--accent-emerald); }
+.ledger-summary-item dd.is-out { color: var(--accent-rose); }
+
+/* ------------------------------------------------------------ Formulario */
+
+.ledger-tab .ledger-form-panel { padding: 1.5rem; }
+
+.ledger-form-title {
+  margin: 0 0 1.1rem;
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.ledger-form-title strong {
+  font-family: var(--font-mono);
+  color: var(--text-main);
+}
+
+.ledger-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+.ledger-form-grid .form-group { margin-bottom: 0; }
+.ledger-form-wide { grid-column: 1 / -1; }
+
+.ledger-tab .ledger-submit-btn {
+  width: auto;
+  padding: 0.6rem 1.4rem;
+  font-size: 0.9rem;
+  border-radius: var(--radius-sm);
+  margin-top: 1.25rem;
+}
+
+.ledger-receipt-current {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.ledger-receipt-current input { width: auto; margin: 0; }
+
+/* ----------------------------------------------------------------- Tabla */
+
+.ledger-table-wrapper { overflow-x: auto; }
+
+.ledger-tab .ledger-table { font-size: 0.82rem; }
+
+.ledger-tab .ledger-table th {
+  padding: 0.6rem 0.8rem;
+  font-size: 0.63rem;
+  letter-spacing: 0.09em;
+}
+
+.ledger-tab .ledger-table th.ledger-num { text-align: right; }
+
+.ledger-tab .ledger-table td {
+  padding: 0.65rem 0.8rem;
+  vertical-align: middle;
+}
+
+/* Filete del margen: verde si el dinero entra, terracota si sale. */
+.ledger-tab .ledger-table tbody td:first-child {
+  position: relative;
+  padding-left: 1.05rem;
+}
+
+.ledger-tab .ledger-table tbody td:first-child::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--ledger-rail, transparent);
+}
+
+.ledger-row-in { --ledger-rail: rgba(46, 125, 70, 0.75); }
+.ledger-row-out { --ledger-rail: rgba(200, 85, 50, 0.7); }
+.ledger-row-pending { --ledger-rail: rgba(222, 117, 75, 0.55); }
+
+/* Cabecera ordenable */
+.ledger-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.ledger-sort:hover { color: var(--text-main); }
+.ledger-sort.is-active { color: var(--primary); }
+.ledger-sort-caret { font-size: 0.7rem; line-height: 1; }
+
+/* Celdas */
+.ledger-code {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.ledger-date {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ledger-detalle {
+  max-width: 250px;
+  min-width: 170px;
+  line-height: 1.45;
+  color: var(--text-main);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ledger-num {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ledger-amount { color: var(--text-main); font-weight: 500; }
+.ledger-amount.is-negative { color: var(--accent-rose); }
+.ledger-amount-cur { color: var(--text-muted); font-size: 0.72rem; margin-right: 0.3rem; }
+.ledger-muted { color: var(--text-muted); }
+
+.ledger-eyebrow {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.61rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 0.12rem;
+}
+
+.ledger-stack-main {
+  display: block;
+  color: var(--text-main);
+  line-height: 1.35;
+}
+
+.ledger-cap { text-transform: capitalize; }
+
+/* Columna de acciones fijada al borde derecho: en una tabla ancha es lo
+   primero que el scroll horizontal se comía. */
+.ledger-tab .ledger-table th.ledger-col-actions,
+.ledger-tab .ledger-table td.ledger-col-actions {
+  position: sticky;
+  right: 0;
+  width: 1%;
+  background: var(--bg-card-solid);
+  /* La sombra interior repone la línea divisoria: en una tabla con bordes
+     colapsados, una celda `sticky` deja de pintar su propio borde. */
+  box-shadow: -10px 0 12px -12px rgba(16, 20, 20, 0.45),
+              inset 0 -1px 0 var(--border-color);
+}
+
+.ledger-tab .ledger-table thead th.ledger-col-actions,
+.ledger-tab .ledger-table tbody tr:hover > td.ledger-col-actions {
+  background: linear-gradient(var(--surface-1), var(--surface-1)), var(--bg-card-solid);
+}
+
+.ledger-tab .ledger-table tbody tr:last-child > td.ledger-col-actions {
+  box-shadow: -10px 0 12px -12px rgba(16, 20, 20, 0.45);
+}
+
+.ledger-row-actions {
+  display: flex;
+  gap: 0.25rem;
+  justify-content: flex-end;
+}
+
+.ledger-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.ledger-icon-btn svg { width: 15px; height: 15px; }
+
+.ledger-icon-btn:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--bg-card-hover);
+}
+
+.ledger-icon-btn.is-danger:hover {
+  color: #fff;
+  background: var(--accent-rose);
+  border-color: var(--accent-rose);
+}
+
+/* ---------------------------------------------------------- Comprobantes */
+
+.receipt-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+
+.receipt-thumb {
+  position: relative;
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-2);
+}
+
+.receipt-thumb-link { display: block; width: 100%; height: 100%; }
+.receipt-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.receipt-thumb-pdf {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--accent-rose);
+  background: rgba(200, 85, 50, 0.08);
+}
+
+.receipt-thumb-loading { font-size: 0.75rem; color: var(--text-muted); }
+
+.receipt-remove {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent-rose);
+  color: #fff;
+  font-size: 0.58rem;
+  line-height: 1;
+  cursor: pointer;
+  display: none;
+}
+
+.receipt-thumb:hover .receipt-remove { display: block; }
+
+.receipt-add {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.receipt-add:hover { color: var(--primary); border-color: var(--primary); }
+
+/* ----------------------------------------------------------- Paginación */
+
+.ledger-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.55rem 0.25rem 0;
+}
+
+.ledger-pagination-count {
+  margin: 0;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+.ledger-pagination-count strong {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-sub);
+}
+
+.ledger-pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.ledger-pagesize {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.73rem;
+  color: var(--text-muted);
+}
+
+.ledger-pagesize .ledger-filter { padding: 0.3rem 0.4rem; font-size: 0.73rem; }
+
+.ledger-pager { display: flex; align-items: center; gap: 0.2rem; }
+
+.ledger-pager-btn {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 0.4rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: none;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.ledger-pager-btn:hover:not(:disabled) {
+  color: var(--text-main);
+  border-color: var(--border-color);
+  background: var(--surface-1);
+}
+
+.ledger-pager-btn.is-active {
+  color: var(--on-tint-strong);
+  border-color: rgba(111, 129, 37, 0.35);
+  background: rgba(111, 129, 37, 0.12);
+  font-weight: 600;
+}
+
+.ledger-pager-btn:disabled { opacity: 0.35; cursor: default; }
+
+.ledger-pager-gap {
+  padding: 0 0.15rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+@media (max-width: 720px) {
+  .ledger-add-btn { margin-left: 0; width: 100%; }
+  .ledger-summary-item { border-left: none; padding: 0.35rem 0.9rem; }
+  .ledger-pagination { justify-content: center; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ledger-icon-btn { transition: none; }
+}

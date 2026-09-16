@@ -1,10 +1,30 @@
 <template>
   <section class="ledger-tab">
-    <div class="ledger-toolbar">
-      <p class="ledger-hint">
-        Código autogenerado por día. El monto admite valores negativos y el ITF se calcula
-        sobre su valor absoluto.
-      </p>
+    <p class="ledger-hint">
+      Código autogenerado por día. El monto admite valores negativos y el ITF se calcula
+      sobre su valor absoluto.
+    </p>
+
+    <div class="ledger-controls">
+      <label class="ledger-search">
+        <span class="ledger-search-icon" aria-hidden="true">🔎</span>
+        <input
+          v-model="search"
+          type="search"
+          class="ledger-search-input"
+          placeholder="Buscar por código, detalle, área o destino"
+          aria-label="Buscar asientos"
+        />
+      </label>
+      <select v-model="estadoFilter" class="ledger-filter" aria-label="Filtrar por estado">
+        <option value="">Todo estado</option>
+        <option value="pagado">Pagado</option>
+        <option value="pendiente">Pendiente</option>
+      </select>
+      <select v-model="bancoFilter" class="ledger-filter" aria-label="Filtrar por banco">
+        <option value="">Todo banco</option>
+        <option v-for="b in BANCOS" :key="b" :value="b">{{ b }}</option>
+      </select>
       <button type="button" class="btn-primary ledger-add-btn" @click="isFormOpen ? closeForm() : openCreate()">
         {{ isFormOpen ? (editingRow ? '✕ Cancelar edición' : '✕ Cerrar') : '+ Nuevo asiento' }}
       </button>
@@ -14,7 +34,9 @@
     <p v-if="successMessage" class="info-box ledger-success">✅ {{ successMessage }}</p>
 
     <section v-if="isFormOpen" class="glass-panel ledger-form-panel">
-      <h3 v-if="editingRow" class="ledger-form-title">Editando el asiento {{ editingRow.code }}</h3>
+      <h3 v-if="editingRow" class="ledger-form-title">
+        Editando el asiento <strong>{{ editingRow.code }}</strong>
+      </h3>
       <form class="ledger-form" @submit.prevent="submit">
         <div class="ledger-form-grid">
           <div class="form-group">
@@ -87,69 +109,159 @@
     </section>
 
     <div v-if="isLoading" class="empty-state"><p>Cargando libro diario...</p></div>
+
     <div v-else-if="rows.length === 0" class="empty-state">
       <p class="empty-state-title">Libro diario vacío</p>
       <p class="empty-state-text">Registra el primer asiento con "+ Nuevo asiento".</p>
     </div>
-    <div v-else class="data-table-wrapper ledger-table-wrapper">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>Código</th><th>Fecha</th><th>Detalle</th><th>Monto</th><th>Moneda</th><th>ITF</th>
-            <th>Banco</th><th>Estado</th><th>Área</th><th>Asiento por destino</th><th>Comprobante</th><th></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="row in rows" :key="row.id">
-            <td class="data-mono">{{ row.code }}</td>
-            <td class="data-mono">{{ formatDate(row.fecha) }}</td>
-            <td class="ledger-detalle">{{ row.detalle }}</td>
-            <td class="data-mono" :class="Number(row.monto) < 0 ? 'amount-negative' : 'amount-positive'">
-              {{ formatAmount(row.monto) }}
-            </td>
-            <td class="ledger-cap">{{ row.moneda }}</td>
-            <td class="data-mono">{{ formatAmount(row.itf) }}</td>
-            <td>{{ row.banco }}</td>
-            <td>
-              <span class="pill" :class="row.estado === 'pagado' ? 'pill-success' : 'pill-warning'">{{ row.estado }}</span>
-            </td>
-            <td>{{ row.area || '—' }}</td>
-            <td>{{ row.asiento_por_destino || '—' }}</td>
-            <td>
-              <a
-                v-if="row.receipt_filename"
-                class="receipt-thumb"
-                :href="receiptUrls[row.id] || undefined"
-                target="_blank"
-                rel="noopener"
-                :title="row.receipt_original_name || 'Comprobante'"
+
+    <template v-else>
+      <dl class="ledger-summary">
+        <div class="ledger-summary-item">
+          <dt>Asientos</dt>
+          <dd>{{ range.total }}</dd>
+        </div>
+        <div class="ledger-summary-item">
+          <dt>Ingresos</dt>
+          <dd class="is-in">S/ {{ formatAmount(totals.ingresos) }}</dd>
+        </div>
+        <div class="ledger-summary-item">
+          <dt>Egresos</dt>
+          <dd class="is-out">S/ {{ formatAmount(totals.egresos) }}</dd>
+        </div>
+        <div class="ledger-summary-item">
+          <dt>Neto</dt>
+          <dd>S/ {{ formatAmount(totals.ingresos - totals.egresos) }}</dd>
+        </div>
+        <div class="ledger-summary-item">
+          <dt>ITF</dt>
+          <dd>S/ {{ formatAmount(totals.itf) }}</dd>
+        </div>
+      </dl>
+
+      <div v-if="paged.length === 0" class="empty-state">
+        <p class="empty-state-title">Ningún asiento coincide</p>
+        <p class="empty-state-text">
+          Ajusta la búsqueda o los filtros para volver a ver el registro.
+        </p>
+        <button type="button" class="btn-secondary ledger-submit-btn" @click="clearFilters()">
+          Quitar filtros
+        </button>
+      </div>
+
+      <template v-else>
+        <div class="data-table-wrapper ledger-table-wrapper">
+          <table class="data-table ledger-table">
+            <thead>
+              <tr>
+                <th>Código</th>
+                <th>
+                  <button type="button" class="ledger-sort" :class="{ 'is-active': sort.key === 'fecha' }" @click="toggleSort('fecha')">
+                    Fecha <span class="ledger-sort-caret">{{ sortCaret('fecha') }}</span>
+                  </button>
+                </th>
+                <th>Detalle</th>
+                <th class="ledger-num">
+                  <button type="button" class="ledger-sort" :class="{ 'is-active': sort.key === 'monto' }" @click="toggleSort('monto')">
+                    Monto <span class="ledger-sort-caret">{{ sortCaret('monto') }}</span>
+                  </button>
+                </th>
+                <th class="ledger-num">ITF</th>
+                <th>Banco</th>
+                <th>Estado</th>
+                <th>Clasificación</th>
+                <th>Comprobante</th>
+                <th class="ledger-col-actions" aria-label="Acciones"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="row in paged"
+                :key="row.id"
+                :class="Number(row.monto) < 0 ? 'ledger-row-out' : 'ledger-row-in'"
               >
-                <span v-if="!receiptUrls[row.id]" class="receipt-thumb-loading">…</span>
-                <span
-                  v-else-if="isPdfReceipt(row.receipt_mime_type, row.receipt_original_name)"
-                  class="receipt-thumb-pdf"
-                >📄</span>
-                <img v-else :src="receiptUrls[row.id]" alt="Comprobante" />
-              </a>
-              <span v-else>—</span>
-            </td>
-            <td>
-              <div class="ledger-row-actions">
-                <button type="button" class="btn-secondary ledger-delete-btn" title="Editar asiento" @click="startEdit(row)">✏️</button>
-                <button type="button" class="btn-secondary ledger-delete-btn" title="Eliminar asiento" @click="removeRow(row.id)">🗑️</button>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+                <td class="ledger-code">{{ row.code }}</td>
+                <td class="ledger-date">{{ formatDate(row.fecha) }}</td>
+                <td>
+                  <span class="ledger-detalle" :title="row.detalle">{{ row.detalle }}</span>
+                </td>
+                <td class="ledger-num">
+                  <span class="ledger-amount-cur">{{ currencySymbol(row.moneda) }}</span>
+                  <span class="ledger-amount" :class="{ 'is-negative': Number(row.monto) < 0 }">
+                    {{ formatAmount(row.monto) }}
+                  </span>
+                </td>
+                <td class="ledger-num">
+                  <span v-if="Number(row.itf) > 0">{{ formatAmount(row.itf) }}</span>
+                  <span v-else class="ledger-muted">—</span>
+                </td>
+                <td>{{ row.banco }}</td>
+                <td>
+                  <span class="pill" :class="row.estado === 'pagado' ? 'pill-success' : 'pill-warning'">{{ row.estado }}</span>
+                </td>
+                <td>
+                  <span v-if="row.area" class="ledger-eyebrow">{{ row.area }}</span>
+                  <span class="ledger-stack-main">{{ row.asiento_por_destino || '—' }}</span>
+                </td>
+                <td>
+                  <a
+                    v-if="row.receipt_filename"
+                    class="receipt-thumb"
+                    :href="receiptUrls[row.id] || undefined"
+                    target="_blank"
+                    rel="noopener"
+                    :title="row.receipt_original_name || 'Comprobante'"
+                  >
+                    <span v-if="!receiptUrls[row.id]" class="receipt-thumb-loading">…</span>
+                    <span
+                      v-else-if="isPdfReceipt(row.receipt_mime_type, row.receipt_original_name)"
+                      class="receipt-thumb-pdf"
+                    >PDF</span>
+                    <img v-else :src="receiptUrls[row.id]" alt="Comprobante" />
+                  </a>
+                  <span v-else class="ledger-muted">—</span>
+                </td>
+                <td class="ledger-col-actions">
+                  <div class="ledger-row-actions">
+                    <button type="button" class="ledger-icon-btn" title="Editar asiento" aria-label="Editar asiento" @click="startEdit(row)">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M12 20h9" />
+                        <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                      </svg>
+                    </button>
+                    <button type="button" class="ledger-icon-btn is-danger" title="Eliminar asiento" aria-label="Eliminar asiento" @click="removeRow(row.id)">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />
+                        <path d="M10 11v6M14 11v6" />
+                      </svg>
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <LedgerPagination
+          v-model:page="page"
+          v-model:page-size="pageSize"
+          :total-pages="totalPages"
+          :range="range"
+          noun="asientos"
+        />
+      </template>
+    </template>
   </section>
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { apiFetch } from '../../apiClient.js';
 import { isPdfReceipt, loadReceiptUrl } from './receiptImage.js';
+import { currencySymbol, dayOnly, formatAmount, formatDate } from './format.js';
+import { useLedgerTable } from './useLedgerTable.js';
+import LedgerPagination from './LedgerPagination.vue';
+import './ledger.css';
 
 const BANCOS = ['BCP', 'Interbank', 'Efectivo'];
 
@@ -166,6 +278,46 @@ const editingRow = ref(null);
 const removeReceipt = ref(false);
 let pendingFile = null;
 
+const {
+  search, estado: estadoFilter, banco: bancoFilter, sort, page, pageSize,
+  filtered, paged, totalPages, range, toggleSort, sortCaret, clearFilters
+} = useLedgerTable(rows, {
+  searchText: (row) => [row.code, row.detalle, row.area, row.asiento_por_destino, row.banco]
+    .filter(Boolean).join(' '),
+  sorters: {
+    fecha: (row) => dayOnly(row.fecha),
+    monto: (row) => Number(row.monto) || 0
+  },
+  defaultSort: { key: 'fecha', dir: 'desc' }
+});
+
+/**
+ * Totales del subconjunto que se está mirando (búsqueda y filtros incluidos),
+ * solo sobre los asientos en soles: sumar monedas distintas daría una cifra
+ * que no significa nada.
+ */
+const totals = computed(() => {
+  let ingresos = 0;
+  let egresos = 0;
+  let itf = 0;
+  for (const row of filtered.value) {
+    if (row.moneda !== 'soles') continue;
+    const monto = Number(row.monto) || 0;
+    if (monto >= 0) ingresos += monto;
+    else egresos += -monto;
+    itf += Number(row.itf) || 0;
+  }
+  return { ingresos, egresos, itf };
+});
+
+const itfPreview = computed(() => calcItf(form.monto));
+
+function calcItf(monto) {
+  const a = Math.abs(Number(monto) || 0);
+  if (a < 1000) return 0;
+  return Math.round(Math.floor(a / 1000) * 0.05 * 100) / 100;
+}
+
 function emptyForm() {
   return {
     fecha: new Date().toISOString().slice(0, 10),
@@ -180,22 +332,6 @@ function emptyForm() {
 }
 
 const form = reactive(emptyForm());
-
-const itfPreview = computed(() => calcItf(form.monto));
-
-function calcItf(monto) {
-  const a = Math.abs(Number(monto) || 0);
-  if (a < 1000) return 0;
-  return Math.round(Math.floor(a / 1000) * 0.05 * 100) / 100;
-}
-
-function formatAmount(value) {
-  return Number(value || 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-function formatDate(dateStr) {
-  return new Date(dateStr).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' });
-}
 
 function onFileChange(event) {
   pendingFile = event.target.files?.[0] || null;
@@ -225,7 +361,7 @@ function startEdit(row) {
   editingRow.value = row;
   resetForm();
   Object.assign(form, {
-    fecha: row.fecha ? String(row.fecha).slice(0, 10) : '',
+    fecha: dayOnly(row.fecha),
     detalle: row.detalle || '',
     monto: row.monto ?? '',
     moneda: row.moneda || 'soles',
@@ -245,14 +381,24 @@ function releaseUrls() {
   }
 }
 
-async function hydrateReceipts() {
-  for (const row of rows.value) {
-    if (!row.receipt_filename || receiptUrls[row.id]) continue;
-    try {
-      receiptUrls[row.id] = await loadReceiptUrl(`/api/finance/journal/${row.id}/receipt`);
-    } catch { /* miniatura simplemente no se muestra */ }
+function forgetReceiptUrl(id) {
+  if (receiptUrls[id]) {
+    URL.revokeObjectURL(receiptUrls[id]);
+    delete receiptUrls[id];
   }
 }
+
+/** Solo se descargan las miniaturas de la página visible. */
+async function hydrateReceipts() {
+  await Promise.all(paged.value.map(async (row) => {
+    if (!row.receipt_filename || receiptUrls[row.id]) return;
+    try {
+      receiptUrls[row.id] = await loadReceiptUrl(`/api/finance/journal/${row.id}/receipt`);
+    } catch { /* la miniatura simplemente no se muestra */ }
+  }));
+}
+
+watch(paged, hydrateReceipts);
 
 async function fetchRows() {
   isLoading.value = true;
@@ -312,13 +458,6 @@ async function submit() {
   }
 }
 
-function forgetReceiptUrl(id) {
-  if (receiptUrls[id]) {
-    URL.revokeObjectURL(receiptUrls[id]);
-    delete receiptUrls[id];
-  }
-}
-
 async function removeRow(id) {
   if (!confirm('¿Eliminar este asiento? Esta acción no se puede deshacer.')) return;
   try {
@@ -335,73 +474,3 @@ async function removeRow(id) {
 onMounted(fetchRows);
 onBeforeUnmount(releaseUrls);
 </script>
-
-<style scoped>
-.ledger-tab { display: flex; flex-direction: column; gap: 1rem; }
-
-.ledger-toolbar {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-
-.ledger-hint { font-size: 0.8rem; color: var(--text-muted); max-width: 640px; margin: 0; }
-.ledger-add-btn { width: auto; padding: 0.55rem 1.1rem; flex-shrink: 0; }
-
-.ledger-alert { border-color: rgba(200, 85, 50, 0.4); color: var(--accent-rose); }
-.ledger-success { border-color: rgba(46, 125, 70, 0.4); color: var(--accent-emerald); }
-
-.ledger-form-panel { padding: 1.5rem; }
-.ledger-form-title { margin: 0 0 1rem; font-size: 0.95rem; color: var(--text-muted); }
-
-.ledger-receipt-current {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin-top: 0.5rem;
-  font-size: 0.78rem;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
-.ledger-receipt-current input { width: auto; margin: 0; }
-
-.ledger-form-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 1rem;
-}
-
-.ledger-form-grid .form-group { margin-bottom: 0; }
-.ledger-form-wide { grid-column: 1 / -1; }
-
-.ledger-submit-btn { width: auto; padding: 0.6rem 1.5rem; margin-top: 1.25rem; }
-
-.ledger-table-wrapper { overflow-x: auto; }
-.ledger-cap { text-transform: capitalize; }
-.ledger-detalle { max-width: 240px; }
-
-.amount-positive { color: var(--accent-emerald); font-weight: 600; }
-.amount-negative { color: var(--accent-rose); font-weight: 600; }
-
-.ledger-delete-btn { padding: 0.3rem 0.55rem; font-size: 0.8rem; }
-.ledger-row-actions { display: flex; gap: 0.3rem; }
-
-.receipt-thumb {
-  display: inline-flex;
-  width: 38px;
-  height: 38px;
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  border: 1px solid var(--border-color);
-  align-items: center;
-  justify-content: center;
-  background: var(--surface-2);
-}
-
-.receipt-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.receipt-thumb-loading { font-size: 0.8rem; color: var(--text-muted); }
-.receipt-thumb-pdf { font-size: 1.2rem; line-height: 1; }
-</style>
