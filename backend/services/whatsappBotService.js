@@ -248,10 +248,6 @@ function extractEmail(value) {
   return match ? match[0].replace(/[.,;:]+$/, '').toLowerCase() : null;
 }
 
-function looksLikeEmail(value) {
-  return !!extractEmail(value);
-}
-
 /**
  * Los leads que llegan de un anuncio de Meta con formulario ("Click to
  * WhatsApp" + preguntas propias) abren la conversación con un mensaje
@@ -2618,33 +2614,20 @@ export class WhatsappBotService {
    * como cuando ya había dicho una hora exacta que estaba libre.
    */
   /**
-   * Último paso antes de crear el evento. Si la reunión es por Meet y todavía
-   * no tenemos su correo, se le pide AQUÍ y no al principio: ya eligió su
-   * horario, así que la pregunta deja de ser un peaje y pasa a ser el cierre
-   * de algo que ya está hecho. El horario elegido se guarda mientras tanto.
-   *
-   * Se pide por la invitación al calendario, que es lo que el correo compra de
-   * verdad — el link de Meet le llega por WhatsApp igual—, y se le dice que
-   * puede saltarlo: el paso ya aceptaba "no", pero nada lo anunciaba.
+   * Último paso antes de crear el evento. Ya no se pregunta por el correo:
+   * el link de Meet llega por WhatsApp de todas formas, así que pedirlo solo
+   * agregaba un paso más donde la conversación se podía atascar (un correo
+   * mal escrito, o un contacto que no puede escribir y manda un audio en su
+   * lugar — ver forceBookPendingSlot(), que sigue existiendo como salida
+   * manual para sesiones viejas que sí llegaron a quedar en ese paso).
+   * Se agenda directo con el horario ya elegido.
    */
   async bookSlot(waId, slot) {
     const session = await this.getSession(waId);
-    const { answers, scheduling } = this._readScheduling(session);
+    const { scheduling } = this._readScheduling(session);
     if (!scheduling) { await this.updateSession(waId, { status: 'completed' }); return; }
 
-    const needsEmail = scheduling.mode === 'meet' && !looksLikeEmail(scheduling.email) && !scheduling.emailSkipped;
-    if (!needsEmail) return this.confirmSlot(waId, slot);
-
-    scheduling.pendingSlot = slot;
-    await this.updateSession(waId, { status: 'scheduling_email', answers: JSON.stringify(answers) });
-    // "Perfecto: <horario>" y no "queda agendada": el evento todavía no existe
-    // hasta que conteste, y darlo por hecho aquí dejaría a quien no responde
-    // creyendo que tiene una reunión.
-    await this.send(
-      waId,
-      `Perfecto: *${slot.label}* ✉️ ¿A qué correo te mando la invitación al calendario? ` +
-      'Si prefieres, dime "no" y te dejo el link por aquí.'
-    );
+    return this.confirmSlot(waId, slot);
   }
 
   async confirmSlot(waId, slot) {
