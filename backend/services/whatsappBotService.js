@@ -207,15 +207,6 @@ function dayLabelWithArticle(dateStr) {
   return label === 'hoy' ? label : `el ${label}`;
 }
 
-/**
- * El mismo día para ir detrás de un "de": "de hoy", "del jueves 17". Sin esto
- * salía "de el jueves 17" al preguntarle de qué día es la hora que pidió.
- */
-function dayLabelWithOf(dateStr) {
-  const label = formatShortDayLabel(dateStr);
-  return label === 'hoy' ? 'de hoy' : `del ${label}`;
-}
-
 function limaTodayIso() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 }
@@ -372,9 +363,9 @@ const VAGUE_TIME_TOLERANCE_MINUTES = 90;
  * Responder solo con una hora ("3:30") cuando se le acaban de nombrar los
  * días es lo normal si esa hora es una de las que se le dijeron: para él el
  * día va implícito. Antes eso caía en "No identifiqué el día", que le pedía
- * repetir algo que acababa de decir. Con los bloques en la mano el día se
- * deduce solo cuando no hay duda —una sola fecha tiene esa hora libre— y si
- * hay varias se le pregunta cuál, nombrándolas.
+ * repetir algo que acababa de decir. Con los bloques en la mano el día sale
+ * del calendario: el que llame primero se queda con la hora (van ordenados),
+ * que es justo lo que espera quien responde "3:30" a un "hoy de 3:30 a 6".
  */
 export function daysMatchingPreferredTime(slots, preferredTime, precision = 'exact') {
   const target = clockMinutes(preferredTime);
@@ -2498,9 +2489,8 @@ export class WhatsappBotService {
     // a las 6 pm"). Antes se descartaba y se le ofrecían siempre los primeros
     // bloques del día, aunque la hora que pidió estuviera libre.
     const parsedDate = await this.ollamaService.parseSchedulingDate(trimmed, todayIso, MAX_BOOKING_DAYS_AHEAD);
-    const { declined } = parsedDate;
-    let { date, preferredTime } = parsedDate;
-    let timePrecision = parsedDate.timePrecision;
+    const { declined, preferredTime, timePrecision } = parsedDate;
+    let { date } = parsedDate;
 
     // El lead está posponiendo/declinando (ej. "mañana le escribo"), no
     // eligiendo un día: aunque mencione una palabra de fecha, insistir con
@@ -2512,20 +2502,12 @@ export class WhatsappBotService {
       return;
     }
 
-    // Hora que quedó pendiente de aclarar en qué día ("3:30" → "¿de hoy o del
-    // jueves 17?"): si ahora responde solo el día, la hora sigue siendo la que
-    // él dijo. Recuperarla evita mandarle una lista a elegir lo que ya eligió.
-    const pendingTime = scheduling.pendingTime;
-    delete scheduling.pendingTime;
-    if (pendingTime && !preferredTime) {
-      preferredTime = pendingTime;
-      timePrecision = 'exact';
-    }
-
     // Respondió SOLO con una hora, sin nombrar día. No es que no se entienda:
-    // acaba de escuchar los días y para él el día va implícito en la hora. El
-    // día se deduce de la agenda misma y solo se le pregunta si de verdad hay
-    // más de un día con esa hora libre.
+    // acaba de escuchar "hoy de 3:30 p.m. a 6:00 p.m." y para él el día va
+    // implícito en la hora. Se asume el más próximo que tenga esa hora libre
+    // —hoy, si la tiene—, igual que cuando la hora llega antes de proponerle
+    // los días; la confirmación nombra la fecha completa, así que si se
+    // refería a otro día lo ve ahí mismo y lo corrige.
     if (!date && preferredTime) {
       const freeSlots = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID, { limit: 100, days: BOOKING_WINDOW_DAYS });
       availableDays = [...new Set(freeSlots.map((s) => s.date))].sort();
@@ -2538,23 +2520,12 @@ export class WhatsappBotService {
         return;
       }
 
+      // Sin día, manda el calendario: el primero que tenga esa hora libre. Si
+      // no la tiene ninguno se cae al primer día con agenda, para responderle
+      // "a esa hora no tenemos, estos son los más cercanos" en vez de un "no
+      // identifiqué el día" que ignora lo que pidió.
       const candidateDays = daysMatchingPreferredTime(freeSlots, preferredTime, timePrecision);
-      if (candidateDays.length === 1) {
-        date = candidateDays[0];
-      } else if (candidateDays.length > 1) {
-        scheduling.pendingTime = preferredTime;
-        const labels = candidateDays.map(dayLabelWithOf);
-        const daysOptions = `${labels.slice(0, -1).join(', ')} o ${labels[labels.length - 1]}`;
-        if (await this._registerStepMiss(waId, answers, scheduling, 'El lead dijo una hora sin decir de qué día.')) return;
-        await this.send(waId, `Esa hora la tenemos libre en más de un día 🙌 ¿Las ${formatClockLabel(preferredTime)} ${daysOptions}?`);
-        return;
-      } else {
-        // Esa hora no está libre ningún día: se sigue con el primero con
-        // agenda para poder responderle "a esa hora no tenemos, estos son los
-        // más cercanos" en vez de un "no identifiqué el día" que ignora lo
-        // que pidió.
-        date = availableDays[0];
-      }
+      date = candidateDays[0] || availableDays[0];
     }
 
     if (!date) {
@@ -2596,7 +2567,7 @@ export class WhatsappBotService {
     // Si dijo día Y hora, esa hora está libre y la eligió de verdad, se agenda
     // directo: pedirle que elija de una lista lo que acaba de pedir es dar una
     // vuelta de más.
-    if (exact && canBookExactTime(trimmed, { ...parsedDate, preferredTime, timePrecision })) {
+    if (exact && canBookExactTime(trimmed, parsedDate)) {
       scheduling.slots = daySlots;
       await this.updateSession(waId, { answers: JSON.stringify(answers) });
       this.logActivity({ type: 'exact_time_booked', waId, when: trimmed, slot: exact.label });

@@ -70,9 +70,9 @@ test('detectRedundantAsk NO marca redundante la pregunta por el tema en el prime
 // --- Responder solo con una hora ("3:30") a la propuesta de días ---------
 // Caso real: se le ofreció "hoy de 3:30 p.m. a 6:00 p.m. y el jueves 17...",
 // respondió "3:30" y el bot contestó "No identifiqué el día", pidiéndole
-// repetir lo que acababa de decir. El día sale de la agenda: si esa hora solo
-// está libre un día, es ese; si está libre en varios, se le pregunta cuál.
-// Lima es UTC-5 todo el año, así que 20:30Z = 3:30 p.m.
+// repetir lo que acababa de decir. El día sale de la agenda, y el primero de
+// la lista es el que se agenda: quien contesta "3:30" a un "hoy de 3:30 a 6"
+// está diciendo hoy. Lima es UTC-5 todo el año, así que 20:30Z = 3:30 p.m.
 const slotAt = (date, iso) => ({ date, startTime: iso });
 
 test('daysMatchingPreferredTime deduce el día cuando la hora solo está libre en uno', () => {
@@ -83,11 +83,12 @@ test('daysMatchingPreferredTime deduce el día cuando la hora solo está libre e
   assert.deepEqual(daysMatchingPreferredTime(slots, '15:30'), ['2026-09-16']);
 });
 
-test('daysMatchingPreferredTime devuelve los dos días cuando la hora está libre en ambos', () => {
+test('daysMatchingPreferredTime devuelve los días en orden: el más próximo primero', () => {
   const slots = [
-    slotAt('2026-09-16', '2026-09-16T20:30:00.000Z'),
-    slotAt('2026-09-17', '2026-09-17T20:30:00.000Z')
+    slotAt('2026-09-17', '2026-09-17T20:30:00.000Z'),
+    slotAt('2026-09-16', '2026-09-16T20:30:00.000Z')
   ];
+  // Los dos tienen las 3:30 libres; se agenda el primero, o sea hoy.
   assert.deepEqual(daysMatchingPreferredTime(slots, '15:30'), ['2026-09-16', '2026-09-17']);
 });
 
