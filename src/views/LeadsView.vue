@@ -1102,12 +1102,17 @@ onBeforeUnmount(stopBotChatPolling);
 
 // Leads que Avan todavía está calificando por WhatsApp (Setter Funnel) no
 // cuentan como leads comerciales todavía: no aparecen en ninguna columna ni
-// estadística del Funnel de Ventas hasta que se agenda una llamada o se
-// transfieren a un asesor (ver whatsappBotService.js).
-const SETTER_ONLY_STATUSES = new Set(['conversacion_abierta', 'calificando', 'congelado']);
-// Un lead que ya se agendó o se transfirió "gradúa" del Setter Funnel al
-// Funnel de Ventas, entrando a esta columna (recién ahí es un lead comercial).
-const GRADUATED_STATUS_TO_SALES_COLUMN = { cita_agendada: 'nuevo', transferido_closer: 'nuevo' };
+// estadística del Funnel de Ventas hasta que se agenda una llamada.
+// "transferido_closer" NO gradúa: es un lead que Avan pasó a un asesor humano
+// SIN llegar a agendar (queja, pedido de hablar con alguien, sin horarios
+// libres en el Calendar, etc. — ver handOffToAdvisor en whatsappBotService.js).
+// Que un asesor lo esté atendiendo no significa que tenga una reunión, así
+// que se queda visible solo en su propia columna del Setter Funnel — antes
+// entraba también acá y se contaba como "Con Reunión" sin tener cita real.
+const SETTER_ONLY_STATUSES = new Set(['conversacion_abierta', 'calificando', 'congelado', 'transferido_closer']);
+// Un lead con cita ya agendada "gradúa" del Setter Funnel al Funnel de
+// Ventas, entrando a esta columna (recién ahí es un lead comercial).
+const GRADUATED_STATUS_TO_SALES_COLUMN = { cita_agendada: 'nuevo' };
 
 const visibleLeads = computed(() => leads.value.filter(l => !SETTER_ONLY_STATUSES.has(l.status)));
 
@@ -1160,9 +1165,9 @@ const filteredLeadsByColumn = computed(() => {
       if (selectedViabilityFilter.value === 'baja' && !lvl.includes('baja')) continue;
     }
 
-    // Ubicar en columna correspondiente — un status "graduado" del Setter
-    // Funnel (cita_agendada/transferido_closer) entra por la columna que le
-    // corresponda como lead comercial nuevo, no por su status literal.
+    // Ubicar en columna correspondiente — un lead "graduado" del Setter
+    // Funnel (cita_agendada) entra por la columna que le corresponda como
+    // lead comercial nuevo, no por su status literal.
     const effectiveStatus = GRADUATED_STATUS_TO_SALES_COLUMN[lead.status] || lead.status;
     if (grouped[effectiveStatus]) {
       grouped[effectiveStatus].push(lead);
