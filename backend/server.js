@@ -1582,6 +1582,21 @@ app.post('/api/whatsapp/conversations/:waId/bot/reset', requireAuth, requirePerm
 });
 
 /**
+ * Override manual: agenda el horario que el contacto ya eligió sin esperar
+ * más el correo de invitación — para conversaciones atascadas en ese paso
+ * (ver whatsappBotService.forceBookPendingSlot).
+ */
+app.post('/api/whatsapp/conversations/:waId/bot/force-book', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    await whatsappBotService.forceBookPendingSlot(req.params.waId);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error al forzar el agendamiento manual:', error);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+/**
  * Configuración del motor conversacional de Avan por WhatsApp: instrucciones
  * de tono/objetivo para el LLM y los valores por defecto que se usan cuando
  * el lead no menciona su nivel, carrera o ámbito.

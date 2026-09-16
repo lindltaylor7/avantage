@@ -384,6 +384,14 @@
                 <button type="button" class="btn-thread-action" @click="resetBotSession" title="Borra el estado del bot para este contacto: su próximo mensaje se procesará como si fuera nuevo.">
                   ↺ Reiniciar
                 </button>
+                <button
+                  v-if="botSession?.status === 'scheduling_email'"
+                  type="button"
+                  class="btn-thread-action"
+                  :disabled="forcingBook"
+                  title="El contacto ya eligió horario pero no dio un correo válido (p. ej. mandó un audio que el bot no puede escuchar). Agenda igual, sin invitación por correo — el link de Meet le llega por WhatsApp."
+                  @click="forceBookPendingSlot"
+                >{{ forcingBook ? 'Agendando…' : '📅 Agendar sin correo' }}</button>
               </div>
               <button type="button" class="btn-thread-action btn-thread-danger" @click="openDeleteConfirm" title="Elimina esta conversación por completo. Queda registrado quién la eliminó.">
                 🗑️ Eliminar
@@ -527,6 +535,7 @@ const thread = ref([]);
 const mediaUrls = reactive({});
 const replyText = ref('');
 const isSending = ref(false);
+const forcingBook = ref(false);
 const threadScrollEl = ref(null);
 const botSession = ref(null);
 
@@ -811,6 +820,25 @@ async function resetBotSession() {
     setTimeout(() => { resetMessage.value = ''; }, 4000);
   } catch (error) {
     errorMessage.value = error.message;
+  }
+}
+
+async function forceBookPendingSlot() {
+  if (!selectedWaId.value) return;
+  if (!confirm('¿Agendar la reunión con el horario que ya eligió, sin invitación por correo? El link de Meet igual se le manda por WhatsApp.')) return;
+  forcingBook.value = true;
+  errorMessage.value = '';
+  try {
+    const response = await apiFetch(`/api/whatsapp/conversations/${encodeURIComponent(selectedWaId.value)}/bot/force-book`, {
+      method: 'POST'
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No se pudo agendar la reunión.');
+    await Promise.all([fetchBotSession(selectedWaId.value), fetchThread(selectedWaId.value), fetchBotActivity()]);
+  } catch (error) {
+    errorMessage.value = error.message;
+  } finally {
+    forcingBook.value = false;
   }
 }
 

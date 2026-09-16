@@ -2743,6 +2743,28 @@ export class WhatsappBotService {
   }
 
   /**
+   * Override manual desde el panel: agenda el horario que el contacto ya
+   * eligió sin esperar más el correo — para cuando se quedó atascado en ese
+   * paso sin dar uno válido (p. ej. mandó un audio, que el bot no puede
+   * transcribir, o insiste con texto que no es un correo). Hace exactamente
+   * lo mismo que confirmSlot() habría hecho si hubiera contestado "no": el
+   * evento se crea igual, solo que sin invitado en el calendario — el link
+   * de Meet le llega por WhatsApp de todas formas.
+   */
+  async forceBookPendingSlot(waId) {
+    const session = await this.getSession(waId);
+    if (!session || session.status !== 'scheduling_email') {
+      throw new Error('Esta conversación no está esperando un correo para agendar.');
+    }
+    const { scheduling } = this._readScheduling(session);
+    const slot = scheduling?.pendingSlot;
+    if (!slot) {
+      throw new Error('No hay un horario pendiente de confirmar para este contacto.');
+    }
+    await this.confirmSlot(waId, slot);
+  }
+
+  /**
    * Barrido periódico (server.js, mismo setInterval que el de conversaciones
    * inactivas) del recordatorio previo: dos horas antes de la reunión se le
    * reenvía la hora y el link. Es lo más barato que hay contra el no-show —
