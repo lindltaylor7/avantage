@@ -207,6 +207,15 @@ function dayLabelWithArticle(dateStr) {
   return label === 'hoy' ? label : `el ${label}`;
 }
 
+/**
+ * El mismo día para ir detrás de un "de": "de hoy", "del jueves 17". Sin esto
+ * salía "de el jueves 17" al preguntarle de qué día es la hora que pidió.
+ */
+function dayLabelWithOf(dateStr) {
+  const label = formatShortDayLabel(dateStr);
+  return label === 'hoy' ? 'de hoy' : `del ${label}`;
+}
+
 function limaTodayIso() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 }
@@ -343,6 +352,41 @@ const LIMA_TIME_FORMATTER = new Intl.DateTimeFormat('en-GB', {
 /** Hora de Lima ("HH:MM", 24h) de un instante ISO. */
 function limaTimeOf(isoStr) {
   return LIMA_TIME_FORMATTER.format(new Date(isoStr));
+}
+
+/** Minutos desde medianoche de un "HH:MM" (null si no es una hora). */
+function clockMinutes(hhmm) {
+  const [h, m] = String(hhmm || '').split(':').map(Number);
+  return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null;
+}
+
+// Margen para las horas que NO dijo el contacto sino que dedujo el parser de
+// un "en la tarde" (~15:00): ahí no se busca el bloque idéntico, basta con
+// que el día tenga algo alrededor.
+const VAGUE_TIME_TOLERANCE_MINUTES = 90;
+
+/**
+ * Días (de los bloques libres que se le pasen) en los que la hora que pidió
+ * el contacto está disponible.
+ *
+ * Responder solo con una hora ("3:30") cuando se le acaban de nombrar los
+ * días es lo normal si esa hora es una de las que se le dijeron: para él el
+ * día va implícito. Antes eso caía en "No identifiqué el día", que le pedía
+ * repetir algo que acababa de decir. Con los bloques en la mano el día se
+ * deduce solo cuando no hay duda —una sola fecha tiene esa hora libre— y si
+ * hay varias se le pregunta cuál, nombrándolas.
+ */
+export function daysMatchingPreferredTime(slots, preferredTime, precision = 'exact') {
+  const target = clockMinutes(preferredTime);
+  if (target === null) return [];
+  const tolerance = precision === 'exact' ? 0 : VAGUE_TIME_TOLERANCE_MINUTES;
+  const days = [];
+  for (const slot of slots || []) {
+    const minutes = clockMinutes(limaTimeOf(slot.startTime));
+    if (minutes === null || Math.abs(minutes - target) > tolerance) continue;
+    if (!days.includes(slot.date)) days.push(slot.date);
+  }
+  return days.sort();
 }
 
 /** "18:00" -> "6:00 p.m.", para nombrarle al lead la hora que él pidió. */
@@ -2454,7 +2498,9 @@ export class WhatsappBotService {
     // a las 6 pm"). Antes se descartaba y se le ofrecían siempre los primeros
     // bloques del día, aunque la hora que pidió estuviera libre.
     const parsedDate = await this.ollamaService.parseSchedulingDate(trimmed, todayIso, MAX_BOOKING_DAYS_AHEAD);
-    const { date, preferredTime, declined } = parsedDate;
+    const { declined } = parsedDate;
+    let { date, preferredTime } = parsedDate;
+    let timePrecision = parsedDate.timePrecision;
 
     // El lead está posponiendo/declinando (ej. "mañana le escribo"), no
     // eligiendo un día: aunque mencione una palabra de fecha, insistir con
@@ -2464,6 +2510,51 @@ export class WhatsappBotService {
       await this.updateSession(waId, { answers: JSON.stringify(answers) });
       await this.handOffToAdvisor(waId, 'El lead prefirió posponer el agendamiento.');
       return;
+    }
+
+    // Hora que quedó pendiente de aclarar en qué día ("3:30" → "¿de hoy o del
+    // jueves 17?"): si ahora responde solo el día, la hora sigue siendo la que
+    // él dijo. Recuperarla evita mandarle una lista a elegir lo que ya eligió.
+    const pendingTime = scheduling.pendingTime;
+    delete scheduling.pendingTime;
+    if (pendingTime && !preferredTime) {
+      preferredTime = pendingTime;
+      timePrecision = 'exact';
+    }
+
+    // Respondió SOLO con una hora, sin nombrar día. No es que no se entienda:
+    // acaba de escuchar los días y para él el día va implícito en la hora. El
+    // día se deduce de la agenda misma y solo se le pregunta si de verdad hay
+    // más de un día con esa hora libre.
+    if (!date && preferredTime) {
+      const freeSlots = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID, { limit: 100, days: BOOKING_WINDOW_DAYS });
+      availableDays = [...new Set(freeSlots.map((s) => s.date))].sort();
+      scheduling.availableDays = availableDays;
+
+      if (availableDays.length === 0) {
+        delete answers.__scheduling;
+        await this.updateSession(waId, { answers: JSON.stringify(answers) });
+        await this.handOffToAdvisor(waId, 'Sin bloques libres al interpretar la hora que pidió el lead.');
+        return;
+      }
+
+      const candidateDays = daysMatchingPreferredTime(freeSlots, preferredTime, timePrecision);
+      if (candidateDays.length === 1) {
+        date = candidateDays[0];
+      } else if (candidateDays.length > 1) {
+        scheduling.pendingTime = preferredTime;
+        const labels = candidateDays.map(dayLabelWithOf);
+        const daysOptions = `${labels.slice(0, -1).join(', ')} o ${labels[labels.length - 1]}`;
+        if (await this._registerStepMiss(waId, answers, scheduling, 'El lead dijo una hora sin decir de qué día.')) return;
+        await this.send(waId, `Esa hora la tenemos libre en más de un día 🙌 ¿Las ${formatClockLabel(preferredTime)} ${daysOptions}?`);
+        return;
+      } else {
+        // Esa hora no está libre ningún día: se sigue con el primero con
+        // agenda para poder responderle "a esa hora no tenemos, estos son los
+        // más cercanos" en vez de un "no identifiqué el día" que ignora lo
+        // que pidió.
+        date = availableDays[0];
+      }
     }
 
     if (!date) {
@@ -2499,13 +2590,13 @@ export class WhatsappBotService {
 
     // Solo se le puede afirmar o negar una hora que él haya dicho: la que el
     // parser dedujo de un "temprano" no es suya.
-    const askedExactTime = !!(preferredTime && parsedDate.timePrecision === 'exact');
+    const askedExactTime = !!(preferredTime && timePrecision === 'exact');
     const exact = askedExactTime ? daySlots.find((slot) => limaTimeOf(slot.startTime) === preferredTime) : null;
 
     // Si dijo día Y hora, esa hora está libre y la eligió de verdad, se agenda
     // directo: pedirle que elija de una lista lo que acaba de pedir es dar una
     // vuelta de más.
-    if (exact && canBookExactTime(trimmed, parsedDate)) {
+    if (exact && canBookExactTime(trimmed, { ...parsedDate, preferredTime, timePrecision })) {
       scheduling.slots = daySlots;
       await this.updateSession(waId, { answers: JSON.stringify(answers) });
       this.logActivity({ type: 'exact_time_booked', waId, when: trimmed, slot: exact.label });

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractLeadFormFields, detectRedundantAsk } from '../whatsappBotService.js';
+import { extractLeadFormFields, detectRedundantAsk, daysMatchingPreferredTime } from '../whatsappBotService.js';
 
 // Mensaje real (anonimizado) de un lead de Meta Ads con formulario propio:
 // llega como líneas "¿Pregunta?: Respuesta" que el LLM de conversación a
@@ -65,4 +65,44 @@ test('detectRedundantAsk detecta que se repite la pregunta por el tema (turnos d
 test('detectRedundantAsk NO marca redundante la pregunta por el tema en el primer turno', () => {
   const answers = { problem: 'Sin tema definido (desde cero)' };
   assert.equal(detectRedundantAsk('¡Hola, Mario! ¿Ya tienes un tema en mente para tu tesis?', answers, true), null);
+});
+
+// --- Responder solo con una hora ("3:30") a la propuesta de días ---------
+// Caso real: se le ofreció "hoy de 3:30 p.m. a 6:00 p.m. y el jueves 17...",
+// respondió "3:30" y el bot contestó "No identifiqué el día", pidiéndole
+// repetir lo que acababa de decir. El día sale de la agenda: si esa hora solo
+// está libre un día, es ese; si está libre en varios, se le pregunta cuál.
+// Lima es UTC-5 todo el año, así que 20:30Z = 3:30 p.m.
+const slotAt = (date, iso) => ({ date, startTime: iso });
+
+test('daysMatchingPreferredTime deduce el día cuando la hora solo está libre en uno', () => {
+  const slots = [
+    slotAt('2026-09-16', '2026-09-16T20:30:00.000Z'), // hoy 3:30 p.m.
+    slotAt('2026-09-17', '2026-09-17T14:30:00.000Z')  // jueves 9:30 a.m.
+  ];
+  assert.deepEqual(daysMatchingPreferredTime(slots, '15:30'), ['2026-09-16']);
+});
+
+test('daysMatchingPreferredTime devuelve los dos días cuando la hora está libre en ambos', () => {
+  const slots = [
+    slotAt('2026-09-16', '2026-09-16T20:30:00.000Z'),
+    slotAt('2026-09-17', '2026-09-17T20:30:00.000Z')
+  ];
+  assert.deepEqual(daysMatchingPreferredTime(slots, '15:30'), ['2026-09-16', '2026-09-17']);
+});
+
+test('daysMatchingPreferredTime no calza una hora que no está libre en ningún día', () => {
+  const slots = [slotAt('2026-09-16', '2026-09-16T20:30:00.000Z')];
+  assert.deepEqual(daysMatchingPreferredTime(slots, '11:00'), []);
+});
+
+// Una hora inferida de un "en la tarde" (~15:00) no es suya: no se le exige
+// un bloque idéntico, basta que el día tenga algo alrededor.
+test('daysMatchingPreferredTime acepta lo cercano cuando la hora la dedujo el parser', () => {
+  const slots = [
+    slotAt('2026-09-16', '2026-09-16T21:00:00.000Z'), // 4:00 p.m.
+    slotAt('2026-09-17', '2026-09-17T14:30:00.000Z')  // 9:30 a.m.
+  ];
+  assert.deepEqual(daysMatchingPreferredTime(slots, '15:00', 'vague'), ['2026-09-16']);
+  assert.deepEqual(daysMatchingPreferredTime(slots, '15:00', 'exact'), []);
 });
