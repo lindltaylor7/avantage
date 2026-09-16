@@ -784,7 +784,7 @@
           <div class="setter-quick-bar">
             <div class="quick-contact-pills">
               <button
-                v-if="selectedLead.phone && getLeadChannelInfo(selectedLead).type === 'whatsapp'"
+                v-if="selectedLead.phone"
                 type="button"
                 class="setter-btn whatsapp-solid"
                 :class="{ 'is-active': showBotChat }"
@@ -792,15 +792,6 @@
               >
                 💬 {{ showBotChat ? 'Ocultar conversación' : 'Ver conversación con el bot' }} ({{ selectedLead.phone }})
               </button>
-              <a
-                v-else-if="selectedLead.phone"
-                :href="'https://wa.me/' + normalizePhone(selectedLead.phone)"
-                target="_blank"
-                rel="noopener"
-                class="setter-btn whatsapp-solid"
-              >
-                💬 Abrir Chat de WhatsApp ({{ selectedLead.phone }})
-              </a>
               <a
                 v-if="selectedLead.email"
                 :href="'mailto:' + selectedLead.email"
