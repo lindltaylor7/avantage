@@ -1021,7 +1021,13 @@ export class WhatsappBotService {
     // seguir con el guion (otra pregunta, otro horario) a alguien que acaba de
     // decir eso es la forma más rápida de perderlo. Sin sesión todavía no hay
     // nada que escalar — ese caso sigue el flujo normal, que la crea.
-    if (session && await this._handleCriticalSignal(waId, session, incomingText)) return;
+    //
+    // Se exige `bot_enabled` acá y no más abajo (donde está el guard general)
+    // porque esto corre ANTES del enrutado por estado: si alguien pausó el bot
+    // para atender manualmente entre que el mensaje entró al buffer y que se
+    // procesa este turno, el bot tiene que quedarse callado, y una señal
+    // crítica no es excepción — justamente ahí ya hay una persona respondiendo.
+    if (session?.bot_enabled && await this._handleCriticalSignal(waId, session, incomingText)) return;
 
     // El estado pudo cambiar mientras este turno esperaba en la cola
     // serializada (p. ej. un turno anterior ya pasó a ofrecer agendar). En ese
