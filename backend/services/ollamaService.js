@@ -480,6 +480,13 @@ Recién cuando tengas (1) y (2) completo —tema, carrera Y universidad— marca
 
 ESCUCHA SIEMPRE, DE PRINCIPIO A FIN: en CADA mensaje, antes de decidir qué responder, revisa si la persona mencionó —aunque no se lo hayas preguntado y aunque venga mezclado en una sola frase— su TEMA, su CARRERA, su UNIVERSIDAD, su nivel académico o CUÁNDO quiere la reunión, y guárdalo todo en "extracted"/"preferredWhen" en ese mismo turno. Ejemplo: "sobre arquitectura de la continental, tesis con avance" trae carrera (Arquitectura), universidad (Universidad Continental) y tema (tesis ya iniciada, con avance). En Perú las universidades se nombran abreviadas o en minúscula: continental = Universidad Continental, upla = Universidad Peruana Los Andes, uncp = Universidad Nacional del Centro del Perú, unac = Universidad Nacional del Callao (¡NO es la uncp!), unmsm = San Marcos, ucv = César Vallejo, y también upc, pucp, uni, utp, usmp, ulima, undac, unsa. NO confundas siglas parecidas; si no estás seguro de qué universidad es una sigla, extráela TAL CUAL la escribió la persona sin "corregirla". JAMÁS preguntes por un dato que ya te dieron, ni en este mensaje ni en uno anterior.
 
+MENSAJES PARTIDOS EN VARIAS BURBUJAS: la gente en WhatsApp escribe a pedazos y le da enviar en cada pausa; el sistema te entrega esas burbujas juntas, separadas por saltos de línea. Léelas SIEMPRE como UNA SOLA intención, nunca como mensajes independientes, y reconstruye lo que quiso decir ANTES de responder o de extraer nada:
+- Un día y una hora en renglones distintos son un solo horario: "mañana" + "a las 3" = mañana a las 3.
+- Una hora y su meridiano son una sola hora: "las 9" + "pm" = 9 de la NOCHE, jamás las 9 de la mañana.
+- Datos académicos sueltos se suman: "Derecho" + "San Marcos" + "desde cero" son carrera, universidad y estado de la tesis, los tres.
+- Si dos renglones se contradicen, vale el ÚLTIMO: "las 9" + "mejor 10" = las 10. Si NO se contradicen, se complementan: usa todos.
+Nunca respondas al primer renglón ignorando los siguientes: es el error que más se nota, porque la persona sabe perfectamente lo que escribió.
+
 TRATO: siempre de TÚ, nunca de usted, en todos los mensajes.
 
 ${openingBlock}
@@ -749,6 +756,8 @@ Responde ÚNICAMENTE en JSON válido: {"name": "<nombre o el texto tal cual>", "
 
 Alguien acaba de responder esto cuando le preguntaron qué día prefiere para una llamada:
 """${text}"""
+
+Si ese texto trae varios renglones, son burbujas seguidas de WhatsApp: una sola intención partida en pedazos, no respuestas distintas. Únelas antes de interpretar ("mañana" + "a las 3" = mañana a las 3; "las 9" + "pm" = 21:00), y si dos se contradicen vale la última.
 
 Interpreta a qué fecha se refiere (puede decir "hoy", "mañana", "pasado mañana", "el jueves", "el 28", una fecha explícita, etc.) y conviértela a formato YYYY-MM-DD. La fecha debe estar entre hoy (${todayIso}) y ${maxDaysAhead} días después como máximo. Si pide un día más lejano, igual devuélvelo tal cual (el sistema le explicará el límite). Si el texto NO expresa ningún día concreto (ej. "cuando puedas", "no sé", o simplemente no habla de fechas), responde null.
 

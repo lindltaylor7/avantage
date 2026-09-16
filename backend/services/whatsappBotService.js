@@ -5,6 +5,7 @@ import { buildKnowledgeBlock } from './whatsappBotPromptDefaults.js';
 import { MIN_BOOKING_LEAD_MINUTES } from './googleCalendarService.js';
 import { normalizeUniversity } from './universityNormalizer.js';
 import { criticalSignal } from './leadSignals.js';
+import { coalesceTimeFragments } from './messageFragments.js';
 import * as whatsappBotCopy from '../copy/whatsappBotCopy.js';
 
 // Motivo que ve el equipo en la notificación de transferencia, por señal
@@ -907,7 +908,11 @@ export class WhatsappBotService {
     });
 
     const fire = () => {
-      const joined = pending.messages.join('\n');
+      // Las burbujas se unen y, en el mismo paso, se recompone lo que quedó
+      // partido entre ellas (un "pm" mandado solo, después de la hora). Se
+      // hace ACÁ y no más adelante para que el LLM, el parser de fechas y las
+      // expresiones del agendamiento lean todos la misma frase coherente.
+      const joined = coalesceTimeFragments(pending.messages.join('\n'));
       // La marca se toma AQUÍ, no dentro del turno: entre que el temporizador
       // dispara y el turno lee la sesión hay consultas a la base de datos, y
       // una burbuja que cayera justo ahí ya no se detectaría como posterior.
