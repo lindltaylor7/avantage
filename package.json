@@ -19,6 +19,7 @@
     "test": "node --test \"backend/**/*.test.js\""
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.126.0",
     "@vue-flow/background": "^1.3.2",
     "@vue-flow/controls": "^1.1.3",
     "@vue-flow/core": "^1.48.2",

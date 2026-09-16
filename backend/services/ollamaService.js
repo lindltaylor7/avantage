@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import Anthropic from '@anthropic-ai/sdk';
 import { BOT_PROMPT_DEFAULTS } from './whatsappBotPromptDefaults.js';
 dotenv.config();
 
@@ -243,6 +244,91 @@ export class OllamaService {
     this.apiKey = process.env.OLLAMA_API_KEY || '';
     this.embedModel = process.env.OLLAMA_EMBED_MODEL || 'nomic-embed-text';
     this.chatModel = process.env.OLLAMA_CHAT_MODEL || 'llama3:latest';
+
+    // "ollama" (Ollama Cloud/local, por defecto) o "anthropic" (API de Claude,
+    // vía créditos de la consola de Anthropic). Todos los métodos de este
+    // archivo arman su propio prompt en español y esperan de vuelta texto con
+    // JSON — el proveedor solo decide a qué backend se le manda ese prompt;
+    // ver _generateJSON() más abajo.
+    this.provider = (process.env.LLM_PROVIDER || 'ollama').toLowerCase();
+    this.anthropicApiKey = process.env.ANTHROPIC_API_KEY || '';
+    this.anthropicModel = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5';
+    this.anthropicClient = this.anthropicApiKey ? new Anthropic({ apiKey: this.anthropicApiKey }) : null;
+  }
+
+  /** ¿Hay credenciales activas para el proveedor de LLM configurado? */
+  hasLLM() {
+    if (this.provider === 'anthropic') return !!this.anthropicApiKey;
+    const activeApiKey = this.apiKey || process.env.OLLAMA_API_KEY || '';
+    const activeHost = this.host || 'https://ollama.com';
+    return !!activeApiKey || activeHost.includes('localhost') || activeHost.includes('127.0.0.1');
+  }
+
+  /**
+   * Manda un prompt de una sola pieza (ya arma sistema + usuario como un solo
+   * texto, igual que necesitaba el endpoint de completado de Ollama) al
+   * backend de LLM configurado, y devuelve el objeto ya parseado de la
+   * respuesta — cada método de este archivo sigue armando su propio prompt
+   * (pidiéndole al modelo "responde ÚNICAMENTE en JSON válido: {...}") y
+   * validando los campos que le importan; esto solo evita repetir la llamada
+   * HTTP y el parseo de JSON en cada uno. Lanza si la llamada falla o la
+   * respuesta no es JSON válido — el llamador ya tiene su propio respaldo sin
+   * IA (fallbackXxx) para ese caso.
+   */
+  async _generateJSON(prompt, { timeoutMs = 15000, ollamaFormat = 'json' } = {}) {
+    const raw = this.provider === 'anthropic'
+      ? await this._generateTextViaAnthropic(prompt, timeoutMs)
+      : await this._generateTextViaOllama(prompt, ollamaFormat, timeoutMs);
+    const clean = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
+    return JSON.parse(clean);
+  }
+
+  async _generateTextViaOllama(prompt, format, timeoutMs) {
+    const activeApiKey = this.apiKey || process.env.OLLAMA_API_KEY || '';
+    let activeHost = this.host || 'https://ollama.com';
+    if (activeHost === 'https://api.ollama.com') activeHost = 'https://ollama.com';
+
+    const generateUrl = this.getApiUrl(activeHost, '/generate');
+    const response = await fetch(generateUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(activeApiKey ? { 'Authorization': `Bearer ${activeApiKey}` } : {})
+      },
+      body: JSON.stringify({ model: this.chatModel, prompt, stream: false, format }),
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Ollama Cloud respondió ${response.status}: ${errText.slice(0, 200)}`);
+    }
+
+    const data = await response.json();
+    return data.response || '';
+  }
+
+  async _generateTextViaAnthropic(prompt, timeoutMs) {
+    if (!this.anthropicClient) throw new Error('ANTHROPIC_API_KEY no está configurado en el servidor.');
+
+    const response = await this.anthropicClient.messages.create(
+      {
+        model: this.anthropicModel,
+        // 2048 alcanza de sobra para una respuesta corta de WhatsApp o un
+        // parseo de fecha/horario, y también para el reporte de viabilidad
+        // (el más largo de los JSON que arma este archivo) sin arriesgar un
+        // corte a mitad del JSON — Haiku solo cobra por lo que de verdad
+        // genera, así que subir este techo no cuesta más si no lo usa.
+        max_tokens: 2048,
+        messages: [{ role: 'user', content: prompt }]
+      },
+      { timeout: timeoutMs }
+    );
+
+    return response.content
+      .filter((block) => block.type === 'text')
+      .map((block) => block.text)
+      .join('');
   }
 
   /**
@@ -312,6 +398,11 @@ export class OllamaService {
    * Evalúa la viabilidad del tema de tesis a nivel de Pregrado o Posgrado en Perú
    */
   async evaluateThesisViability({ topic, academicLevel, fieldOfStudy, additionalNotes, apiKeyOverride, hostOverride }) {
+    // Un "apiKeyOverride"/"hostOverride" explícito (p. ej. el evaluador
+    // público de tesis con una key propia) es SIEMPRE contra Ollama directo,
+    // sea cual sea LLM_PROVIDER: es la única forma de que ese override tenga
+    // efecto, y "host" no tiene sentido para el proveedor Anthropic.
+    const hasOverride = !!(apiKeyOverride && String(apiKeyOverride).trim() !== '') || !!(hostOverride && String(hostOverride).trim() !== '');
     const activeApiKey = (apiKeyOverride && String(apiKeyOverride).trim() !== '') ? apiKeyOverride.trim() : (this.apiKey || process.env.OLLAMA_API_KEY || '');
     let activeHost = (hostOverride && String(hostOverride).trim() !== '') ? hostOverride.trim() : (this.host || 'https://ollama.com');
     if (activeHost === 'https://api.ollama.com') activeHost = 'https://ollama.com';
@@ -327,7 +418,10 @@ export class OllamaService {
     let llmEvaluationRaw = null;
 
     try {
-      if (activeApiKey || activeHost.includes('localhost') || activeHost.includes('127.0.0.1')) {
+      const shouldCallOllamaDirect = hasOverride && (activeApiKey || activeHost.includes('localhost') || activeHost.includes('127.0.0.1'));
+      const shouldCallConfiguredProvider = !hasOverride && this.hasLLM();
+
+      if (shouldCallOllamaDirect || shouldCallConfiguredProvider) {
         const systemPrompt = `Eres un Presidente de Jurado de Tesis y Consultor Académico de alto nivel especializado en universidades peruanas (regular por SUNEDU y CONCYTEC).
 Tu objetivo es evaluar la viabilidad de un tema de tesis propuesto para el nivel: ${academicLevel} en la carrera/área de ${fieldOfStudy}.
 
@@ -359,38 +453,40 @@ Nivel: ${academicLevel}
 Área de Conocimiento: ${fieldOfStudy}
 Detalles adicionales: ${additionalNotes || 'Ninguno'}`;
 
-        const generateUrl = this.getApiUrl(activeHost, '/generate');
-        console.log(`🤖 [Ollama Cloud LLM] Petición a ${generateUrl} (${this.chatModel})...`);
+        const fullPrompt = `${systemPrompt}\n\n${userPrompt}`;
 
-        const response = await fetch(generateUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(activeApiKey ? { 'Authorization': `Bearer ${activeApiKey}` } : {})
-          },
-          body: JSON.stringify({
-            model: this.chatModel,
-            prompt: `${systemPrompt}\n\n${userPrompt}`,
-            stream: false,
-            format: 'json'
-          })
-        });
+        if (shouldCallOllamaDirect) {
+          const generateUrl = this.getApiUrl(activeHost, '/generate');
+          console.log(`🤖 [Ollama Cloud LLM] Petición a ${generateUrl} (${this.chatModel})...`);
 
-        console.log(`- Status ${generateUrl} => Status ${response.status} ${response.statusText}`);
+          const response = await fetch(generateUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(activeApiKey ? { 'Authorization': `Bearer ${activeApiKey}` } : {})
+            },
+            body: JSON.stringify({ model: this.chatModel, prompt: fullPrompt, stream: false, format: 'json' })
+          });
 
-        if (response.ok) {
-          const data = await response.json();
-          const cleanResponse = data.response.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
-          const parsed = JSON.parse(cleanResponse);
-          llmEvaluationRaw = parsed;
-          console.log(`✅ [Ollama Cloud LLM] Respuesta generada exitosamente por ${this.chatModel}`);
+          console.log(`- Status ${generateUrl} => Status ${response.status} ${response.statusText}`);
+
+          if (response.ok) {
+            const data = await response.json();
+            const cleanResponse = data.response.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
+            llmEvaluationRaw = JSON.parse(cleanResponse);
+            console.log(`✅ [Ollama Cloud LLM] Respuesta generada exitosamente por ${this.chatModel}`);
+          } else {
+            const errText = await response.text();
+            console.warn(`⚠️ [Ollama Cloud LLM Error]: ${errText.substring(0, 150)}`);
+          }
         } else {
-          const errText = await response.text();
-          console.warn(`⚠️ [Ollama Cloud LLM Error]: ${errText.substring(0, 150)}`);
+          console.log(`🤖 [${this.provider} LLM] Generando reporte de viabilidad...`);
+          llmEvaluationRaw = await this._generateJSON(fullPrompt, { timeoutMs: 20000 });
+          console.log(`✅ [${this.provider} LLM] Reporte de viabilidad generado`);
         }
       }
     } catch (err) {
-      console.warn('Ollama Cloud LLM call notice:', err.message);
+      console.warn(`${this.provider} LLM call notice:`, err.message);
     }
 
     // Step 4: Construir o complementar el reporte final
@@ -422,11 +518,7 @@ Detalles adicionales: ${additionalNotes || 'Ninguno'}`;
    * una lógica de respaldo mínima basada en reglas.
    */
   async converseAsAvan({ history, knownAnswers, incomingText, isFirstTurn, toneInstructions, contactName, shortReplies = true, botIdentity, botObjective, promptRules, knowledgeBlock }) {
-    const activeApiKey = this.apiKey || process.env.OLLAMA_API_KEY || '';
-    let activeHost = this.host || 'https://ollama.com';
-    if (activeHost === 'https://api.ollama.com') activeHost = 'https://ollama.com';
-
-    if (!activeApiKey && !activeHost.includes('localhost') && !activeHost.includes('127.0.0.1')) {
+    if (!this.hasLLM()) {
       return this.fallbackConversationTurn(knownAnswers, incomingText, isFirstTurn);
     }
 
@@ -545,36 +637,12 @@ Responde ÚNICAMENTE en JSON válido con esta forma exacta (usa null en los camp
     const userPrompt = `Historial de la conversación hasta ahora:\n${transcript || '(sin mensajes previos)'}\n\nNuevo mensaje del contacto: "${incomingText}"\n\nResponde siguiendo las reglas, en el JSON indicado.`;
 
     try {
-      const generateUrl = this.getApiUrl(activeHost, '/generate');
-      console.log(`🤖 [Ollama Cloud LLM] Turno conversacional de Avan en ${generateUrl} (${this.chatModel})...`);
+      console.log(`🤖 [${this.provider} LLM] Turno conversacional de Avan (${this.provider === 'anthropic' ? this.anthropicModel : this.chatModel})...`);
 
-      const response = await fetch(generateUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(activeApiKey ? { 'Authorization': `Bearer ${activeApiKey}` } : {})
-        },
-        body: JSON.stringify({
-          model: this.chatModel,
-          prompt: `${systemPrompt}\n\n${userPrompt}`,
-          stream: false,
-          format: 'json'
-        }),
-        signal: AbortSignal.timeout(20000)
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        console.warn(`⚠️ [Ollama Cloud LLM Error] turno de Avan: ${errText.substring(0, 150)}`);
-        return this.fallbackConversationTurn(knownAnswers, incomingText, isFirstTurn);
-      }
-
-      const data = await response.json();
-      const cleanResponse = (data.response || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
-      const parsed = JSON.parse(cleanResponse);
+      const parsed = await this._generateJSON(`${systemPrompt}\n\n${userPrompt}`, { timeoutMs: 20000 });
       if (!parsed.reply) return this.fallbackConversationTurn(knownAnswers, incomingText, isFirstTurn);
 
-      console.log(`✅ [Ollama Cloud LLM] Turno de Avan generado por ${this.chatModel}`);
+      console.log(`✅ [${this.provider} LLM] Turno de Avan generado`);
       return {
         reply: isFirstTurn ? ensureGreeting(parsed.reply, contactName) : parsed.reply,
         extracted: parsed.extracted || {},
@@ -584,7 +652,7 @@ Responde ÚNICAMENTE en JSON válido con esta forma exacta (usa null en los camp
         source: 'llm'
       };
     } catch (err) {
-      console.warn('Ollama Cloud LLM conversation turn notice:', err.message);
+      console.warn(`${this.provider} LLM conversation turn notice:`, err.message);
       return this.fallbackConversationTurn(knownAnswers, incomingText, isFirstTurn);
     }
   }
@@ -697,11 +765,7 @@ Responde ÚNICAMENTE en JSON válido con esta forma exacta (usa null en los camp
     const text = String(raw || '').trim();
     if (!text) return { name: null, confident: false, source: 'empty' };
 
-    const activeApiKey = this.apiKey || process.env.OLLAMA_API_KEY || '';
-    let activeHost = this.host || 'https://ollama.com';
-    if (activeHost === 'https://api.ollama.com') activeHost = 'https://ollama.com';
-
-    if (!activeApiKey && !activeHost.includes('localhost') && !activeHost.includes('127.0.0.1')) {
+    if (!this.hasLLM()) {
       return { name: text, confident: false, source: 'fallback' };
     }
 
@@ -718,26 +782,11 @@ Reglas:
 Responde ÚNICAMENTE en JSON válido: {"name": "<nombre o el texto tal cual>", "confident": <true o false>}`;
 
     try {
-      const generateUrl = this.getApiUrl(activeHost, '/generate');
-      const response = await fetch(generateUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(activeApiKey ? { 'Authorization': `Bearer ${activeApiKey}` } : {})
-        },
-        body: JSON.stringify({ model: this.chatModel, prompt, stream: false, format: UNIVERSITY_SCHEMA }),
-        signal: AbortSignal.timeout(12000)
-      });
-
-      if (!response.ok) return { name: text, confident: false, source: 'fallback' };
-
-      const data = await response.json();
-      const cleanResponse = (data.response || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
-      const parsed = JSON.parse(cleanResponse);
+      const parsed = await this._generateJSON(prompt, { timeoutMs: 12000, ollamaFormat: UNIVERSITY_SCHEMA });
       const name = typeof parsed.name === 'string' && parsed.name.trim() ? parsed.name.trim() : text;
       return { name, confident: !!parsed.confident, source: 'llm' };
     } catch (err) {
-      console.warn('Ollama Cloud LLM university resolve notice:', err.message);
+      console.warn(`${this.provider} LLM university resolve notice:`, err.message);
       return { name: text, confident: false, source: 'fallback' };
     }
   }
@@ -749,11 +798,7 @@ Responde ÚNICAMENTE en JSON válido: {"name": "<nombre o el texto tal cual>", "
    * logra identificar un día claro dentro de un rango razonable.
    */
   async parseSchedulingDate(text, todayIso, maxDaysAhead = 2) {
-    const activeApiKey = this.apiKey || process.env.OLLAMA_API_KEY || '';
-    let activeHost = this.host || 'https://ollama.com';
-    if (activeHost === 'https://api.ollama.com') activeHost = 'https://ollama.com';
-
-    if (!activeApiKey && !activeHost.includes('localhost') && !activeHost.includes('127.0.0.1')) {
+    if (!this.hasLLM()) {
       return this.fallbackParseSchedulingDate(text, todayIso);
     }
 
@@ -773,22 +818,7 @@ OJO — POSPONER NO ES ELEGIR UN DÍA: si el mensaje en realidad es una forma de
 Responde ÚNICAMENTE en JSON válido: {"date": "YYYY-MM-DD" o null, "preferredTime": "<HH:MM o null>", "declined": true o false}`;
 
     try {
-      const generateUrl = this.getApiUrl(activeHost, '/generate');
-      const response = await fetch(generateUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(activeApiKey ? { 'Authorization': `Bearer ${activeApiKey}` } : {})
-        },
-        body: JSON.stringify({ model: this.chatModel, prompt, stream: false, format: SCHEDULING_DATE_SCHEMA }),
-        signal: AbortSignal.timeout(15000)
-      });
-
-      if (!response.ok) return this.fallbackParseSchedulingDate(text, todayIso);
-
-      const data = await response.json();
-      const cleanResponse = (data.response || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
-      const parsed = JSON.parse(cleanResponse);
+      const parsed = await this._generateJSON(prompt, { timeoutMs: 15000, ollamaFormat: SCHEDULING_DATE_SCHEMA });
       const declined = !!parsed.declined;
       // Igual que con la hora: el prompt le pide completar SIEMPRE una fecha,
       // y ante un mensaje que no nombra ningún día ("para las 11?") el modelo
@@ -809,7 +839,7 @@ Responde ÚNICAMENTE en JSON válido: {"date": "YYYY-MM-DD" o null, "preferredTi
         source: 'llm'
       };
     } catch (err) {
-      console.warn('Ollama Cloud LLM date parsing notice:', err.message);
+      console.warn(`${this.provider} LLM date parsing notice:`, err.message);
       return this.fallbackParseSchedulingDate(text, todayIso);
     }
   }
@@ -908,11 +938,7 @@ Responde ÚNICAMENTE en JSON válido: {"date": "YYYY-MM-DD" o null, "preferredTi
    * ejemplo, si pregunta algo distinto).
    */
   async parseSchedulingChoice(text, optionLabels) {
-    const activeApiKey = this.apiKey || process.env.OLLAMA_API_KEY || '';
-    let activeHost = this.host || 'https://ollama.com';
-    if (activeHost === 'https://api.ollama.com') activeHost = 'https://ollama.com';
-
-    if (!activeApiKey && !activeHost.includes('localhost') && !activeHost.includes('127.0.0.1')) {
+    if (!this.hasLLM()) {
       return this.fallbackParseSchedulingChoice(text, optionLabels);
     }
 
@@ -929,27 +955,12 @@ Además, si NO eligió ninguna opción pero sí expresó una preferencia de hora
 Responde ÚNICAMENTE en JSON válido: {"index": <número de 1 a ${optionLabels.length}, o null>, "preferredTime": "<HH:MM o null>"}`;
 
     try {
-      const generateUrl = this.getApiUrl(activeHost, '/generate');
-      const response = await fetch(generateUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(activeApiKey ? { 'Authorization': `Bearer ${activeApiKey}` } : {})
-        },
-        body: JSON.stringify({ model: this.chatModel, prompt, stream: false, format: SCHEDULING_CHOICE_SCHEMA }),
-        signal: AbortSignal.timeout(15000)
-      });
-
-      if (!response.ok) return this.fallbackParseSchedulingChoice(text, optionLabels);
-
-      const data = await response.json();
-      const cleanResponse = (data.response || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
-      const parsed = JSON.parse(cleanResponse);
+      const parsed = await this._generateJSON(prompt, { timeoutMs: 15000, ollamaFormat: SCHEDULING_CHOICE_SCHEMA });
       const index = Number.isInteger(parsed.index) && parsed.index >= 1 && parsed.index <= optionLabels.length ? parsed.index - 1 : null;
       const preferredTime = typeof parsed.preferredTime === 'string' && /^\d{2}:\d{2}$/.test(parsed.preferredTime) ? parsed.preferredTime : null;
       return { index, preferredTime: normalizeBusinessHour(preferredTime, text), source: 'llm' };
     } catch (err) {
-      console.warn('Ollama Cloud LLM scheduling choice notice:', err.message);
+      console.warn(`${this.provider} LLM scheduling choice notice:`, err.message);
       return this.fallbackParseSchedulingChoice(text, optionLabels);
     }
   }
@@ -986,11 +997,7 @@ Responde ÚNICAMENTE en JSON válido: {"index": <número de 1 a ${optionLabels.l
    * (`answersStep: true`, sin pregunta aparte): el paso sigue como siempre.
    */
   async classifySchedulingAside(text, { stepQuestion, knowledgeBlock, contactName } = {}) {
-    const activeApiKey = this.apiKey || process.env.OLLAMA_API_KEY || '';
-    let activeHost = this.host || 'https://ollama.com';
-    if (activeHost === 'https://api.ollama.com') activeHost = 'https://ollama.com';
-
-    if (!activeApiKey && !activeHost.includes('localhost') && !activeHost.includes('127.0.0.1')) {
+    if (!this.hasLLM()) {
       return { answersStep: true, isAside: false, preferredWhen: null, answer: null, source: 'fallback' };
     }
 
@@ -1015,22 +1022,7 @@ Analiza el mensaje y responde:
 Responde ÚNICAMENTE en JSON válido: {"answersStep": <true o false>, "isAside": <true o false>, "preferredWhen": "<texto o null>", "answer": "<texto o null>"}`;
 
     try {
-      const generateUrl = this.getApiUrl(activeHost, '/generate');
-      const response = await fetch(generateUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(activeApiKey ? { 'Authorization': `Bearer ${activeApiKey}` } : {})
-        },
-        body: JSON.stringify({ model: this.chatModel, prompt, stream: false, format: SCHEDULING_ASIDE_SCHEMA }),
-        signal: AbortSignal.timeout(15000)
-      });
-
-      if (!response.ok) return { answersStep: true, isAside: false, preferredWhen: null, answer: null, source: 'fallback' };
-
-      const data = await response.json();
-      const cleanResponse = (data.response || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
-      const parsed = JSON.parse(cleanResponse);
+      const parsed = await this._generateJSON(prompt, { timeoutMs: 15000, ollamaFormat: SCHEDULING_ASIDE_SCHEMA });
       const answer = typeof parsed.answer === 'string' && parsed.answer.trim() ? parsed.answer.trim() : null;
       return {
         answersStep: !!parsed.answersStep,
@@ -1042,7 +1034,7 @@ Responde ÚNICAMENTE en JSON válido: {"answersStep": <true o false>, "isAside":
         source: 'llm'
       };
     } catch (err) {
-      console.warn('Ollama Cloud LLM scheduling aside notice:', err.message);
+      console.warn(`${this.provider} LLM scheduling aside notice:`, err.message);
       return { answersStep: true, isAside: false, preferredWhen: null, answer: null, source: 'fallback' };
     }
   }
@@ -1060,11 +1052,7 @@ Responde ÚNICAMENTE en JSON válido: {"answersStep": <true o false>, "isAside":
    * deben avisarle a un asesor humano.
    */
   async classifyPostBookingMessage(text, { meetingLabel, meetLink, contactName, knowledgeBlock }) {
-    const activeApiKey = this.apiKey || process.env.OLLAMA_API_KEY || '';
-    let activeHost = this.host || 'https://ollama.com';
-    if (activeHost === 'https://api.ollama.com') activeHost = 'https://ollama.com';
-
-    if (!activeApiKey && !activeHost.includes('localhost') && !activeHost.includes('127.0.0.1')) {
+    if (!this.hasLLM()) {
       return this.fallbackClassifyPostBookingMessage(text);
     }
 
@@ -1088,22 +1076,7 @@ Responde ÚNICAMENTE en JSON válido:
 }`;
 
     try {
-      const generateUrl = this.getApiUrl(activeHost, '/generate');
-      const response = await fetch(generateUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(activeApiKey ? { 'Authorization': `Bearer ${activeApiKey}` } : {})
-        },
-        body: JSON.stringify({ model: this.chatModel, prompt, stream: false, format: 'json' }),
-        signal: AbortSignal.timeout(15000)
-      });
-
-      if (!response.ok) return this.fallbackClassifyPostBookingMessage(text);
-
-      const data = await response.json();
-      const cleanResponse = (data.response || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
-      const parsed = JSON.parse(cleanResponse);
+      const parsed = await this._generateJSON(prompt, { timeoutMs: 15000 });
       return {
         needsReply: !!parsed.needsReply,
         replyText: parsed.needsReply ? (parsed.replyText || null) : null,
@@ -1111,7 +1084,7 @@ Responde ÚNICAMENTE en JSON válido:
         source: 'llm'
       };
     } catch (err) {
-      console.warn('Ollama Cloud LLM post-booking classification notice:', err.message);
+      console.warn(`${this.provider} LLM post-booking classification notice:`, err.message);
       return this.fallbackClassifyPostBookingMessage(text);
     }
   }
