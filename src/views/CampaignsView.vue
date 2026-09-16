@@ -120,133 +120,214 @@
       </section>
 
       <!-- Campañas -->
-      <section class="campaigns-list">
+      <section class="campaigns-table-section">
         <p v-if="!report.campaigns.length" class="state-banner">
           Aún no has creado ninguna campaña. Usa <strong>＋ Nueva campaña</strong> o clasifica un anuncio detectado abajo.
         </p>
 
-        <article v-for="campaign in report.campaigns" :key="campaign.id" class="campaign-card">
-          <div class="campaign-card-header">
-            <div class="campaign-identity">
-              <BrandIcon :name="brandIconName(campaign.platform)" :size="26" class="campaign-platform-icon" />
-              <div>
-                <h3 class="campaign-name">
-                  {{ campaign.name }}
-                  <span v-if="campaign.source === 'meta'" class="meta-badge">Meta Ads</span>
-                </h3>
-                <span class="campaign-meta">
-                  {{ dateRangeLabel(campaign) }}
-                  · Inversión {{ money(campaign.metrics.spend) }}
-                  <template v-if="campaign.objective"> · {{ campaign.objective }}</template>
-                  <template v-if="campaign.lastSyncedAt"> · sync {{ formatDateTime(campaign.lastSyncedAt) }}</template>
-                </span>
-              </div>
+        <template v-else>
+          <div class="table-toolbar">
+            <div class="search-box">
+              <span class="search-icon" aria-hidden="true">🔍</span>
+              <input v-model="searchQuery" type="text" class="search-input" placeholder="Buscar campaña por nombre..." />
+              <button v-if="searchQuery" type="button" class="search-clear" title="Limpiar búsqueda" @click="searchQuery = ''">✕</button>
             </div>
-            <div class="campaign-header-actions">
-              <span class="pill" :class="statusPillClass(campaign.status)">{{ statusLabel(campaign.status) }}</span>
-              <button type="button" class="icon-btn" title="Editar campaña" @click="openEditModal(campaign)">✏️</button>
-              <button
-                v-if="campaign.source !== 'meta'"
-                type="button"
-                class="icon-btn"
-                title="Eliminar campaña"
-                @click="removeCampaign(campaign)"
-              >🗑️</button>
-            </div>
+            <select v-model="platformFilter" class="filter-select">
+              <option v-for="opt in PLATFORM_FILTERS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+            </select>
+            <select v-model="statusFilter" class="filter-select">
+              <option v-for="opt in STATUS_FILTERS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+            </select>
+            <span class="table-total">Total {{ filteredCampaigns.length }} {{ filteredCampaigns.length === 1 ? 'campaña' : 'campañas' }}</span>
           </div>
 
-          <!-- Embudo real -->
-          <div class="funnel">
-            <div v-for="(stage, i) in campaign.funnel" :key="stage.key" class="funnel-row">
-              <span class="funnel-label">{{ stage.label }}</span>
-              <div class="funnel-bar-track">
-                <div
-                  class="funnel-bar-fill"
-                  :style="{ width: funnelBarWidth(campaign.funnel, stage) }"
-                  :title="`${stage.label}: ${num(stage.count)}`"
-                ></div>
-                <span class="funnel-bar-value">{{ num(stage.count) }}</span>
-              </div>
-              <span v-if="i > 0" class="funnel-dropoff">{{ dropoffLabel(campaign.funnel[i - 1], stage) }}</span>
-              <span v-else class="funnel-dropoff funnel-dropoff-spacer"></span>
-            </div>
-          </div>
-
-          <!-- Métricas de marketing -->
-          <div class="metric-grid">
-            <template v-if="campaign.metrics.impressions != null">
-              <div class="metric metric-meta"><span class="metric-label">Impresiones</span><span class="metric-value">{{ num(campaign.metrics.impressions) }}</span></div>
-              <div class="metric metric-meta"><span class="metric-label">Alcance</span><span class="metric-value">{{ num(campaign.metrics.reach) }}</span></div>
-              <div class="metric metric-meta"><span class="metric-label">Clics</span><span class="metric-value">{{ num(campaign.metrics.clicks) }}</span></div>
-              <div class="metric metric-meta"><span class="metric-label">CTR</span><span class="metric-value">{{ campaign.metrics.ctr != null ? campaign.metrics.ctr + '%' : '—' }}</span></div>
-              <div class="metric metric-meta"><span class="metric-label">CPM</span><span class="metric-value">{{ campaign.metrics.cpm != null ? money(campaign.metrics.cpm) : '—' }}</span></div>
-              <div class="metric metric-meta"><span class="metric-label">CPC</span><span class="metric-value">{{ campaign.metrics.cpc != null ? money(campaign.metrics.cpc) : '—' }}</span></div>
-              <div class="metric metric-meta"><span class="metric-label">Costo/conv. (Meta)</span><span class="metric-value">{{ campaign.metrics.costPerLeadMeta != null ? money(campaign.metrics.costPerLeadMeta) : '—' }}</span></div>
-            </template>
-            <div class="metric"><span class="metric-label">Tasa de calificación</span><span class="metric-value">{{ campaign.metrics.qualificationRate }}%</span></div>
-            <div class="metric"><span class="metric-label">Conversación → cita</span><span class="metric-value">{{ campaign.metrics.conversationToAppointmentRate }}%</span></div>
-            <div class="metric"><span class="metric-label">Cita → ganado</span><span class="metric-value">{{ campaign.metrics.appointmentToWonRate }}%</span></div>
-            <div class="metric"><span class="metric-label">Viabilidad prom.</span><span class="metric-value">{{ campaign.metrics.avgViability != null ? campaign.metrics.avgViability + '%' : '—' }}</span></div>
-            <div class="metric"><span class="metric-label">1ª respuesta (mediana)</span><span class="metric-value">{{ responseLabel(campaign.metrics.medianFirstResponseMin) }}</span></div>
-            <div class="metric"><span class="metric-label">Costo / conversación</span><span class="metric-value">{{ campaign.metrics.costPerConversation != null ? money(campaign.metrics.costPerConversation) : '—' }}</span></div>
-            <div class="metric"><span class="metric-label">Costo / cita</span><span class="metric-value">{{ campaign.metrics.costPerAppointment != null ? money(campaign.metrics.costPerAppointment) : '—' }}</span></div>
-            <div class="metric"><span class="metric-label">Costo / ganado</span><span class="metric-value">{{ campaign.metrics.costPerWon != null ? money(campaign.metrics.costPerWon) : '—' }}</span></div>
-            <div class="metric"><span class="metric-label">Valor cotizado</span><span class="metric-value">{{ money(campaign.metrics.quotedValue) }}</span></div>
-            <div class="metric"><span class="metric-label">ROAS</span><span class="metric-value">{{ campaign.metrics.roas != null ? campaign.metrics.roas + '×' : '—' }}</span></div>
-          </div>
-
-          <!-- Anuncios mapeados -->
-          <div class="ad-chips">
-            <span class="ad-chips-label">Anuncios:</span>
-            <span v-for="ad in campaign.ads" :key="ad.id" class="ad-chip">
-              {{ ad.label || ad.sourceId }}
-              <button type="button" class="ad-chip-x" title="Quitar anuncio" @click="detachAd(ad.id)">✕</button>
-            </span>
-            <span v-if="!campaign.ads.length" class="ad-chips-empty">sin anuncios asociados</span>
-          </div>
-
-          <button type="button" class="btn-secondary campaign-trace-btn" @click="toggleTrace(campaign.id)">
-            {{ openTraceId === campaign.id ? '▲ Ocultar trazabilidad' : '🔍 Ver trazabilidad de leads' }}
-          </button>
-
-          <div v-if="openTraceId === campaign.id" class="trace-panel">
-            <p v-if="!campaign.sampleContacts.length" class="trace-hint">
-              Todavía no hay contactos atribuidos a esta campaña en el rango seleccionado.
-            </p>
-            <template v-else>
-              <p class="trace-hint">
-                Recorrido real de {{ campaign.sampleContacts.length }} contacto(s) de esta campaña, desde el anuncio hasta su etapa actual.
-              </p>
-              <div class="trace-leads">
-                <div v-for="(lead, li) in campaign.sampleContacts" :key="li" class="trace-lead">
-                  <div class="trace-lead-header">
-                    <strong class="trace-lead-name">{{ lead.name }}</strong>
-                    <span v-if="lead.topic" class="trace-lead-topic">{{ lead.topic }}</span>
-                    <span class="pill" :class="stagePillClass(lead.currentStage)">{{ stageLabel(lead.currentStage) }}</span>
-                    <span v-if="lead.viability != null" class="pill pill-neutral">Viab. {{ lead.viability }}%</span>
-                  </div>
-                  <ol class="trace-timeline">
-                    <li
-                      v-for="(step, idx) in lead.timeline"
-                      :key="idx"
-                      class="trace-step"
-                      :class="{ 'is-last': idx === lead.timeline.length - 1 }"
-                    >
-                      <span class="trace-step-dot" :class="stepDotClass(lead, step, idx)"></span>
-                      <span class="trace-step-body">
-                        <span class="trace-step-label">{{ step.stage }}</span>
-                        <span class="trace-step-time data-mono">
-                          <template v-if="step.at">{{ formatDateTime(step.at) }}</template>
-                          <template v-else-if="step.note">{{ step.note }}</template>
+          <div v-if="filteredCampaigns.length" class="data-table-wrapper">
+            <table class="data-table campaigns-table">
+              <thead>
+                <tr>
+                  <th class="col-campaign">Campaña</th>
+                  <th>Estado</th>
+                  <th>Fechas</th>
+                  <th>Inversión</th>
+                  <th>Conversaciones</th>
+                  <th>Citas</th>
+                  <th>Ganados</th>
+                  <th>Costo / cita</th>
+                  <th class="col-actions"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <template v-for="campaign in pagedCampaigns" :key="campaign.id">
+                  <tr class="campaign-row" @click="toggleExpand(campaign.id)">
+                    <td class="col-campaign">
+                      <div class="campaign-identity">
+                        <img
+                          v-if="campaign.primaryStoryId && campaignImageUrls[campaign.primaryStoryId]"
+                          :src="campaignImageUrls[campaign.primaryStoryId]"
+                          alt=""
+                          class="campaign-thumb"
+                        />
+                        <span v-else class="campaign-thumb campaign-thumb-fallback">
+                          <BrandIcon :name="brandIconName(campaign.platform)" :size="20" />
                         </span>
-                      </span>
-                    </li>
-                  </ol>
-                </div>
-              </div>
-            </template>
+                        <div class="campaign-identity-text">
+                          <strong class="campaign-name">
+                            {{ campaign.name }}
+                            <span v-if="campaign.source === 'meta'" class="meta-badge">Meta Ads</span>
+                          </strong>
+                          <span class="campaign-objective">{{ campaign.objective || 'Sin objetivo registrado' }}</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td><span class="pill" :class="statusPillClass(campaign.status)">{{ statusLabel(campaign.status) }}</span></td>
+                    <td class="data-mono">{{ dateRangeLabel(campaign) }}</td>
+                    <td class="data-mono">{{ money(campaign.metrics.spend) }}</td>
+                    <td class="data-mono">{{ num(campaign.metrics.conversations) }}</td>
+                    <td class="data-mono">{{ num(campaign.metrics.appointments) }}</td>
+                    <td class="data-mono">{{ num(campaign.metrics.won) }}</td>
+                    <td class="data-mono">{{ campaign.metrics.costPerAppointment != null ? money(campaign.metrics.costPerAppointment) : '—' }}</td>
+                    <td class="col-actions" @click.stop>
+                      <button type="button" class="icon-btn" title="Editar campaña" @click="openEditModal(campaign)">✏️</button>
+                      <button
+                        v-if="campaign.source !== 'meta'"
+                        type="button"
+                        class="icon-btn"
+                        title="Eliminar campaña"
+                        @click="removeCampaign(campaign)"
+                      >🗑️</button>
+                      <button
+                        type="button"
+                        class="icon-btn expand-btn"
+                        :class="{ 'is-open': expandedId === campaign.id }"
+                        :title="expandedId === campaign.id ? 'Ocultar detalle' : 'Ver detalle'"
+                        @click="toggleExpand(campaign.id)"
+                      >▾</button>
+                    </td>
+                  </tr>
+
+                  <tr v-if="expandedId === campaign.id" class="campaign-detail-row">
+                    <td colspan="9">
+                      <div class="campaign-detail">
+                        <span class="campaign-meta">
+                          <template v-if="campaign.lastSyncedAt">Última sincronización: {{ formatDateTime(campaign.lastSyncedAt) }}</template>
+                          <template v-else>Campaña manual, sin sincronizar con Meta</template>
+                        </span>
+
+                        <!-- Embudo real -->
+                        <div class="funnel">
+                          <div v-for="(stage, i) in campaign.funnel" :key="stage.key" class="funnel-row">
+                            <span class="funnel-label">{{ stage.label }}</span>
+                            <div class="funnel-bar-track">
+                              <div
+                                class="funnel-bar-fill"
+                                :style="{ width: funnelBarWidth(campaign.funnel, stage) }"
+                                :title="`${stage.label}: ${num(stage.count)}`"
+                              ></div>
+                              <span class="funnel-bar-value">{{ num(stage.count) }}</span>
+                            </div>
+                            <span v-if="i > 0" class="funnel-dropoff">{{ dropoffLabel(campaign.funnel[i - 1], stage) }}</span>
+                            <span v-else class="funnel-dropoff funnel-dropoff-spacer"></span>
+                          </div>
+                        </div>
+
+                        <!-- Métricas de marketing -->
+                        <div class="metric-grid">
+                          <template v-if="campaign.metrics.impressions != null">
+                            <div class="metric metric-meta"><span class="metric-label">Impresiones</span><span class="metric-value">{{ num(campaign.metrics.impressions) }}</span></div>
+                            <div class="metric metric-meta"><span class="metric-label">Alcance</span><span class="metric-value">{{ num(campaign.metrics.reach) }}</span></div>
+                            <div class="metric metric-meta"><span class="metric-label">Clics</span><span class="metric-value">{{ num(campaign.metrics.clicks) }}</span></div>
+                            <div class="metric metric-meta"><span class="metric-label">CTR</span><span class="metric-value">{{ campaign.metrics.ctr != null ? campaign.metrics.ctr + '%' : '—' }}</span></div>
+                            <div class="metric metric-meta"><span class="metric-label">CPM</span><span class="metric-value">{{ campaign.metrics.cpm != null ? money(campaign.metrics.cpm) : '—' }}</span></div>
+                            <div class="metric metric-meta"><span class="metric-label">CPC</span><span class="metric-value">{{ campaign.metrics.cpc != null ? money(campaign.metrics.cpc) : '—' }}</span></div>
+                            <div class="metric metric-meta"><span class="metric-label">Costo/conv. (Meta)</span><span class="metric-value">{{ campaign.metrics.costPerLeadMeta != null ? money(campaign.metrics.costPerLeadMeta) : '—' }}</span></div>
+                          </template>
+                          <div class="metric"><span class="metric-label">Tasa de calificación</span><span class="metric-value">{{ campaign.metrics.qualificationRate }}%</span></div>
+                          <div class="metric"><span class="metric-label">Conversación → cita</span><span class="metric-value">{{ campaign.metrics.conversationToAppointmentRate }}%</span></div>
+                          <div class="metric"><span class="metric-label">Cita → ganado</span><span class="metric-value">{{ campaign.metrics.appointmentToWonRate }}%</span></div>
+                          <div class="metric"><span class="metric-label">Viabilidad prom.</span><span class="metric-value">{{ campaign.metrics.avgViability != null ? campaign.metrics.avgViability + '%' : '—' }}</span></div>
+                          <div class="metric"><span class="metric-label">1ª respuesta (mediana)</span><span class="metric-value">{{ responseLabel(campaign.metrics.medianFirstResponseMin) }}</span></div>
+                          <div class="metric"><span class="metric-label">Costo / conversación</span><span class="metric-value">{{ campaign.metrics.costPerConversation != null ? money(campaign.metrics.costPerConversation) : '—' }}</span></div>
+                          <div class="metric"><span class="metric-label">Costo / ganado</span><span class="metric-value">{{ campaign.metrics.costPerWon != null ? money(campaign.metrics.costPerWon) : '—' }}</span></div>
+                          <div class="metric"><span class="metric-label">Valor cotizado</span><span class="metric-value">{{ money(campaign.metrics.quotedValue) }}</span></div>
+                          <div class="metric"><span class="metric-label">ROAS</span><span class="metric-value">{{ campaign.metrics.roas != null ? campaign.metrics.roas + '×' : '—' }}</span></div>
+                        </div>
+
+                        <!-- Anuncios mapeados -->
+                        <div class="ad-chips">
+                          <span class="ad-chips-label">Anuncios:</span>
+                          <span v-for="ad in campaign.ads" :key="ad.id" class="ad-chip">
+                            {{ ad.label || ad.sourceId }}
+                            <button type="button" class="ad-chip-x" title="Quitar anuncio" @click="detachAd(ad.id)">✕</button>
+                          </span>
+                          <span v-if="!campaign.ads.length" class="ad-chips-empty">sin anuncios asociados</span>
+                        </div>
+
+                        <button type="button" class="btn-secondary campaign-trace-btn" @click="toggleTrace(campaign.id)">
+                          {{ openTraceId === campaign.id ? '▲ Ocultar trazabilidad' : '🔍 Ver trazabilidad de leads' }}
+                        </button>
+
+                        <div v-if="openTraceId === campaign.id" class="trace-panel">
+                          <p v-if="!campaign.sampleContacts.length" class="trace-hint">
+                            Todavía no hay contactos atribuidos a esta campaña en el rango seleccionado.
+                          </p>
+                          <template v-else>
+                            <p class="trace-hint">
+                              Recorrido real de {{ campaign.sampleContacts.length }} contacto(s) de esta campaña, desde el anuncio hasta su etapa actual.
+                            </p>
+                            <div class="trace-leads">
+                              <div v-for="(lead, li) in campaign.sampleContacts" :key="li" class="trace-lead">
+                                <div class="trace-lead-header">
+                                  <strong class="trace-lead-name">{{ lead.name }}</strong>
+                                  <span v-if="lead.topic" class="trace-lead-topic">{{ lead.topic }}</span>
+                                  <span class="pill" :class="stagePillClass(lead.currentStage)">{{ stageLabel(lead.currentStage) }}</span>
+                                  <span v-if="lead.viability != null" class="pill pill-neutral">Viab. {{ lead.viability }}%</span>
+                                </div>
+                                <ol class="trace-timeline">
+                                  <li
+                                    v-for="(step, idx) in lead.timeline"
+                                    :key="idx"
+                                    class="trace-step"
+                                    :class="{ 'is-last': idx === lead.timeline.length - 1 }"
+                                  >
+                                    <span class="trace-step-dot" :class="stepDotClass(lead, step, idx)"></span>
+                                    <span class="trace-step-body">
+                                      <span class="trace-step-label">{{ step.stage }}</span>
+                                      <span class="trace-step-time data-mono">
+                                        <template v-if="step.at">{{ formatDateTime(step.at) }}</template>
+                                        <template v-else-if="step.note">{{ step.note }}</template>
+                                      </span>
+                                    </span>
+                                  </li>
+                                </ol>
+                              </div>
+                            </div>
+                          </template>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
           </div>
-        </article>
+
+          <div v-else class="empty-state">
+            <span class="empty-state-icon" aria-hidden="true">🔍</span>
+            <p class="empty-state-title">Sin resultados</p>
+            <p class="empty-state-text">Ninguna campaña coincide con los filtros aplicados.</p>
+          </div>
+
+          <div v-if="filteredCampaigns.length" class="table-pagination">
+            <button type="button" class="page-btn" :disabled="currentPage === 1" @click="currentPage--">‹</button>
+            <span class="page-indicator">Página {{ currentPage }} de {{ totalPages }}</span>
+            <button type="button" class="page-btn" :disabled="currentPage === totalPages" @click="currentPage++">›</button>
+            <select v-model.number="pageSize" class="page-size-select">
+              <option :value="10">10 / pág.</option>
+              <option :value="25">25 / pág.</option>
+              <option :value="50">50 / pág.</option>
+            </select>
+          </div>
+        </template>
       </section>
 
       <!-- Anuncios sin clasificar -->
@@ -372,8 +453,9 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue';
 import { apiFetch } from '../apiClient.js';
+import { loadApiImage } from '../apiImage.js';
 import BrandIcon from '../components/BrandIcon.vue';
 
 const RANGE_OPTIONS = [
@@ -388,7 +470,80 @@ const loading = ref(false);
 const errorMsg = ref('');
 const rangeDays = ref(30);
 const openTraceId = ref(null);
+const expandedId = ref(null);
 const assignSelection = reactive({});
+
+// ─────────────────────── Búsqueda, filtros y paginación ───────────────────
+const searchQuery = ref('');
+const platformFilter = ref('all');
+const statusFilter = ref('all');
+const currentPage = ref(1);
+const pageSize = ref(10);
+
+const PLATFORM_FILTERS = [
+  { value: 'all', label: 'Todas las plataformas' },
+  { value: 'instagram', label: 'Instagram' },
+  { value: 'facebook', label: 'Facebook' },
+  { value: 'meta', label: 'Meta (ambas)' },
+  { value: 'whatsapp', label: 'WhatsApp' },
+  { value: 'other', label: 'Otra' }
+];
+
+const STATUS_FILTERS = [
+  { value: 'all', label: 'Todos los estados' },
+  { value: 'activa', label: 'Activa' },
+  { value: 'pausada', label: 'Pausada' },
+  { value: 'finalizada', label: 'Finalizada' }
+];
+
+const filteredCampaigns = computed(() => {
+  const list = report.value?.campaigns || [];
+  const query = searchQuery.value.trim().toLowerCase();
+  return list.filter((c) => {
+    if (query && !c.name.toLowerCase().includes(query)) return false;
+    if (platformFilter.value !== 'all' && c.platform !== platformFilter.value) return false;
+    if (statusFilter.value !== 'all' && c.status !== statusFilter.value) return false;
+    return true;
+  });
+});
+
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredCampaigns.value.length / pageSize.value)));
+
+const pagedCampaigns = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value;
+  return filteredCampaigns.value.slice(start, start + pageSize.value);
+});
+
+watch([searchQuery, platformFilter, statusFilter, pageSize], () => { currentPage.value = 1; });
+watch(totalPages, (max) => { if (currentPage.value > max) currentPage.value = max; });
+
+// ────────────────────── Miniatura del anuncio (Meta) ───────────────────────
+// Reutiliza el mismo caché de imágenes de posts que ya usa Interacciones
+// Sociales (ver pageInteractionService.getCachedPostImage): el `primaryStoryId`
+// de la campaña ES el post_id del anuncio, así que no hace falta un endpoint
+// ni una descarga nuevos.
+const campaignImageUrls = reactive({});
+
+function releaseCampaignImages(keepIds) {
+  for (const key of Object.keys(campaignImageUrls)) {
+    if (keepIds.has(key)) continue;
+    URL.revokeObjectURL(campaignImageUrls[key]);
+    delete campaignImageUrls[key];
+  }
+}
+
+async function hydrateCampaignImages(campaigns) {
+  const withImage = campaigns.filter((c) => c.primaryStoryId);
+  releaseCampaignImages(new Set(withImage.map((c) => String(c.primaryStoryId))));
+  for (const c of withImage) {
+    const key = String(c.primaryStoryId);
+    if (campaignImageUrls[key]) continue;
+    const url = await loadApiImage(`/api/social-interactions/post-image/${encodeURIComponent(c.primaryStoryId)}`);
+    if (url) campaignImageUrls[key] = url;
+  }
+}
+
+onBeforeUnmount(() => releaseCampaignImages(new Set()));
 
 const metaStatus = ref(null);
 const syncing = ref(false);
@@ -419,6 +574,7 @@ async function loadReport() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'No se pudo cargar el rendimiento.');
     report.value = data;
+    await hydrateCampaignImages(data.campaigns || []);
   } catch (err) {
     errorMsg.value = err.message;
   } finally {
@@ -466,6 +622,10 @@ async function syncMeta() {
 
 function toggleTrace(id) {
   openTraceId.value = openTraceId.value === id ? null : id;
+}
+
+function toggleExpand(id) {
+  expandedId.value = expandedId.value === id ? null : id;
 }
 
 // ─────────────────────────── Campañas (CRUD) ──────────────────────────
@@ -794,30 +954,91 @@ onMounted(() => {
 .kpi-value { font-family: var(--font-heading); font-size: 1.5rem; font-weight: 700; color: var(--text-main); }
 .kpi-sub { font-size: 0.72rem; color: var(--text-muted); font-family: var(--font-mono); }
 
-/* Campaign cards */
-.campaigns-list { display: flex; flex-direction: column; gap: 1rem; }
+/* Campañas — tabla compacta con fila expandible */
+.campaigns-table-section { display: flex; flex-direction: column; gap: 1rem; }
 
-.campaign-card {
-  background: var(--bg-card-solid);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
-  padding: 1.35rem 1.5rem;
-  box-shadow: var(--shadow-sm);
-}
-
-.campaign-card-header {
+.table-toolbar {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
+  align-items: center;
+  gap: 0.6rem;
   flex-wrap: wrap;
-  margin-bottom: 1.25rem;
 }
-.campaign-identity { display: flex; align-items: center; gap: 0.75rem; }
-.campaign-platform-icon { border-radius: var(--radius-sm); flex-shrink: 0; }
-.campaign-name { font-family: var(--font-heading); font-weight: 700; font-size: 1.02rem; color: var(--text-main); }
+
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--surface-1);
+  border: 1px solid var(--border-color);
+  border-radius: 9999px;
+  padding: 0.45rem 0.9rem;
+  flex: 1 1 240px;
+  min-width: 200px;
+  max-width: 340px;
+}
+.search-icon { font-size: 0.85rem; opacity: 0.6; flex-shrink: 0; }
+.search-input {
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 0.82rem;
+  color: var(--text-main);
+  width: 100%;
+}
+.search-clear {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  flex-shrink: 0;
+}
+.search-clear:hover { color: var(--accent-rose); }
+
+.filter-select {
+  border: 1px solid var(--border-color);
+  background: var(--surface-1);
+  color: var(--text-main);
+  border-radius: 9999px;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.8rem;
+  font-family: inherit;
+}
+
+.table-total { font-size: 0.78rem; color: var(--text-muted); margin-left: auto; white-space: nowrap; }
+
+.campaigns-table th.col-campaign { min-width: 260px; }
+.campaigns-table th.col-actions, .campaigns-table td.col-actions { text-align: right; white-space: nowrap; }
+.campaigns-table td.data-mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+.campaign-row { cursor: pointer; }
+
+.campaign-identity { display: flex; align-items: center; gap: 0.65rem; }
+.campaign-thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--surface-2);
+}
+.campaign-thumb-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-color);
+}
+.campaign-identity-text { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.campaign-name { font-family: var(--font-heading); font-weight: 700; font-size: 0.9rem; color: var(--text-main); }
+.campaign-objective {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 260px;
+}
 .campaign-meta { font-size: 0.76rem; color: var(--text-muted); font-family: var(--font-mono); }
-.campaign-header-actions { display: flex; align-items: center; gap: 0.4rem; }
 
 .icon-btn {
   border: 1px solid var(--border-color);
@@ -830,6 +1051,46 @@ onMounted(() => {
   line-height: 1;
 }
 .icon-btn:hover { background: var(--surface-3); }
+.expand-btn { transition: transform 0.15s ease; }
+.expand-btn.is-open { transform: rotate(180deg); }
+
+.campaign-detail-row td { padding: 0; background: var(--surface-1); }
+.campaign-detail {
+  padding: 1.25rem 1.5rem 1.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+/* Paginación */
+.table-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+}
+.page-btn {
+  border: 1px solid var(--border-color);
+  background: var(--surface-1);
+  color: var(--text-main);
+  border-radius: 8px;
+  width: 30px;
+  height: 30px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.page-btn:not(:disabled):hover { background: var(--surface-3); }
+.page-indicator { font-size: 0.8rem; color: var(--text-muted); font-family: var(--font-mono); }
+.page-size-select {
+  border: 1px solid var(--border-color);
+  background: var(--surface-1);
+  color: var(--text-main);
+  border-radius: 8px;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.78rem;
+  font-family: inherit;
+}
 
 /* Embudo */
 .funnel { display: flex; flex-direction: column; gap: 0.55rem; }

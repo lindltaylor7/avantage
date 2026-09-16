@@ -193,6 +193,11 @@ export class MetaAdsService {
     }
 
     const mappedSourceIds = new Set();
+    // Un solo `primary_story_id` por campaña — el del PRIMER anuncio con
+    // creativo que se encuentre — para mostrar la imagen del anuncio en el
+    // panel (ver getCachedPostImage en pageInteractionService.js, que ya
+    // sabe descargar y cachear la imagen de un post a partir de este mismo ID).
+    const imageSetForCampaign = new Set();
     for (const ad of ads) {
       const localCampaignId = localIdByExternal.get(String(ad.campaign_id));
       if (!localCampaignId) continue;
@@ -215,6 +220,13 @@ export class MetaAdsService {
           .onConflict('ad_source_id')
           .merge({ campaign_id: localCampaignId, ad_label: ad.name || null });
       }
+
+      const imageStoryId = storyId || ad.creative?.effective_instagram_media_id || null;
+      if (imageStoryId && !imageSetForCampaign.has(localCampaignId)) {
+        imageSetForCampaign.add(localCampaignId);
+        await db('campaigns').where({ id: localCampaignId }).update({ primary_story_id: String(imageStoryId) });
+      }
+
       summary.adsMapped++;
     }
 
