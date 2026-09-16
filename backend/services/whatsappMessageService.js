@@ -3,6 +3,9 @@ import path from 'path';
 import { db } from '../db/connection.js';
 import { whatsappMediaDir } from '../middleware/upload.js';
 import { isAdFormMessage } from './whatsappBotService.js';
+import { WhisperService } from './whisperService.js';
+
+const whisperService = new WhisperService();
 
 const GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v21.0';
 // "meta" (Graph API directa) o "ycloud" (proveedor usado tras vincular el
@@ -37,6 +40,25 @@ export function extractBody(message) {
     case 'sticker': return '[Sticker]';
     default: return '';
   }
+}
+
+/**
+ * Cuerpo final a guardar para un mensaje entrante: si es un audio y ya se
+ * cacheó localmente, se intenta transcribir con Whisper y esa transcripción
+ * reemplaza el placeholder "[Audio]" — así el mensaje se puede leer en el
+ * panel Y el bot lo puede procesar como si lo hubieran escrito. Sin
+ * OPENAI_API_KEY configurada (o si la transcripción falla), se cae de vuelta
+ * al placeholder de siempre.
+ */
+export async function resolveMessageBody(message, cachedMedia) {
+  const fallback = extractBody(message);
+  if (message.type !== 'audio' || !cachedMedia?.filename) return fallback;
+
+  const transcript = await whisperService.transcribe(
+    path.join(whatsappMediaDir, cachedMedia.filename),
+    cachedMedia.mimeType
+  );
+  return transcript || fallback;
 }
 
 // Tipos de mensaje de WhatsApp que traen un archivo adjunto real (no solo
@@ -168,6 +190,7 @@ export class WhatsappMessageService {
 
     const contact = (value.contacts || []).find((c) => (c.wa_id || c.user_id) === senderId);
     const cachedMedia = await cacheMetaMedia(message);
+    const body = await resolveMessageBody(message, cachedMedia);
 
     const [id] = await db('whatsapp_messages')
       .insert({
@@ -175,7 +198,7 @@ export class WhatsappMessageService {
         contact_name: contact?.profile?.name || null,
         message_id: message.id,
         message_type: message.type,
-        body: extractBody(message),
+        body,
         direction: 'inbound',
         channel: detectWhatsappChannel(message.referral),
         referral: message.referral ? JSON.stringify(message.referral) : null,

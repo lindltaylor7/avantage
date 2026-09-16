@@ -446,6 +446,7 @@
                       rel="noopener"
                       class="bubble-attachment-link"
                     >📎 Ver adjunto</a>
+                    <span v-if="msg.message_type === 'audio' && msg.body && msg.body !== '[Audio]'" class="bubble-audio-tag" title="Transcrito automáticamente de una nota de voz">🎤 Audio transcrito</span>
                     <p v-if="msg.body && !(msg.media_filename && MEDIA_BODY_PLACEHOLDER_RE.test(msg.body))" class="bubble-text">{{ msg.body }}</p>
                     <span class="bubble-meta">
                       <span class="bubble-time">{{ formatClock(msg.received_at) }}</span>
@@ -1978,6 +1979,13 @@ onUnmounted(() => {
   color: inherit;
   text-decoration: underline;
   margin-bottom: 0.3rem;
+}
+
+.bubble-audio-tag {
+  display: block;
+  font-size: 0.68rem;
+  opacity: 0.65;
+  margin-bottom: 0.15rem;
 }
 
 .bubble-meta {

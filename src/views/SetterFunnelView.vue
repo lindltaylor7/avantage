@@ -890,6 +890,7 @@
                   rel="noopener"
                   class="bot-bubble-attachment-link"
                 >📎 Ver adjunto</a>
+                <span v-if="msg.message_type === 'audio' && msg.body && msg.body !== '[Audio]'" class="bot-bubble-audio-tag" title="Transcrito automáticamente de una nota de voz">🎤 Audio transcrito</span>
                 <p v-if="msg.body && !(msg.media_filename && MEDIA_BODY_PLACEHOLDER_RE.test(msg.body))" class="bot-bubble-text">{{ msg.body }}</p>
                 <span class="bot-bubble-time">
                   {{ msg.direction === 'outbound' ? 'Avan' : 'Contacto' }} · {{ formatClock(msg.received_at) }}
@@ -3184,6 +3185,13 @@ button.setter-btn {
   color: inherit;
   text-decoration: underline;
   margin-bottom: 0.25rem;
+}
+
+.bot-bubble-audio-tag {
+  display: block;
+  font-size: 0.65rem;
+  opacity: 0.65;
+  margin-bottom: 0.15rem;
 }
 
 .bot-bubble-time {

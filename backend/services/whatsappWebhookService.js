@@ -93,7 +93,7 @@ export class WhatsappWebhookService {
           : true;
 
         try {
-          const { isNew } = await this.messageService.createFromMessage(value, message);
+          const { record, isNew } = await this.messageService.createFromMessage(value, message);
 
           // Se crea/actualiza el lead tanto si el remitente compartió un
           // número real ("from") como si solo viene identificado por un
@@ -110,11 +110,16 @@ export class WhatsappWebhookService {
             source: detectWhatsappChannel(message.referral)
           });
 
-          // Solo ante mensajes de texto, y solo si el mensaje es realmente
-          // nuevo (Meta puede reenviar el mismo evento por reintentos; sin
-          // este chequeo el bot procesaría el mismo mensaje dos veces).
-          if (isNew && isFreshMessage && this.botService && message.type === 'text' && message.text?.body) {
-            await this.botService.handleIncomingMessage(senderId, message.text.body, message.id);
+          // Mensajes de texto siempre; un audio solo si se pudo transcribir
+          // (createFromMessage ya dejó la transcripción en record.body en vez
+          // del placeholder "[Audio]" — ver resolveMessageBody()). Y solo si
+          // el mensaje es realmente nuevo (Meta puede reenviar el mismo
+          // evento por reintentos; sin este chequeo el bot lo procesaría dos veces).
+          const triggerText = message.type === 'text'
+            ? message.text?.body
+            : (message.type === 'audio' && record?.body !== '[Audio]' ? record?.body : null);
+          if (isNew && isFreshMessage && this.botService && triggerText) {
+            await this.botService.handleIncomingMessage(senderId, triggerText, message.id);
           }
         } catch (error) {
           console.error(`❌ [WhatsApp Webhook] Error al guardar el mensaje ${message.id}:`, error);

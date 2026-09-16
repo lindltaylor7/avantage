@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { WhatsappMessageService, detectWhatsappChannel, extractBody, cacheYCloudMedia } from './whatsappMessageService.js';
+import { WhatsappMessageService, detectWhatsappChannel, cacheYCloudMedia, resolveMessageBody } from './whatsappMessageService.js';
 import { LeadService } from './leadService.js';
 
 const MAX_RECENT_EVENTS = 50;
@@ -112,13 +112,14 @@ export class YCloudWebhookService {
       // con Meta.
       const channel = detectWhatsappChannel(message.referral);
       const cachedMedia = await cacheYCloudMedia(message);
+      const body = await resolveMessageBody(message, cachedMedia);
 
       const { isNew } = await this.messageService.recordInboundMessage({
         waId: senderId,
         contactName: message.customerProfile?.name,
         messageId: message.wamid,
         messageType: message.type,
-        body: extractBody(message),
+        body,
         channel,
         referral: message.referral || null,
         receivedAt: sentAt,
@@ -133,12 +134,16 @@ export class YCloudWebhookService {
         source: channel
       });
 
-      if (isNew && isFreshMessage && this.botService && message.type === 'text' && message.text?.body) {
+      // Texto siempre; un audio solo si se pudo transcribir (ver
+      // resolveMessageBody(), que ya dejó la transcripción en `body` en vez
+      // del placeholder "[Audio]").
+      const triggerText = message.type === 'text' ? message.text?.body : (message.type === 'audio' && body !== '[Audio]' ? body : null);
+      if (isNew && isFreshMessage && this.botService && triggerText) {
         // Se pasa el "id" interno de YCloud (no el "wamid") porque el
         // indicador de leído/escribiendo lo referencia así:
         // POST /whatsapp/inboundMessages/{id}/markAsRead — ver
         // whatsappMessageService.sendTypingIndicatorViaYCloud.
-        await this.botService.handleIncomingMessage(senderId, message.text.body, message.id);
+        await this.botService.handleIncomingMessage(senderId, triggerText, message.id);
       }
     } catch (error) {
       console.error(`❌ [YCloud Webhook] Error al guardar el mensaje ${message.id}:`, error);
