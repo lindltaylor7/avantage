@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { db } from '../db/connection.js';
+import { whatsappMediaDir } from '../middleware/upload.js';
 
 const GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v21.0';
 // "meta" (Graph API directa) o "ycloud" (proveedor usado tras vincular el
@@ -21,7 +22,7 @@ function limaTodayIso() {
   }).format(new Date());
 }
 
-function extractBody(message) {
+export function extractBody(message) {
   switch (message.type) {
     case 'text': return message.text?.body || '';
     case 'button': return message.button?.text || '';
@@ -34,6 +35,99 @@ function extractBody(message) {
     case 'location': return `[Ubicación] ${message.location?.name || ''}`.trim();
     case 'sticker': return '[Sticker]';
     default: return '';
+  }
+}
+
+// Tipos de mensaje de WhatsApp que traen un archivo adjunto real (no solo
+// texto/botones), y el nombre del campo del mensaje donde viene ese adjunto
+// — es el mismo nombre que el "type" en el formato de Meta/YCloud.
+const MEDIA_MESSAGE_TYPES = ['image', 'video', 'audio', 'document', 'sticker'];
+
+const MIME_TO_EXTENSION = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'video/mp4': 'mp4',
+  'video/3gpp': '3gp',
+  'audio/ogg': 'ogg',
+  'audio/mpeg': 'mp3',
+  'audio/mp4': 'm4a',
+  'audio/amr': 'amr',
+  'application/pdf': 'pdf'
+};
+
+function extensionForMime(mimeType) {
+  const clean = String(mimeType || '').split(';')[0].trim().toLowerCase();
+  return MIME_TO_EXTENSION[clean] || 'bin';
+}
+
+async function saveMediaBuffer(buffer, mimeType, prefix) {
+  const filename = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extensionForMime(mimeType)}`;
+  await fs.promises.writeFile(path.join(whatsappMediaDir, filename), buffer);
+  return filename;
+}
+
+/**
+ * Descarga y cachea localmente el adjunto de un mensaje entrante de YCloud.
+ * YCloud entrega un "link" de descarga directa en el propio webhook, pero
+ * solo lo garantiza accesible por 30 días y pide el header "X-API-Key" — sin
+ * copiarlo, el adjunto dejaba de verse en el panel pasado ese tiempo (o antes,
+ * si el link exige ese header desde el inicio).
+ * https://docs.ycloud.com/reference/whatsapp-inbound-message-webhook-examples
+ */
+export async function cacheYCloudMedia(message) {
+  if (!MEDIA_MESSAGE_TYPES.includes(message.type)) return null;
+  const media = message[message.type];
+  if (!media?.link) return null;
+
+  const apiKey = process.env.YCLOUD_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const response = await fetch(media.link, { headers: { 'X-API-Key': apiKey } });
+    if (!response.ok) return null;
+    const mimeType = media.mime_type || response.headers.get('content-type') || 'application/octet-stream';
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const filename = await saveMediaBuffer(buffer, mimeType, 'ycloud');
+    return { filename, mimeType };
+  } catch (error) {
+    console.warn('⚠️ [WhatsApp] No se pudo descargar el adjunto entrante (YCloud):', error.message);
+    return null;
+  }
+}
+
+/**
+ * Descarga y cachea localmente el adjunto de un mensaje entrante nativo de la
+ * Graph API de Meta. El webhook solo trae un "id" de media (nunca una URL
+ * directa): hace falta resolverlo primero a una URL temporal —dura minutos—
+ * y descargarla con el mismo access token, todo antes de que caduque.
+ * https://developers.facebook.com/docs/whatsapp/cloud-api/reference/media
+ */
+async function cacheMetaMedia(message) {
+  if (!MEDIA_MESSAGE_TYPES.includes(message.type)) return null;
+  const media = message[message.type];
+  if (!media?.id) return null;
+
+  const accessToken = process.env.META_WHATSAPP_ACCESS_TOKEN || process.env.META_PAGE_ACCESS_TOKEN;
+  if (!accessToken) return null;
+
+  try {
+    const metaUrl = `https://graph.facebook.com/${GRAPH_API_VERSION}/${media.id}`;
+    const metaResponse = await fetch(metaUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!metaResponse.ok) return null;
+    const metaData = await metaResponse.json();
+    if (!metaData.url) return null;
+
+    const fileResponse = await fetch(metaData.url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!fileResponse.ok) return null;
+    const mimeType = media.mime_type || metaData.mime_type || 'application/octet-stream';
+    const buffer = Buffer.from(await fileResponse.arrayBuffer());
+    const filename = await saveMediaBuffer(buffer, mimeType, 'meta');
+    return { filename, mimeType };
+  } catch (error) {
+    console.warn('⚠️ [WhatsApp] No se pudo descargar el adjunto entrante (Meta):', error.message);
+    return null;
   }
 }
 
@@ -72,6 +166,7 @@ export class WhatsappMessageService {
     }
 
     const contact = (value.contacts || []).find((c) => (c.wa_id || c.user_id) === senderId);
+    const cachedMedia = await cacheMetaMedia(message);
 
     const [id] = await db('whatsapp_messages')
       .insert({
@@ -84,6 +179,8 @@ export class WhatsappMessageService {
         channel: detectWhatsappChannel(message.referral),
         referral: message.referral ? JSON.stringify(message.referral) : null,
         raw_payload: JSON.stringify(message),
+        media_filename: cachedMedia?.filename || null,
+        media_mime_type: cachedMedia?.mimeType || null,
         received_at: message.timestamp ? new Date(Number(message.timestamp) * 1000) : new Date()
       })
       .onConflict('message_id')
@@ -101,7 +198,7 @@ export class WhatsappMessageService {
    * el formato nativo de webhook de la Graph API (p. ej. YCloud, ver
    * YCloudWebhookService). Mismo contrato de retorno que createFromMessage().
    */
-  async recordInboundMessage({ waId, contactName, messageId, messageType, body, channel, referral, receivedAt, rawPayload }) {
+  async recordInboundMessage({ waId, contactName, messageId, messageType, body, channel, referral, receivedAt, rawPayload, mediaFilename, mediaMimeType }) {
     const [id] = await db('whatsapp_messages')
       .insert({
         wa_id: waId,
@@ -113,6 +210,8 @@ export class WhatsappMessageService {
         channel,
         referral: referral ? JSON.stringify(referral) : null,
         raw_payload: rawPayload ? JSON.stringify(rawPayload) : null,
+        media_filename: mediaFilename || null,
+        media_mime_type: mediaMimeType || null,
         received_at: receivedAt || new Date()
       })
       .onConflict('message_id')

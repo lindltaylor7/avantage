@@ -877,7 +877,20 @@
                 class="bot-bubble"
                 :class="msg.direction === 'outbound' ? 'outbound' : 'inbound'"
               >
-                <p class="bot-bubble-text">{{ msg.body }}</p>
+                <img
+                  v-if="msg.message_type === 'image' && botChatMediaUrls[msg.id]"
+                  :src="botChatMediaUrls[msg.id]"
+                  alt="Imagen enviada por WhatsApp"
+                  class="bot-bubble-image"
+                />
+                <a
+                  v-else-if="msg.media_filename && botChatMediaUrls[msg.id]"
+                  :href="botChatMediaUrls[msg.id]"
+                  target="_blank"
+                  rel="noopener"
+                  class="bot-bubble-attachment-link"
+                >📎 Ver adjunto</a>
+                <p v-if="msg.body && !(msg.media_filename && MEDIA_BODY_PLACEHOLDER_RE.test(msg.body))" class="bot-bubble-text">{{ msg.body }}</p>
                 <span class="bot-bubble-time">
                   {{ msg.direction === 'outbound' ? 'Avan' : 'Contacto' }} · {{ formatClock(msg.received_at) }}
                 </span>
@@ -900,6 +913,10 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { apiFetch } from '../apiClient.js';
+import { loadApiImage } from '../apiImage.js';
+
+/** Deja de mostrar solo "[Imagen]"/"[Video]": para esos placeholders se intenta cargar el adjunto real. */
+const MEDIA_BODY_PLACEHOLDER_RE = /^\[(Imagen|Video|Audio|Documento|Sticker)\]$/;
 
 // Etapas predeterminadas especializadas para Setter Funnel
 const DEFAULT_SETTER_COLUMNS = [
@@ -992,6 +1009,7 @@ const selectedLead = ref(null);
 // Conversación con el bot de WhatsApp (Avan) dentro de la ficha del lead
 const showBotChat = ref(false);
 const botChatMessages = ref([]);
+const botChatMediaUrls = reactive({});
 const botChatLoading = ref(false);
 const botChatError = ref('');
 const botChatScrollEl = ref(null);
@@ -1651,6 +1669,24 @@ function formatClock(dateStr) {
  * Trae el hilo completo (contacto + Avan) del lead seleccionado desde la
  * tabla `whatsapp_messages`. El `phone` del lead ES el wa_id del contacto.
  */
+function releaseBotChatMedia(keepIds) {
+  for (const key of Object.keys(botChatMediaUrls)) {
+    if (keepIds.has(Number(key))) continue;
+    URL.revokeObjectURL(botChatMediaUrls[key]);
+    delete botChatMediaUrls[key];
+  }
+}
+
+async function hydrateBotChatMedia(messages) {
+  const withMedia = messages.filter((m) => m.media_filename);
+  releaseBotChatMedia(new Set(withMedia.map((m) => m.id)));
+  for (const msg of withMedia) {
+    if (botChatMediaUrls[msg.id]) continue;
+    const url = await loadApiImage(`/api/whatsapp/messages/${msg.id}/media`);
+    if (url) botChatMediaUrls[msg.id] = url;
+  }
+}
+
 async function loadBotChat() {
   const waId = selectedLead.value?.phone;
   if (!waId) return;
@@ -1661,6 +1697,7 @@ async function loadBotChat() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'No se pudo obtener la conversación.');
     botChatMessages.value = data.messages || [];
+    await hydrateBotChatMedia(botChatMessages.value);
     await nextTick();
     if (botChatScrollEl.value) botChatScrollEl.value.scrollTop = botChatScrollEl.value.scrollHeight;
   } catch (err) {
@@ -1693,10 +1730,14 @@ watch(selectedLead, () => {
   showBotChat.value = false;
   botChatMessages.value = [];
   botChatError.value = '';
+  releaseBotChatMedia(new Set());
   stopBotChatPolling();
 });
 
-onBeforeUnmount(stopBotChatPolling);
+onBeforeUnmount(() => {
+  stopBotChatPolling();
+  releaseBotChatMedia(new Set());
+});
 
 onMounted(() => {
   loadSetterColumns();
@@ -3128,6 +3169,21 @@ button.setter-btn {
 .bot-bubble-text {
   margin: 0;
   white-space: pre-wrap;
+}
+
+.bot-bubble-image {
+  display: block;
+  max-width: 100%;
+  max-height: 18rem;
+  border-radius: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.bot-bubble-attachment-link {
+  display: inline-block;
+  color: inherit;
+  text-decoration: underline;
+  margin-bottom: 0.25rem;
 }
 
 .bot-bubble-time {

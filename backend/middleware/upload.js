@@ -15,6 +15,12 @@ fs.mkdirSync(financeReceiptDir, { recursive: true });
 const socialPostImageDir = path.join(__dirname, '..', '..', 'uploads', 'social-posts');
 fs.mkdirSync(socialPostImageDir, { recursive: true });
 
+// Copias locales de los adjuntos (imagen/video/audio/documento) que un
+// contacto envía por WhatsApp: el link de descarga que da Meta o YCloud
+// caduca, así que se descargan una sola vez apenas llega el webhook.
+const whatsappMediaDir = path.join(__dirname, '..', '..', 'uploads', 'whatsapp-media');
+fs.mkdirSync(whatsappMediaDir, { recursive: true });
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
   filename: (req, file, cb) => {
@@ -92,4 +98,4 @@ export function uploadFinanceFile(req, res, next) {
   });
 }
 
-export { financeReceiptDir, socialPostImageDir };
+export { financeReceiptDir, socialPostImageDir, whatsappMediaDir };

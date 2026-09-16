@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { WhatsappMessageService, detectWhatsappChannel } from './whatsappMessageService.js';
+import { WhatsappMessageService, detectWhatsappChannel, extractBody, cacheYCloudMedia } from './whatsappMessageService.js';
 import { LeadService } from './leadService.js';
 
 const MAX_RECENT_EVENTS = 50;
@@ -111,17 +111,20 @@ export class YCloudWebhookService {
       // orgánico), detectWhatsappChannel() cae a "WhatsApp Directo" igual que
       // con Meta.
       const channel = detectWhatsappChannel(message.referral);
+      const cachedMedia = await cacheYCloudMedia(message);
 
       const { isNew } = await this.messageService.recordInboundMessage({
         waId: senderId,
         contactName: message.customerProfile?.name,
         messageId: message.wamid,
         messageType: message.type,
-        body: message.text?.body || '',
+        body: extractBody(message),
         channel,
         referral: message.referral || null,
         receivedAt: sentAt,
-        rawPayload: message
+        rawPayload: message,
+        mediaFilename: cachedMedia?.filename || null,
+        mediaMimeType: cachedMedia?.mimeType || null
       });
 
       await this.leadService.findOrCreateFromWhatsApp({

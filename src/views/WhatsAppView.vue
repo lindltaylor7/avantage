@@ -420,7 +420,20 @@
                     class="bubble"
                     :class="[run.direction, { 'is-last': i === run.messages.length - 1, 'is-failed': msg.status === 'failed' }]"
                   >
-                    <p class="bubble-text">{{ msg.body }}</p>
+                    <img
+                      v-if="msg.message_type === 'image' && mediaUrls[msg.id]"
+                      :src="mediaUrls[msg.id]"
+                      alt="Imagen enviada por WhatsApp"
+                      class="bubble-image"
+                    />
+                    <a
+                      v-else-if="msg.media_filename && mediaUrls[msg.id]"
+                      :href="mediaUrls[msg.id]"
+                      target="_blank"
+                      rel="noopener"
+                      class="bubble-attachment-link"
+                    >📎 Ver adjunto</a>
+                    <p v-if="msg.body && !(msg.media_filename && MEDIA_BODY_PLACEHOLDER_RE.test(msg.body))" class="bubble-text">{{ msg.body }}</p>
                     <span class="bubble-meta">
                       <span class="bubble-time">{{ formatClock(msg.received_at) }}</span>
                       <span
@@ -490,8 +503,9 @@
 </template>
 
 <script setup>
-import { nextTick, onMounted, onUnmounted, computed, ref } from 'vue';
+import { nextTick, onMounted, onUnmounted, computed, ref, reactive } from 'vue';
 import { apiFetch } from '../apiClient.js';
+import { loadApiImage } from '../apiImage.js';
 
 const conversations = ref([]);
 const contactSearch = ref('');
@@ -504,6 +518,7 @@ const autoRefresh = ref(true);
 
 const selectedWaId = ref(null);
 const thread = ref([]);
+const mediaUrls = reactive({});
 const replyText = ref('');
 const isSending = ref(false);
 const threadScrollEl = ref(null);
@@ -705,6 +720,27 @@ async function scrollThreadToBottom({ smooth = false } = {}) {
   unseenCount.value = 0;
 }
 
+/** Deja de mostrar solo "[Imagen]"/"[Video]": para esos placeholders se intenta cargar el adjunto real. */
+const MEDIA_BODY_PLACEHOLDER_RE = /^\[(Imagen|Video|Audio|Documento|Sticker)\]$/;
+
+function releaseThreadMedia(keepIds) {
+  for (const key of Object.keys(mediaUrls)) {
+    if (keepIds.has(Number(key))) continue;
+    URL.revokeObjectURL(mediaUrls[key]);
+    delete mediaUrls[key];
+  }
+}
+
+async function hydrateThreadMedia(messages) {
+  const withMedia = messages.filter((m) => m.media_filename);
+  releaseThreadMedia(new Set(withMedia.map((m) => m.id)));
+  for (const msg of withMedia) {
+    if (mediaUrls[msg.id]) continue;
+    const url = await loadApiImage(`/api/whatsapp/messages/${msg.id}/media`);
+    if (url) mediaUrls[msg.id] = url;
+  }
+}
+
 async function fetchThread(waId, { scrollToBottom = false } = {}) {
   try {
     const response = await apiFetch(`/api/whatsapp/conversations/${encodeURIComponent(waId)}/messages`);
@@ -717,6 +753,7 @@ async function fetchThread(waId, { scrollToBottom = false } = {}) {
     const previousCount = thread.value.length;
     assignIfChanged(thread, data.messages || []);
     const added = thread.value.length - previousCount;
+    await hydrateThreadMedia(thread.value);
 
     if (scrollToBottom || isPinnedToBottom.value) await scrollThreadToBottom();
     else if (added > 0) unseenCount.value += added;
@@ -1157,6 +1194,7 @@ onMounted(() => {
 onUnmounted(() => {
   if (pollHandle) clearInterval(pollHandle);
   window.removeEventListener('keydown', onActivityKeydown);
+  releaseThreadMedia(new Set());
 });
 </script>
 
@@ -1873,6 +1911,21 @@ onUnmounted(() => {
 .bubble-text {
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.bubble-image {
+  display: block;
+  max-width: 100%;
+  max-height: 22rem;
+  border-radius: 0.6rem;
+  margin-bottom: 0.3rem;
+}
+
+.bubble-attachment-link {
+  display: inline-block;
+  color: inherit;
+  text-decoration: underline;
+  margin-bottom: 0.3rem;
 }
 
 .bubble-meta {

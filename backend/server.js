@@ -36,7 +36,7 @@ import { FinanceService } from './services/financeService.js';
 import { FinanceLedgerService } from './services/financeLedgerService.js';
 import { signToken, requireAuth, requirePermission, signGoogleOAuthState, verifyGoogleOAuthState } from './middleware/auth.js';
 
-import { uploadProjectUpdateAttachment, uploadDir, uploadFinanceReceipt, uploadFinanceFile, financeReceiptDir } from './middleware/upload.js';
+import { uploadProjectUpdateAttachment, uploadDir, uploadFinanceReceipt, uploadFinanceFile, financeReceiptDir, whatsappMediaDir } from './middleware/upload.js';
 
 // Estado del funnel Kanban que marca el fin del proceso comercial: al llegar
 // aquí se genera automáticamente el proyecto asociado al lead.
@@ -1496,6 +1496,24 @@ app.post('/api/whatsapp/conversations/:waId/messages', requireAuth, requirePermi
   } catch (error) {
     console.error('❌ Error al enviar el mensaje de WhatsApp:', error);
     res.status(502).json({ error: 'No se pudo enviar el mensaje de WhatsApp.', details: error.message });
+  }
+});
+
+/**
+ * Sirve la copia local del adjunto (imagen/video/audio/documento) de un
+ * mensaje de WhatsApp — el link que dan Meta/YCloud en el webhook caduca, así
+ * que el panel siempre pide esta copia cacheada en vez de esa URL original.
+ */
+app.get('/api/whatsapp/messages/:id/media', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const message = await whatsappMessageService.getById(req.params.id);
+    if (!message || !message.media_filename) return res.status(404).end();
+    res.type(message.media_mime_type || 'application/octet-stream');
+    res.set('Cache-Control', 'private, max-age=86400');
+    res.sendFile(path.join(whatsappMediaDir, message.media_filename));
+  } catch (error) {
+    console.error('❌ Error al servir el adjunto de WhatsApp:', error);
+    res.status(404).end();
   }
 });
 
