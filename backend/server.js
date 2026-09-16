@@ -479,6 +479,20 @@ app.post('/api/finance/income', requireAuth, requirePermission('finance.view'), 
   }
 });
 
+app.put('/api/finance/income/:id', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const { fecha, leadId, cuota, emitir, monto, banco, estado, tributario } = req.body || {};
+    const record = await financeLedgerService.updateIncome(req.params.id, {
+      fecha, leadId, cuota, emitir, monto, banco, estado, tributario
+    });
+    if (!record) return res.status(404).json({ error: 'Ingreso no encontrado.' });
+    res.json({ income: record });
+  } catch (error) {
+    console.error('❌ Error al editar el ingreso:', error);
+    res.status(400).json({ error: error.message || 'Error al editar el ingreso.' });
+  }
+});
+
 app.patch('/api/finance/income/:id/estado', requireAuth, requirePermission('finance.view'), async (req, res) => {
   try {
     const record = await financeLedgerService.updateIncomeEstado(req.params.id, req.body?.estado);
@@ -637,6 +651,21 @@ app.post('/api/finance/journal', requireAuth, requirePermission('finance.view'),
   } catch (error) {
     console.error('❌ Error al registrar el asiento del libro diario:', error);
     res.status(400).json({ error: error.message || 'Error al registrar el asiento.' });
+  }
+});
+
+app.put('/api/finance/journal/:id', requireAuth, requirePermission('finance.view'), uploadFinanceReceipt, async (req, res) => {
+  try {
+    const { fecha, detalle, monto, moneda, banco, estado, area, asientoPorDestino, removeReceipt } = req.body || {};
+    const record = await financeLedgerService.updateJournal(req.params.id, {
+      fecha, detalle, monto, moneda, banco, estado, area, asientoPorDestino,
+      receipt: req.file, removeReceipt: removeReceipt === 'true' || removeReceipt === true
+    });
+    if (!record) return res.status(404).json({ error: 'Asiento no encontrado.' });
+    res.json({ journal: record });
+  } catch (error) {
+    console.error('❌ Error al editar el asiento del libro diario:', error);
+    res.status(400).json({ error: error.message || 'Error al editar el asiento.' });
   }
 });
 

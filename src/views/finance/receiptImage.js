@@ -14,3 +14,11 @@ export async function loadReceiptUrl(apiPath) {
   const blob = await response.blob();
   return URL.createObjectURL(blob);
 }
+
+/**
+ * Los comprobantes admiten imágenes y PDFs: un PDF no se puede pintar en un
+ * `<img>`, así que la tabla muestra un icono de documento en su lugar.
+ */
+export function isPdfReceipt(mimeType, fileName) {
+  return (mimeType || '').includes('pdf') || /\.pdf$/i.test(fileName || '');
+}

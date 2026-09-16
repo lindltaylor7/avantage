@@ -68,14 +68,15 @@ const financeReceiptUpload = multer({
   storage: financeReceiptStorage,
   limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
   fileFilter: (req, file, cb) => {
-    if (file.mimetype && file.mimetype.startsWith('image/')) return cb(null, true);
-    cb(new Error('El comprobante debe ser una imagen.'));
+    const mime = file.mimetype || '';
+    if (mime.startsWith('image/') || mime === 'application/pdf') return cb(null, true);
+    cb(new Error('El comprobante debe ser una imagen o un PDF.'));
   }
 }).single('receipt');
 
 /**
- * Middleware para rutas de Finanzas: sube (opcionalmente) una única imagen de
- * comprobante en el campo "receipt" y normaliza los errores de multer a JSON.
+ * Middleware para rutas de Finanzas: sube (opcionalmente) un único comprobante
+ * (imagen o PDF) en el campo "receipt" y normaliza los errores de multer a JSON.
  */
 export function uploadFinanceReceipt(req, res, next) {
   financeReceiptUpload(req, res, (err) => {

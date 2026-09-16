@@ -9,9 +9,9 @@
       <button
         type="button"
         class="btn-primary ledger-add-btn"
-        @click="isFormOpen = !isFormOpen"
+        @click="isFormOpen ? closeForm() : openCreate()"
       >
-        {{ isFormOpen ? "✕ Cerrar" : "+ Registrar ingreso" }}
+        {{ isFormOpen ? (editingRow ? "✕ Cancelar edición" : "✕ Cerrar") : "+ Registrar ingreso" }}
       </button>
     </div>
 
@@ -23,6 +23,10 @@
     </p>
 
     <section v-if="isFormOpen" class="glass-panel ledger-form-panel">
+      <h3 v-if="editingRow" class="ledger-form-title">
+        Editando el ingreso {{ editingRow.code }} — los comprobantes y el archivo
+        tributario se gestionan desde su fila en la tabla.
+      </h3>
       <form class="ledger-form" @submit.prevent="submit">
         <div class="ledger-form-grid">
           <div class="form-group">
@@ -116,7 +120,7 @@
               <option value="No aplica" />
             </datalist>
           </div>
-          <div class="form-group">
+          <div v-if="!editingRow" class="form-group">
             <label class="form-label">Tributario — archivo o imagen (opcional)</label>
             <input
               ref="tributarioInput"
@@ -125,12 +129,12 @@
               @change="onTributarioChange"
             />
           </div>
-          <div class="form-group ledger-form-wide">
-            <label class="form-label">Comprobante (imagen, opcional)</label>
+          <div v-if="!editingRow" class="form-group ledger-form-wide">
+            <label class="form-label">Comprobante (imagen o PDF, opcional)</label>
             <input
               ref="fileInput"
               type="file"
-              accept="image/*"
+              accept="image/*,application/pdf"
               class="form-input"
               @change="onFileChange"
             />
@@ -142,7 +146,7 @@
           class="btn-primary ledger-submit-btn"
           :disabled="isSaving"
         >
-          {{ isSaving ? "Guardando..." : "Guardar ingreso" }}
+          {{ isSaving ? "Guardando..." : editingRow ? "Guardar cambios" : "Guardar ingreso" }}
         </button>
       </form>
     </section>
@@ -248,7 +252,11 @@
                     rel="noopener"
                     class="receipt-thumb-link"
                   >
-                    <img :src="receiptUrls[rcpt.id]" alt="Comprobante" />
+                    <span
+                      v-if="isPdfReceipt(rcpt.mime_type, rcpt.original_name)"
+                      class="receipt-thumb-pdf"
+                    >📄</span>
+                    <img v-else :src="receiptUrls[rcpt.id]" alt="Comprobante" />
                   </a>
                   <span v-else class="receipt-thumb-loading">…</span>
                   <button
@@ -260,10 +268,10 @@
                     ✕
                   </button>
                 </span>
-                <label class="receipt-add" title="Agregar comprobante">
+                <label class="receipt-add" title="Agregar comprobante (imagen o PDF)">
                   <input
                     type="file"
-                    accept="image/*"
+                    accept="image/*,application/pdf"
                     hidden
                     @change="(e) => uploadReceipt(row.id, e)"
                   />
@@ -272,13 +280,24 @@
               </div>
             </td>
             <td>
-              <button
-                type="button"
-                class="btn-secondary ledger-delete-btn"
-                @click="removeRow(row.id)"
-              >
-                🗑️
-              </button>
+              <div class="ledger-row-actions">
+                <button
+                  type="button"
+                  class="btn-secondary ledger-delete-btn"
+                  title="Editar ingreso"
+                  @click="startEdit(row)"
+                >
+                  ✏️
+                </button>
+                <button
+                  type="button"
+                  class="btn-secondary ledger-delete-btn"
+                  title="Eliminar ingreso"
+                  @click="removeRow(row.id)"
+                >
+                  🗑️
+                </button>
+              </div>
             </td>
           </tr>
         </tbody>
@@ -296,7 +315,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { apiFetch } from "../../apiClient.js";
-import { loadReceiptUrl } from "./receiptImage.js";
+import { isPdfReceipt, loadReceiptUrl } from "./receiptImage.js";
 import SendTributarioModal from "./SendTributarioModal.vue";
 
 const CUOTAS = ["1era", "2da", "3era"];
@@ -331,19 +350,24 @@ const fileInput = ref(null);
 const tributarioInput = ref(null);
 const estadoSaving = ref(null);
 const sendModalRow = ref(null);
+const editingRow = ref(null);
 let pendingFile = null;
 let pendingTributarioFile = null;
 
-const form = reactive({
-  fecha: new Date().toISOString().slice(0, 10),
-  leadId: null,
-  cuota: "1era",
-  emitir: "factura",
-  monto: "",
-  banco: "BCP",
-  estado: "no pagado",
-  tributario: "",
-});
+function emptyForm() {
+  return {
+    fecha: new Date().toISOString().slice(0, 10),
+    leadId: null,
+    cuota: "1era",
+    emitir: "factura",
+    monto: "",
+    banco: "BCP",
+    estado: "no pagado",
+    tributario: "",
+  };
+}
+
+const form = reactive(emptyForm());
 
 const mesPreview = computed(() => {
   if (!form.fecha) return "";
@@ -379,6 +403,44 @@ function onFileChange(event) {
 
 function onTributarioChange(event) {
   pendingTributarioFile = event.target.files?.[0] || null;
+}
+
+function resetForm() {
+  Object.assign(form, emptyForm());
+  pendingFile = null;
+  pendingTributarioFile = null;
+  if (fileInput.value) fileInput.value.value = "";
+  if (tributarioInput.value) tributarioInput.value.value = "";
+}
+
+function openCreate() {
+  editingRow.value = null;
+  resetForm();
+  isFormOpen.value = true;
+}
+
+function closeForm() {
+  isFormOpen.value = false;
+  editingRow.value = null;
+  resetForm();
+}
+
+/** Abre el formulario con los datos del ingreso para editarlo en su sitio. */
+function startEdit(row) {
+  editingRow.value = row;
+  resetForm();
+  Object.assign(form, {
+    fecha: row.fecha ? String(row.fecha).slice(0, 10) : "",
+    leadId: row.lead_id ?? null,
+    cuota: row.cuota || "1era",
+    emitir: row.emitir || "factura",
+    monto: row.monto ?? "",
+    banco: row.banco || "BCP",
+    estado: row.estado || "no pagado",
+    tributario: row.tributario || "",
+  });
+  isFormOpen.value = true;
+  errorMessage.value = "";
 }
 
 function releaseUrls() {
@@ -444,15 +506,24 @@ async function submit() {
   isSaving.value = true;
   errorMessage.value = "";
   successMessage.value = "";
+  const editing = editingRow.value;
   try {
-    const response = await apiFetch("/api/finance/income", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    });
+    const response = await apiFetch(
+      editing ? `/api/finance/income/${editing.id}` : "/api/finance/income",
+      {
+        method: editing ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      },
+    );
     const data = await response.json();
     if (!response.ok)
-      throw new Error(data.error || "No se pudo registrar el ingreso.");
+      throw new Error(
+        data.error ||
+          (editing
+            ? "No se pudo editar el ingreso."
+            : "No se pudo registrar el ingreso."),
+      );
 
     if (pendingFile && data.income?.id) {
       const fd = new FormData();
@@ -472,17 +543,13 @@ async function submit() {
       });
     }
 
-    form.monto = "";
-    form.tributario = "";
-    pendingFile = null;
-    pendingTributarioFile = null;
-    if (fileInput.value) fileInput.value.value = "";
-    if (tributarioInput.value) tributarioInput.value.value = "";
-    successMessage.value = `Ingreso ${data.income?.code || ""} registrado.`;
+    successMessage.value = editing
+      ? `Ingreso ${data.income?.code || ""} actualizado.`
+      : `Ingreso ${data.income?.code || ""} registrado.`;
     setTimeout(() => {
       successMessage.value = "";
     }, 3000);
-    isFormOpen.value = false;
+    closeForm();
     await fetchRows();
   } catch (error) {
     errorMessage.value = error.message;
@@ -606,6 +673,7 @@ async function removeRow(id) {
       method: "DELETE",
     });
     if (!response.ok) throw new Error("No se pudo eliminar el ingreso.");
+    if (editingRow.value?.id === id) closeForm();
     await fetchRows();
   } catch (error) {
     errorMessage.value = error.message;
@@ -697,6 +765,17 @@ onBeforeUnmount(releaseUrls);
 .ledger-delete-btn {
   padding: 0.3rem 0.55rem;
   font-size: 0.8rem;
+}
+
+.ledger-row-actions {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.ledger-form-title {
+  margin: 0 0 1rem;
+  font-size: 0.95rem;
+  color: var(--text-muted);
 }
 
 .lead-dni {
@@ -806,6 +885,16 @@ onBeforeUnmount(releaseUrls);
 .receipt-thumb-loading {
   font-size: 0.8rem;
   color: var(--text-muted);
+}
+
+.receipt-thumb-pdf {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  line-height: 1;
 }
 
 .receipt-remove {

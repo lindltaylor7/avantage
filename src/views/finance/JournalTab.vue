@@ -5,8 +5,8 @@
         Código autogenerado por día. El monto admite valores negativos y el ITF se calcula
         sobre su valor absoluto.
       </p>
-      <button type="button" class="btn-primary ledger-add-btn" @click="isFormOpen = !isFormOpen">
-        {{ isFormOpen ? '✕ Cerrar' : '+ Nuevo asiento' }}
+      <button type="button" class="btn-primary ledger-add-btn" @click="isFormOpen ? closeForm() : openCreate()">
+        {{ isFormOpen ? (editingRow ? '✕ Cancelar edición' : '✕ Cerrar') : '+ Nuevo asiento' }}
       </button>
     </div>
 
@@ -14,6 +14,7 @@
     <p v-if="successMessage" class="info-box ledger-success">✅ {{ successMessage }}</p>
 
     <section v-if="isFormOpen" class="glass-panel ledger-form-panel">
+      <h3 v-if="editingRow" class="ledger-form-title">Editando el asiento {{ editingRow.code }}</h3>
       <form class="ledger-form" @submit.prevent="submit">
         <div class="ledger-form-grid">
           <div class="form-group">
@@ -69,13 +70,18 @@
             <textarea v-model="form.detalle" class="form-textarea" rows="2" placeholder="Descripción del movimiento" required></textarea>
           </div>
           <div class="form-group ledger-form-wide">
-            <label class="form-label">Comprobante (imagen, opcional)</label>
-            <input ref="fileInput" type="file" accept="image/*" class="form-input" @change="onFileChange" />
+            <label class="form-label">Comprobante (imagen o PDF, opcional)</label>
+            <input ref="fileInput" type="file" accept="image/*,application/pdf" class="form-input" @change="onFileChange" />
+            <label v-if="editingRow?.receipt_filename" class="ledger-receipt-current">
+              <input v-model="removeReceipt" type="checkbox" />
+              Eliminar el comprobante actual
+              ({{ editingRow.receipt_original_name || 'archivo' }})
+            </label>
           </div>
         </div>
 
         <button type="submit" class="btn-primary ledger-submit-btn" :disabled="isSaving">
-          {{ isSaving ? 'Guardando...' : 'Guardar asiento' }}
+          {{ isSaving ? 'Guardando...' : (editingRow ? 'Guardar cambios' : 'Guardar asiento') }}
         </button>
       </form>
     </section>
@@ -118,13 +124,20 @@
                 rel="noopener"
                 :title="row.receipt_original_name || 'Comprobante'"
               >
-                <img v-if="receiptUrls[row.id]" :src="receiptUrls[row.id]" alt="Comprobante" />
-                <span v-else class="receipt-thumb-loading">…</span>
+                <span v-if="!receiptUrls[row.id]" class="receipt-thumb-loading">…</span>
+                <span
+                  v-else-if="isPdfReceipt(row.receipt_mime_type, row.receipt_original_name)"
+                  class="receipt-thumb-pdf"
+                >📄</span>
+                <img v-else :src="receiptUrls[row.id]" alt="Comprobante" />
               </a>
               <span v-else>—</span>
             </td>
             <td>
-              <button type="button" class="btn-secondary ledger-delete-btn" @click="removeRow(row.id)">🗑️</button>
+              <div class="ledger-row-actions">
+                <button type="button" class="btn-secondary ledger-delete-btn" title="Editar asiento" @click="startEdit(row)">✏️</button>
+                <button type="button" class="btn-secondary ledger-delete-btn" title="Eliminar asiento" @click="removeRow(row.id)">🗑️</button>
+              </div>
             </td>
           </tr>
         </tbody>
@@ -136,7 +149,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { apiFetch } from '../../apiClient.js';
-import { loadReceiptUrl } from './receiptImage.js';
+import { isPdfReceipt, loadReceiptUrl } from './receiptImage.js';
 
 const BANCOS = ['BCP', 'Interbank', 'Efectivo'];
 
@@ -149,18 +162,24 @@ const successMessage = ref('');
 const rows = ref([]);
 const receiptUrls = reactive({});
 const fileInput = ref(null);
+const editingRow = ref(null);
+const removeReceipt = ref(false);
 let pendingFile = null;
 
-const form = reactive({
-  fecha: new Date().toISOString().slice(0, 10),
-  detalle: '',
-  monto: '',
-  moneda: 'soles',
-  banco: 'BCP',
-  estado: 'pendiente',
-  area: '',
-  asientoPorDestino: ''
-});
+function emptyForm() {
+  return {
+    fecha: new Date().toISOString().slice(0, 10),
+    detalle: '',
+    monto: '',
+    moneda: 'soles',
+    banco: 'BCP',
+    estado: 'pendiente',
+    area: '',
+    asientoPorDestino: ''
+  };
+}
+
+const form = reactive(emptyForm());
 
 const itfPreview = computed(() => calcItf(form.monto));
 
@@ -180,6 +199,43 @@ function formatDate(dateStr) {
 
 function onFileChange(event) {
   pendingFile = event.target.files?.[0] || null;
+}
+
+function resetForm() {
+  Object.assign(form, emptyForm());
+  pendingFile = null;
+  removeReceipt.value = false;
+  if (fileInput.value) fileInput.value.value = '';
+}
+
+function openCreate() {
+  editingRow.value = null;
+  resetForm();
+  isFormOpen.value = true;
+}
+
+function closeForm() {
+  isFormOpen.value = false;
+  editingRow.value = null;
+  resetForm();
+}
+
+/** Abre el formulario con los datos del asiento para editarlo en su sitio. */
+function startEdit(row) {
+  editingRow.value = row;
+  resetForm();
+  Object.assign(form, {
+    fecha: row.fecha ? String(row.fecha).slice(0, 10) : '',
+    detalle: row.detalle || '',
+    monto: row.monto ?? '',
+    moneda: row.moneda || 'soles',
+    banco: row.banco || 'BCP',
+    estado: row.estado || 'pendiente',
+    area: row.area || '',
+    asientoPorDestino: row.asiento_por_destino || ''
+  });
+  isFormOpen.value = true;
+  errorMessage.value = '';
 }
 
 function releaseUrls() {
@@ -218,6 +274,7 @@ async function submit() {
   isSaving.value = true;
   errorMessage.value = '';
   successMessage.value = '';
+  const editing = editingRow.value;
   try {
     const fd = new FormData();
     fd.append('fecha', form.fecha);
@@ -229,20 +286,24 @@ async function submit() {
     fd.append('area', form.area);
     fd.append('asientoPorDestino', form.asientoPorDestino);
     if (pendingFile) fd.append('receipt', pendingFile);
+    if (editing && removeReceipt.value) fd.append('removeReceipt', 'true');
 
-    const response = await apiFetch('/api/finance/journal', { method: 'POST', body: fd });
+    const response = await apiFetch(
+      editing ? `/api/finance/journal/${editing.id}` : '/api/finance/journal',
+      { method: editing ? 'PUT' : 'POST', body: fd }
+    );
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'No se pudo registrar el asiento.');
+    if (!response.ok) {
+      throw new Error(data.error || (editing ? 'No se pudo editar el asiento.' : 'No se pudo registrar el asiento.'));
+    }
 
-    form.detalle = '';
-    form.monto = '';
-    form.area = '';
-    form.asientoPorDestino = '';
-    pendingFile = null;
-    if (fileInput.value) fileInput.value.value = '';
-    successMessage.value = `Asiento ${data.journal?.code || ''} registrado.`;
+    // El comprobante pudo cambiar: se descarta la miniatura cacheada del asiento.
+    if (editing) forgetReceiptUrl(editing.id);
+    successMessage.value = editing
+      ? `Asiento ${data.journal?.code || ''} actualizado.`
+      : `Asiento ${data.journal?.code || ''} registrado.`;
     setTimeout(() => { successMessage.value = ''; }, 3000);
-    isFormOpen.value = false;
+    closeForm();
     await fetchRows();
   } catch (error) {
     errorMessage.value = error.message;
@@ -251,15 +312,20 @@ async function submit() {
   }
 }
 
+function forgetReceiptUrl(id) {
+  if (receiptUrls[id]) {
+    URL.revokeObjectURL(receiptUrls[id]);
+    delete receiptUrls[id];
+  }
+}
+
 async function removeRow(id) {
   if (!confirm('¿Eliminar este asiento? Esta acción no se puede deshacer.')) return;
   try {
     const response = await apiFetch(`/api/finance/journal/${id}`, { method: 'DELETE' });
     if (!response.ok) throw new Error('No se pudo eliminar el asiento.');
-    if (receiptUrls[id]) {
-      URL.revokeObjectURL(receiptUrls[id]);
-      delete receiptUrls[id];
-    }
+    forgetReceiptUrl(id);
+    if (editingRow.value?.id === id) closeForm();
     await fetchRows();
   } catch (error) {
     errorMessage.value = error.message;
@@ -288,6 +354,19 @@ onBeforeUnmount(releaseUrls);
 .ledger-success { border-color: rgba(46, 125, 70, 0.4); color: var(--accent-emerald); }
 
 .ledger-form-panel { padding: 1.5rem; }
+.ledger-form-title { margin: 0 0 1rem; font-size: 0.95rem; color: var(--text-muted); }
+
+.ledger-receipt-current {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.ledger-receipt-current input { width: auto; margin: 0; }
 
 .ledger-form-grid {
   display: grid;
@@ -308,6 +387,7 @@ onBeforeUnmount(releaseUrls);
 .amount-negative { color: var(--accent-rose); font-weight: 600; }
 
 .ledger-delete-btn { padding: 0.3rem 0.55rem; font-size: 0.8rem; }
+.ledger-row-actions { display: flex; gap: 0.3rem; }
 
 .receipt-thumb {
   display: inline-flex;
@@ -323,4 +403,5 @@ onBeforeUnmount(releaseUrls);
 
 .receipt-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .receipt-thumb-loading { font-size: 0.8rem; color: var(--text-muted); }
+.receipt-thumb-pdf { font-size: 1.2rem; line-height: 1; }
 </style>

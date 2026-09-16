@@ -117,20 +117,23 @@ export class FinanceLedgerService {
     return row;
   }
 
-  async createIncome({ fecha, leadId, cuota, emitir, monto, banco, estado, tributario, createdBy }) {
+  /**
+   * Valida y normaliza los campos editables de un ingreso; los comparten el
+   * alta y la edición para que ambas apliquen las mismas reglas (mes e ITF
+   * siempre derivados de la fecha y el monto).
+   */
+  #normalizeIncome({ fecha, leadId, cuota, emitir, monto, banco, estado, tributario }) {
     if (!fecha) throw new Error('La fecha es obligatoria.');
     if (!CUOTAS.includes(cuota)) throw new Error('La cuota debe ser 1era, 2da o 3era.');
     if (!EMITIR_OPCIONES.includes(emitir)) throw new Error('El campo "emitir" no es válido.');
     if (!BANCOS.includes(banco)) throw new Error('El banco debe ser BCP, Interbank o Efectivo.');
-    const estadoFinal = ESTADOS_INGRESO.includes(estado) ? estado : 'no pagado';
     const numericMonto = Number(monto);
     if (!Number.isFinite(numericMonto) || numericMonto <= 0) {
       throw new Error('El monto debe ser un número mayor a 0.');
     }
 
     const day = dayOnly(fecha);
-    const [id] = await db('finance_income').insert({
-      code: await nextCode('finance_income', day),
+    return {
       mes: mesEnLetras(day),
       fecha: day,
       lead_id: leadId || null,
@@ -139,10 +142,29 @@ export class FinanceLedgerService {
       monto: numericMonto,
       itf: calcItf(numericMonto),
       banco,
-      estado: estadoFinal,
-      tributario: tributario?.trim() || null,
+      estado: ESTADOS_INGRESO.includes(estado) ? estado : 'no pagado',
+      tributario: tributario?.trim() || null
+    };
+  }
+
+  async createIncome({ createdBy, ...fields }) {
+    const values = this.#normalizeIncome(fields);
+    const [id] = await db('finance_income').insert({
+      ...values,
+      code: await nextCode('finance_income', values.fecha),
       created_by: createdBy || null
     });
+    return this.getIncomeById(id);
+  }
+
+  /**
+   * Edita un ingreso ya registrado. El código no se regenera aunque cambie la
+   * fecha: es el identificador con el que ya se referencia el asiento.
+   */
+  async updateIncome(id, fields) {
+    const existing = await db('finance_income').where({ id }).first();
+    if (!existing) return null;
+    await db('finance_income').where({ id }).update(this.#normalizeIncome(fields));
     return this.getIncomeById(id);
   }
 
@@ -241,31 +263,63 @@ export class FinanceLedgerService {
       .first();
   }
 
-  async createJournal({ fecha, detalle, monto, moneda, banco, estado, area, asientoPorDestino, receipt, createdBy }) {
+  /** Valida y normaliza los campos editables de un asiento (alta y edición). */
+  #normalizeJournal({ fecha, detalle, monto, moneda, banco, estado, area, asientoPorDestino }) {
     if (!fecha) throw new Error('La fecha es obligatoria.');
     if (!detalle || !detalle.trim()) throw new Error('El detalle es obligatorio.');
     if (!BANCOS.includes(banco)) throw new Error('El banco debe ser BCP, Interbank o Efectivo.');
     const numericMonto = Number(monto);
     if (!Number.isFinite(numericMonto)) throw new Error('El monto debe ser un número.');
-    const monedaFinal = MONEDAS.includes(moneda) ? moneda : 'soles';
-    const estadoFinal = ESTADOS_DIARIO.includes(estado) ? estado : 'pendiente';
 
-    const day = dayOnly(fecha);
+    return {
+      fecha: dayOnly(fecha),
+      detalle: detalle.trim(),
+      monto: numericMonto,
+      moneda: MONEDAS.includes(moneda) ? moneda : 'soles',
+      itf: calcItf(numericMonto),
+      banco,
+      estado: ESTADOS_DIARIO.includes(estado) ? estado : 'pendiente',
+      area: area?.trim() || null,
+      asiento_por_destino: asientoPorDestino?.trim() || null
+    };
+  }
+
+  async createJournal({ receipt, createdBy, ...fields }) {
     try {
+      const values = this.#normalizeJournal(fields);
       const [id] = await db('finance_journal').insert({
-        code: await nextCode('finance_journal', day),
-        fecha: day,
-        detalle: detalle.trim(),
-        monto: numericMonto,
-        moneda: monedaFinal,
-        itf: calcItf(numericMonto),
-        banco,
-        estado: estadoFinal,
-        area: area?.trim() || null,
-        asiento_por_destino: asientoPorDestino?.trim() || null,
+        ...values,
+        code: await nextCode('finance_journal', values.fecha),
         ...receiptColumnsFromFile(receipt),
         created_by: createdBy || null
       });
+      return this.getJournalById(id);
+    } catch (error) {
+      unlinkQuiet(receipt?.filename);
+      throw error;
+    }
+  }
+
+  /**
+   * Edita un asiento del libro diario. El código se mantiene aunque cambie la
+   * fecha. Si llega un `receipt` nuevo reemplaza al anterior (borrándolo del
+   * disco); con `removeReceipt` se quita el comprobante sin subir otro.
+   */
+  async updateJournal(id, { receipt, removeReceipt, ...fields }) {
+    const existing = await db('finance_journal').where({ id }).first();
+    if (!existing) {
+      unlinkQuiet(receipt?.filename);
+      return null;
+    }
+    try {
+      const values = this.#normalizeJournal(fields);
+      if (receipt) {
+        Object.assign(values, receiptColumnsFromFile(receipt));
+      } else if (removeReceipt) {
+        Object.assign(values, receiptColumnsFromFile(null));
+      }
+      await db('finance_journal').where({ id }).update(values);
+      if (receipt || removeReceipt) unlinkQuiet(existing.receipt_filename);
       return this.getJournalById(id);
     } catch (error) {
       unlinkQuiet(receipt?.filename);
