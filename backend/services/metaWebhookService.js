@@ -7,6 +7,65 @@ const GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v21.0';
 
 const MAX_RECENT_EVENTS = 50;
 
+/** Sin tildes/mayúsculas y con guiones/guiones bajos como espacio, para comparar contra la clave de una pregunta del formulario sea cual sea el formato en que Meta la mande. */
+function normalizeFieldKey(text) {
+  return String(text || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** "Título profesional" / "Maestría" / etc. -> uno de los tres niveles canónicos, o null. */
+function mapAcademicLevel(value) {
+  const v = normalizeFieldKey(value);
+  if (/doctorado/.test(v)) return 'Posgrado (Doctorado)';
+  if (/maestria|magister|master/.test(v)) return 'Posgrado (Maestría)';
+  if (/bachiller|titulo|pregrado|licenciatura/.test(v)) return 'Pregrado (Bachiller/Título)';
+  return null;
+}
+
+// Mismas preguntas que ya reconoce extractLeadFormFields() en
+// whatsappBotService.js para el resumen que llega por WhatsApp — acá se
+// comparan contra la CLAVE de cada pregunta del formulario de Meta Lead Ads
+// (no contra texto libre), que suele conservar palabras de la pregunta
+// original aunque venga en snake_case.
+const LEVEL_KEY_RE = /sacando|nivel academ|grado academ/;
+const UNIVERSITY_KEY_RE = /universidad/;
+const FIELD_KEY_RE = /carrera/;
+const PROGRESS_KEY_RE = /punto|avanzad|avance|estado.*tesis/;
+
+/**
+ * Extrae grado académico, universidad, carrera y avance declarado a partir
+ * del `field_data` que devuelve la Graph API para un lead de Meta Lead Ads
+ * (formulario instantáneo) — sin esto, esas respuestas quedaban capturadas
+ * por Meta pero nunca se guardaban en el lead (solo nombre/teléfono/correo),
+ * y la ficha del lead se veía con los valores por defecto ("General", "No
+ * especificada") aunque la persona sí los hubiera contestado.
+ */
+function extractCustomFields(fieldData) {
+  const extracted = {};
+  for (const item of fieldData || []) {
+    const key = normalizeFieldKey(item.name);
+    const value = (item.values?.[0] || '').trim();
+    if (!key || !value) continue;
+
+    if (!extracted.academicLevel && LEVEL_KEY_RE.test(key)) {
+      const level = mapAcademicLevel(value);
+      if (level) extracted.academicLevel = level;
+    } else if (!extracted.university && UNIVERSITY_KEY_RE.test(key)) {
+      extracted.university = value;
+    } else if (!extracted.fieldOfStudy && FIELD_KEY_RE.test(key)) {
+      extracted.fieldOfStudy = value;
+    } else if (!extracted.progressNote && PROGRESS_KEY_RE.test(key)) {
+      extracted.progressNote = value;
+    }
+  }
+  return extracted;
+}
+
 /**
  * Recepción e importación de leads generados por Meta Lead Ads (Facebook/Instagram)
  * vía el webhook de la app de Meta (campo "leadgen").
@@ -132,17 +191,32 @@ export class MetaWebhookService {
     for (const item of data.field_data || []) {
       fields[item.name] = item.values?.[0] || '';
     }
+    console.log(`📋 [Meta Webhook] field_data del lead ${leadgenId}:`, JSON.stringify(data.field_data));
 
     // "platform" indica si el formulario se llenó en Facebook ("fb") o
     // Instagram ("ig"); sin ese dato, se etiqueta genéricamente como Meta Ads.
     const source = data.platform === 'ig' ? 'Instagram Ads' : data.platform === 'fb' ? 'Facebook Ads' : 'Meta Ads';
+
+    const custom = extractCustomFields(data.field_data);
+    const notesParts = [`${marker} form_id=${data.form_id || 'desconocido'}`];
+    if (custom.progressNote) notesParts.push(`Avance declarado en el formulario: ${custom.progressNote}`);
 
     const prospect = await this.leadService.createProspect({
       fullName: fields.full_name || fields.nombre_completo || 'Prospecto de Facebook',
       email: fields.email || fields.correo_electronico || '',
       phone: fields.phone_number || fields.phone || '',
       source,
-      additionalNotes: `${marker} form_id=${data.form_id || 'desconocido'}`
+      academicLevel: custom.academicLevel,
+      university: custom.university,
+      fieldOfStudy: custom.fieldOfStudy,
+      // Arranca igual que un contacto nuevo de WhatsApp que Avan todavía no
+      // calificó: esta persona llenó el formulario pero nunca llegó a
+      // escribir (o recibir) un mensaje de WhatsApp real, así que no es un
+      // lead comercial todavía — debe quedarse en el Setter Funnel, no
+      // "graduar" directo al Funnel de Ventas (ver SETTER_ONLY_STATUSES en
+      // LeadsView.vue).
+      status: 'conversacion_abierta',
+      additionalNotes: notesParts.join(' | ')
     });
 
     console.log(`📥 [Meta Webhook] Lead importado como prospecto #${prospect.id} (leadgen_id=${leadgenId})`);
