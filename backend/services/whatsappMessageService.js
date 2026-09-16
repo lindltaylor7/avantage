@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { db } from '../db/connection.js';
 import { whatsappMediaDir } from '../middleware/upload.js';
+import { isAdFormMessage } from './whatsappBotService.js';
 
 const GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v21.0';
 // "meta" (Graph API directa) o "ycloud" (proveedor usado tras vincular el
@@ -577,9 +578,16 @@ export class WhatsappMessageService {
     const map = new Map();
     for (const row of rows) {
       const prev = map.get(row.wa_id);
+      // Solo el PRIMER mensaje entrante decide si la conversación arrancó con
+      // el resumen automático de un formulario de un anuncio — se evalúa una
+      // sola vez por contacto, no en cada mensaje que llega después.
+      const isFormLead = prev
+        ? prev.is_form_lead
+        : (row.direction === 'inbound' && isAdFormMessage(row.body));
       map.set(row.wa_id, {
         ...row,
         origin_channel: prev?.origin_channel ?? row.channel,
+        is_form_lead: isFormLead,
         // El nombre del perfil de WhatsApp solo viaja en los mensajes
         // ENTRANTES que traen el bloque "contacts"; los salientes lo dejan en
         // null. Como aquí gana el último mensaje del contacto, la primera

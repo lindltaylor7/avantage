@@ -345,8 +345,13 @@
             </span>
             <span class="contact-side">
               <span class="contact-time">{{ formatShortTime(c.received_at) }}</span>
-              <span class="channel-badge" :class="channelBadgeClass(c.origin_channel)" :title="c.origin_channel">
-                {{ channelIcon(c.origin_channel) }}
+              <span class="badge-row">
+                <span v-if="c.is_form_lead" class="form-lead-badge" title="Llegó desde el formulario de un anuncio">
+                  <Form :size="11" :stroke-width="2.25" />
+                </span>
+                <span class="channel-badge" :class="channelBadgeClass(c.origin_channel)" :title="c.origin_channel">
+                  {{ channelIcon(c.origin_channel) }}
+                </span>
               </span>
             </span>
           </button>
@@ -506,6 +511,7 @@
 import { nextTick, onMounted, onUnmounted, computed, ref, reactive } from 'vue';
 import { apiFetch } from '../apiClient.js';
 import { loadApiImage } from '../apiImage.js';
+import { Form } from 'lucide-vue-next';
 
 const conversations = ref([]);
 const contactSearch = ref('');
@@ -1567,6 +1573,24 @@ onUnmounted(() => {
   opacity: 0.7;
   flex-shrink: 0;
   white-space: nowrap;
+}
+
+.badge-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.form-lead-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 999px;
+  background: rgba(111, 129, 37, 0.18);
+  color: #6F8125;
+  flex-shrink: 0;
 }
 
 .channel-badge {

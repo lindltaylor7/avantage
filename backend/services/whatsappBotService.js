@@ -314,6 +314,18 @@ export function extractLeadFormFields(text) {
   return fields;
 }
 
+/**
+ * ¿Este texto es el resumen automático de un formulario de un anuncio de Meta
+ * Ads ("¿Pregunta?: Respuesta" línea a línea), y no un mensaje escrito a mano
+ * por el contacto? Misma condición que usa runConversationTurn() para saltar
+ * la pregunta de apertura; se expone aparte para que el panel (bandeja de
+ * WhatsApp) pueda etiquetar la conversación sin duplicar la regla.
+ */
+export function isAdFormMessage(text) {
+  const fields = extractLeadFormFields(text);
+  return !!(fields.level || fields.university || fields.field || fields.problem);
+}
+
 /** Interpreta la elección de modalidad de llamada: 'phone' | 'meet' | null. */
 function parseCallMode(text) {
   const n = normalize(text || '');
@@ -1094,7 +1106,7 @@ export class WhatsappBotService {
     // diseño siempre pregunta el tema) en repetir algo del formulario.
     if (isFirstTurn) {
       const formFields = extractLeadFormFields(incomingText);
-      if (formFields.level || formFields.university || formFields.field || formFields.problem) {
+      if (isAdFormMessage(incomingText)) {
         if (formFields.level) answers.level = formFields.level;
         if (formFields.university) answers.university = formFields.university;
         if (formFields.field) answers.field = formFields.field;

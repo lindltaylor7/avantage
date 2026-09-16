@@ -30,6 +30,7 @@
     "googleapis": "^176.0.0",
     "jsonwebtoken": "^9.0.3",
     "knex": "^3.3.0",
+    "lucide-vue-next": "^1.0.0",
     "multer": "^2.2.0",
     "mysql2": "^3.23.2",
     "nodemailer": "^6.9.13",
