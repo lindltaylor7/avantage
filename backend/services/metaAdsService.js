@@ -1,7 +1,39 @@
+import fs from 'fs';
+import path from 'path';
 import { db } from '../db/connection.js';
+import { campaignAdImageDir } from '../middleware/upload.js';
 
 const GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v21.0';
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
+
+const MIME_TO_EXTENSION = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
+function extensionForMime(mimeType) {
+  return MIME_TO_EXTENSION[String(mimeType || '').split(';')[0].trim().toLowerCase()] || 'jpg';
+}
+
+/**
+ * Descarga el thumbnail/imagen del creativo de un anuncio y lo cachea en
+ * disco. A diferencia de un post orgánico, la imagen de un anuncio se pide
+ * directamente al creativo (`thumbnail_url` de la Marketing
+ * API) — la mayoría de anuncios usan un "dark post" (publicación no
+ * publicada en el muro), que la Graph API no deja leer como post normal
+ * (`{post-id}?fields=full_picture` devuelve 404 para esos).
+ */
+async function downloadAdCreativeImage(imageUrl) {
+  if (!imageUrl) return null;
+  try {
+    const response = await fetch(imageUrl);
+    if (!response.ok) return null;
+    const mimeType = (response.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
+    if (!mimeType.startsWith('image/')) return null;
+    const filename = `ad-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extensionForMime(mimeType)}`;
+    await fs.promises.writeFile(path.join(campaignAdImageDir, filename), Buffer.from(await response.arrayBuffer()));
+    return { filename, mimeType };
+  } catch (error) {
+    console.error('❌ [Meta Ads] No se pudo descargar la imagen del creativo:', error.message);
+    return null;
+  }
+}
 
 /** Cuántas páginas de resultados de la Graph API se siguen como máximo. */
 const MAX_PAGES = 20;
@@ -185,7 +217,7 @@ export class MetaAdsService {
     let ads = [];
     try {
       ads = await this.#graphGet(`${account}/ads`, {
-        fields: 'id,name,campaign_id,effective_status,creative{effective_object_story_id,effective_instagram_media_id,object_story_id}',
+        fields: 'id,name,campaign_id,effective_status,creative{effective_object_story_id,effective_instagram_media_id,object_story_id,thumbnail_url}',
         limit: '500'
       });
     } catch (err) {
@@ -193,10 +225,9 @@ export class MetaAdsService {
     }
 
     const mappedSourceIds = new Set();
-    // Un solo `primary_story_id` por campaña — el del PRIMER anuncio con
-    // creativo que se encuentre — para mostrar la imagen del anuncio en el
-    // panel (ver getCachedPostImage en pageInteractionService.js, que ya
-    // sabe descargar y cachear la imagen de un post a partir de este mismo ID).
+    // Una sola imagen por campaña — la del creativo del PRIMER anuncio con
+    // thumbnail/imagen que se encuentre — para reconocer la campaña de un
+    // vistazo en el panel.
     const imageSetForCampaign = new Set();
     for (const ad of ads) {
       const localCampaignId = localIdByExternal.get(String(ad.campaign_id));
@@ -221,10 +252,16 @@ export class MetaAdsService {
           .merge({ campaign_id: localCampaignId, ad_label: ad.name || null });
       }
 
-      const imageStoryId = storyId || ad.creative?.effective_instagram_media_id || null;
-      if (imageStoryId && !imageSetForCampaign.has(localCampaignId)) {
+      const creativeImageUrl = ad.creative?.thumbnail_url || null;
+      if (creativeImageUrl && !imageSetForCampaign.has(localCampaignId)) {
         imageSetForCampaign.add(localCampaignId);
-        await db('campaigns').where({ id: localCampaignId }).update({ primary_story_id: String(imageStoryId) });
+        const downloaded = await downloadAdCreativeImage(creativeImageUrl);
+        if (downloaded) {
+          await db('campaigns').where({ id: localCampaignId }).update({
+            ad_image_filename: downloaded.filename,
+            ad_image_mime_type: downloaded.mimeType
+          });
+        }
       }
 
       summary.adsMapped++;

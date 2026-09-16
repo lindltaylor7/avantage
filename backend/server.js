@@ -36,7 +36,7 @@ import { FinanceService } from './services/financeService.js';
 import { FinanceLedgerService } from './services/financeLedgerService.js';
 import { signToken, requireAuth, requirePermission, signGoogleOAuthState, verifyGoogleOAuthState } from './middleware/auth.js';
 
-import { uploadProjectUpdateAttachment, uploadDir, uploadFinanceReceipt, uploadFinanceFile, financeReceiptDir, whatsappMediaDir } from './middleware/upload.js';
+import { uploadProjectUpdateAttachment, uploadDir, uploadFinanceReceipt, uploadFinanceFile, financeReceiptDir, whatsappMediaDir, campaignAdImageDir } from './middleware/upload.js';
 
 // Estado del funnel Kanban que marca el fin del proceso comercial: al llegar
 // aquí se genera automáticamente el proyecto asociado al lead.
@@ -1892,6 +1892,25 @@ app.get('/api/campaigns/performance', requireAuth, requirePermission('leads.view
   } catch (error) {
     console.error('❌ Error al calcular el rendimiento de campañas:', error);
     res.status(500).json({ error: 'Error al calcular el rendimiento de campañas.', details: error.message });
+  }
+});
+
+/**
+ * Imagen del anuncio de Meta (thumbnail del creativo) que representa a la
+ * campaña, servida desde la copia local que guarda metaAdsService.sync().
+ * Responde 404 si la campaña no tiene imagen — el frontend muestra un
+ * ícono de respaldo en su lugar.
+ */
+app.get('/api/campaigns/:id/image', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const campaign = await campaignService.getCampaign(req.params.id);
+    if (!campaign || !campaign.ad_image_filename) return res.status(404).end();
+    res.type(campaign.ad_image_mime_type || 'image/jpeg');
+    res.set('Cache-Control', 'private, max-age=86400');
+    res.sendFile(path.join(campaignAdImageDir, campaign.ad_image_filename));
+  } catch (error) {
+    console.error('❌ Error al servir la imagen de la campaña:', error);
+    res.status(404).end();
   }
 });
 

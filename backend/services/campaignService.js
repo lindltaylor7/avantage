@@ -395,7 +395,7 @@ export class CampaignService {
         source: campaign.source || 'manual',
         externalId: campaign.external_id || null,
         metaStatus: campaign.meta_status || null,
-        primaryStoryId: campaign.primary_story_id || null,
+        hasImage: !!campaign.ad_image_filename,
         lastSyncedAt: campaign.last_synced_at || null,
         insightsWindow: parseMetaInsights(campaign.meta_insights)?.window || null,
         ads: campaign.ads.map((a) => ({ id: a.id, sourceId: a.ad_source_id, label: a.ad_label })),

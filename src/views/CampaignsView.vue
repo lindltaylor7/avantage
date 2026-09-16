@@ -162,8 +162,8 @@
                     <td class="col-campaign">
                       <div class="campaign-identity">
                         <img
-                          v-if="campaign.primaryStoryId && campaignImageUrls[campaign.primaryStoryId]"
-                          :src="campaignImageUrls[campaign.primaryStoryId]"
+                          v-if="campaignImageUrls[campaign.id]"
+                          :src="campaignImageUrls[campaign.id]"
                           alt=""
                           class="campaign-thumb"
                         />
@@ -518,10 +518,9 @@ watch([searchQuery, platformFilter, statusFilter, pageSize], () => { currentPage
 watch(totalPages, (max) => { if (currentPage.value > max) currentPage.value = max; });
 
 // ────────────────────── Miniatura del anuncio (Meta) ───────────────────────
-// Reutiliza el mismo caché de imágenes de posts que ya usa Interacciones
-// Sociales (ver pageInteractionService.getCachedPostImage): el `primaryStoryId`
-// de la campaña ES el post_id del anuncio, así que no hace falta un endpoint
-// ni una descarga nuevos.
+// Cada campaña sincronizada con Meta guarda una copia local del thumbnail
+// del creativo de su primer anuncio (ver metaAdsService.sync()); se sirve
+// por /api/campaigns/:id/image y se pide solo cuando `hasImage` es true.
 const campaignImageUrls = reactive({});
 
 function releaseCampaignImages(keepIds) {
@@ -533,12 +532,12 @@ function releaseCampaignImages(keepIds) {
 }
 
 async function hydrateCampaignImages(campaigns) {
-  const withImage = campaigns.filter((c) => c.primaryStoryId);
-  releaseCampaignImages(new Set(withImage.map((c) => String(c.primaryStoryId))));
+  const withImage = campaigns.filter((c) => c.hasImage);
+  releaseCampaignImages(new Set(withImage.map((c) => String(c.id))));
   for (const c of withImage) {
-    const key = String(c.primaryStoryId);
+    const key = String(c.id);
     if (campaignImageUrls[key]) continue;
-    const url = await loadApiImage(`/api/social-interactions/post-image/${encodeURIComponent(c.primaryStoryId)}`);
+    const url = await loadApiImage(`/api/campaigns/${c.id}/image`);
     if (url) campaignImageUrls[key] = url;
   }
 }

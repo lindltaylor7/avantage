@@ -21,6 +21,13 @@ fs.mkdirSync(socialPostImageDir, { recursive: true });
 const whatsappMediaDir = path.join(__dirname, '..', '..', 'uploads', 'whatsapp-media');
 fs.mkdirSync(whatsappMediaDir, { recursive: true });
 
+// Copia local del thumbnail/imagen del creativo del primer anuncio de cada
+// campaña de Meta Ads (para reconocerla de un vistazo en el panel) — el
+// thumbnail_url/image_url que da la Marketing API es una URL firmada que
+// caduca, así que se descarga una sola vez en cada sincronización.
+const campaignAdImageDir = path.join(__dirname, '..', '..', 'uploads', 'campaign-ads');
+fs.mkdirSync(campaignAdImageDir, { recursive: true });
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
   filename: (req, file, cb) => {
@@ -98,4 +105,4 @@ export function uploadFinanceFile(req, res, next) {
   });
 }
 
-export { financeReceiptDir, socialPostImageDir, whatsappMediaDir };
+export { financeReceiptDir, socialPostImageDir, whatsappMediaDir, campaignAdImageDir };
