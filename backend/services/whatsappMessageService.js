@@ -19,6 +19,27 @@ function toE164(waId) {
   return waId.startsWith('+') ? waId : `+${waId}`;
 }
 
+/**
+ * Clave para emparejar un teléfono con un wa_id: los últimos 9 dígitos, que es
+ * el número nacional en Perú. El mismo contacto aparece como "+51934819600",
+ * "51934819600" o "934819600" según de dónde venga el dato (webhook, formulario
+ * de un anuncio, carga manual), y compararlos tal cual no emparejaba nunca.
+ *
+ * Devuelve null para los identificadores que no son teléfonos (los BSUID de
+ * Instagram/Facebook, tipo "PE.2249505489171169"), para no emparejar por
+ * casualidad dos contactos que solo comparten sus últimos dígitos.
+ */
+function phoneKey(value) {
+  const raw = String(value || '');
+  // Cualquier letra descarta: es un BSUID, no un teléfono. Los separadores
+  // (espacios, guiones, paréntesis) sí se toleran, que es como se escriben los
+  // números cuando alguien los carga a mano.
+  if (!raw || /[a-z]/i.test(raw)) return null;
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length < 8 || digits.length > 15) return null;
+  return digits.slice(-9);
+}
+
 /** Fecha de hoy ("YYYY-MM-DD") en el calendario de Lima, sin importar la zona horaria del servidor. */
 function limaTodayIso() {
   return new Intl.DateTimeFormat('en-CA', {
@@ -603,6 +624,43 @@ export class WhatsappMessageService {
     return db('whatsapp_messages').where({ message_id: messageId }).first();
   }
 
+  /**
+   * Cuelga de cada conversación el nombre y el id del lead correspondiente
+   * (`lead_name`, `lead_id`), emparejando por los últimos 9 dígitos del
+   * teléfono: el wa_id llega en formato internacional ("+51934819600") y el
+   * teléfono del lead puede estar guardado con el "+", sin él o como el
+   * celular local a secas, y comparar las cadenas tal cual no emparejaba.
+   *
+   * Se traen todos los leads con teléfono de una vez porque son pocos (cientos
+   * como mucho) y así el emparejamiento por sufijo se hace en memoria, sin
+   * depender de funciones de expresiones regulares que no existen en todas las
+   * versiones de MySQL.
+   */
+  async #attachLeadNames(conversations) {
+    if (conversations.length === 0) return conversations;
+
+    const leads = await db('leads')
+      .whereNotNull('phone').where('phone', '!=', '')
+      .select('id', 'phone', 'full_name')
+      .orderBy('id', 'desc');
+
+    const porSufijo = new Map();
+    for (const lead of leads) {
+      const key = phoneKey(lead.phone);
+      // Gana el lead más reciente con ese teléfono (van ordenados desc), que
+      // es el que refleja el nombre con el que se registró la última vez.
+      if (key && !porSufijo.has(key)) porSufijo.set(key, lead);
+    }
+
+    for (const conversation of conversations) {
+      const lead = porSufijo.get(phoneKey(conversation.wa_id));
+      const nombre = lead?.full_name?.trim();
+      conversation.lead_id = lead?.id ?? null;
+      conversation.lead_name = nombre && nombre !== 'Contacto de WhatsApp' ? nombre : null;
+    }
+    return conversations;
+  }
+
   async getRecent({ limit = 50 } = {}) {
     return db('whatsapp_messages').orderBy('received_at', 'desc').limit(limit);
   }
@@ -641,18 +699,12 @@ export class WhatsappMessageService {
       .sort((a, b) => new Date(b.received_at) - new Date(a.received_at))
       .slice(0, limit);
 
-    // Respaldo para los contactos cuyos mensajes nunca trajeron el nombre
-    // (p. ej. los guardados antes de que se registrara): se usa el del lead,
-    // ignorando el placeholder que se pone cuando WhatsApp no compartió uno.
-    const sinNombre = conversations.filter((c) => !c.contact_name).map((c) => c.wa_id);
-    if (sinNombre.length > 0) {
-      const leads = await db('leads').whereIn('phone', sinNombre).select('phone', 'full_name');
-      const porTelefono = new Map(leads.map((l) => [l.phone, l.full_name]));
-      for (const conversation of conversations) {
-        const nombre = porTelefono.get(conversation.wa_id);
-        if (nombre && nombre !== 'Contacto de WhatsApp') conversation.contact_name = nombre;
-      }
-    }
+    // El nombre REAL del lead (el que dio en el formulario) manda sobre el
+    // alias del perfil de WhatsApp. Antes solo se usaba cuando el perfil no
+    // traía ninguno, y un contacto guardado como "kevin" o "😎😎😎😎" quedaba
+    // imposible de encontrar buscándolo por su nombre de verdad. El alias no
+    // se pierde: viaja aparte para mostrarlo como dato secundario.
+    await this.#attachLeadNames(conversations);
 
     // Marca las conversaciones que Avan transfirió a un asesor (ver
     // handOffToAdvisor en whatsappBotService.js), para que el panel pueda

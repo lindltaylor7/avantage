@@ -334,12 +334,17 @@
             @click="selectConversation(c.wa_id)"
           >
             <span class="contact-avatar" :style="{ background: avatarColor(c.wa_id) }" aria-hidden="true">
-              {{ initialsOf(c.contact_name || c.wa_id) }}
+              {{ initialsOf(displayName(c)) }}
             </span>
             <span class="contact-info">
               <span class="contact-name">
                 <span v-if="c.handed_off_at" class="urgent-flag" title="Avan lo transfirió a un asesor">🆘</span>
-                {{ c.contact_name || c.wa_id }}
+                {{ displayName(c) }}
+                <!-- El alias del perfil de WhatsApp, cuando no es el nombre
+                     real: es como aparece en el celular de quien atiende. -->
+                <span v-if="aliasOf(c)" class="contact-alias" :title="'En WhatsApp aparece como ' + aliasOf(c)">
+                  {{ aliasOf(c) }}
+                </span>
               </span>
               <span class="contact-preview">{{ c.direction === 'outbound' ? 'Tú: ' : '' }}{{ truncate(c.body, 42) }}</span>
             </span>
@@ -368,6 +373,11 @@
               <strong class="thread-name">{{ selectedContactName }}</strong>
               <span class="thread-sub">
                 <span class="thread-phone">{{ selectedWaId }}</span>
+                <span
+                  v-if="selectedConversation && aliasOf(selectedConversation)"
+                  class="contact-alias"
+                  title="Nombre de su perfil de WhatsApp"
+                >{{ aliasOf(selectedConversation) }}</span>
                 <span v-if="threadOriginChannel" class="channel-badge" :class="channelBadgeClass(threadOriginChannel)">
                   {{ channelIcon(threadOriginChannel) }} {{ threadOriginChannel }}
                 </span>
@@ -612,15 +622,42 @@ function activityClass(type) {
   return ACTIVITY_META[type]?.className || '';
 }
 
+/**
+ * Con qué nombre se muestra un contacto. Manda el que dio en el formulario
+ * (`lead_name`) sobre el alias de su perfil de WhatsApp: alguien registrado
+ * como "Franthz Gamarra" aparecía en la bandeja como "kevin" y no había forma
+ * de encontrarlo buscándolo por su nombre.
+ */
+function displayName(conversation) {
+  return conversation.lead_name || conversation.contact_name || conversation.wa_id;
+}
+
+/** El alias de WhatsApp, solo cuando aporta algo distinto al nombre mostrado. */
+function aliasOf(conversation) {
+  const alias = (conversation.contact_name || '').trim();
+  if (!alias || !conversation.lead_name) return '';
+  return alias.toLowerCase() === conversation.lead_name.trim().toLowerCase() ? '' : alias;
+}
+
+const selectedConversation = computed(
+  () => conversations.value.find((c) => c.wa_id === selectedWaId.value) || null
+);
+
 const selectedContactName = computed(() => {
-  const conv = conversations.value.find((c) => c.wa_id === selectedWaId.value);
-  return conv?.contact_name || selectedWaId.value;
+  const conv = selectedConversation.value;
+  return conv ? displayName(conv) : selectedWaId.value;
 });
 
 const filteredConversations = computed(() => {
   const q = contactSearch.value.trim().toLowerCase();
   if (!q) return conversations.value;
-  return conversations.value.filter((c) => (c.contact_name || '').toLowerCase().includes(q) || c.wa_id.includes(q));
+  // Se busca por los dos nombres: quien atiende puede acordarse del real o
+  // del alias con el que lo tiene agendado.
+  return conversations.value.filter((c) =>
+    (c.lead_name || '').toLowerCase().includes(q) ||
+    (c.contact_name || '').toLowerCase().includes(q) ||
+    c.wa_id.includes(q)
+  );
 });
 
 /**
@@ -1579,6 +1616,17 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Alias del perfil de WhatsApp junto al nombre real: sirve para reconocerlo
+   (así lo ve quien atiende en su celular) sin robarle protagonismo al nombre
+   con el que el lead está registrado. */
+.contact-alias {
+  font-weight: 400;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.contact-alias::before { content: '· '; }
 
 .contact-preview {
   font-size: 0.75rem;
