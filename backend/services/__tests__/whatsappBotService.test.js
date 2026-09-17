@@ -19,9 +19,16 @@ test('extractLeadFormFields lee nivel y universidad del formulario de Meta Ads',
   assert.equal(fields.university, 'San pedro chimbote');
 });
 
-test('extractLeadFormFields ignora "Full name" y "Phone number" (no son carrera/universidad/nivel)', () => {
+test('extractLeadFormFields ignora "Full name" (no es carrera/universidad/nivel)', () => {
   const fields = extractLeadFormFields(META_AD_FORM_MESSAGE);
   assert.equal(fields.field, undefined);
+});
+
+// El teléfono que Meta adjunta al formulario se guarda para no volver a
+// pedirlo al agendar la llamada (antes se ignoraba por completo).
+test('extractLeadFormFields lee el teléfono del formulario de Meta Ads', () => {
+  const fields = extractLeadFormFields(META_AD_FORM_MESSAGE);
+  assert.equal(fields.phone, '51949491790');
 });
 
 test('extractLeadFormFields reconoce maestría y doctorado', () => {

@@ -328,6 +328,11 @@ const FORM_PROGRESS_LABEL_RE = /en\s+qu[eé]\s+punto|qu[eé]\s+tan\s+avanzado|av
 // misma señal y evita la pregunta redundante "¿ya tienes un tema en mente?"
 // seguida, turnos después, de la misma respuesta escrita a mano.
 const FORM_NO_PROGRESS_VALUE_RE = /todav[ií]a\s*no\s*empiez\w*|a[uú]n\s*no\s*empiez\w*|no\s*he\s*empezado|sin\s*empezar|desde\s*cero|sin\s*avance|no\s*tengo\s*avance/i;
+// El formulario de Click-to-WhatsApp de Meta agrega el teléfono que la
+// persona ya tiene registrado en Facebook/Instagram ("Phone number: +51...").
+// Si no se guarda, el bot se lo vuelve a pedir en el paso de agendar aunque
+// ya lo tenga delante — el lead nota la pregunta redundante y se frustra.
+const FORM_PHONE_LABEL_RE = /phone|tel[eé]fono|celular/i;
 
 export function extractLeadFormFields(text) {
   const fields = {};
@@ -341,6 +346,8 @@ export function extractLeadFormFields(text) {
       fields.field = value;
     } else if (!fields.problem && FORM_PROGRESS_LABEL_RE.test(label) && FORM_NO_PROGRESS_VALUE_RE.test(value)) {
       fields.problem = 'Sin tema definido (desde cero)';
+    } else if (!fields.phone && FORM_PHONE_LABEL_RE.test(label) && looksLikePhone(value)) {
+      fields.phone = digitsOnly(value);
     }
   }
   return fields;
@@ -1218,6 +1225,7 @@ export class WhatsappBotService {
         if (formFields.university) answers.university = formFields.university;
         if (formFields.field) answers.field = formFields.field;
         if (formFields.problem) answers.problem = formFields.problem;
+        if (formFields.phone) answers.phone = formFields.phone;
         await this.updateSession(waId, { answers: JSON.stringify(answers) });
 
         this.logActivity({ type: 'ad_form_lead_fast_track', waId, formFields });
@@ -1270,6 +1278,7 @@ export class WhatsappBotService {
     if (formFields.level) extracted.level = formFields.level;
     if (formFields.university) extracted.university = formFields.university;
     if (formFields.field) extracted.field = formFields.field;
+    if (formFields.phone) extracted.phone = formFields.phone;
     // "problem" es una señal más débil (interpretación de "sin avance", no un
     // dato literal como la universidad): solo se usa si el LLM no encontró un
     // tema real en el mismo mensaje, para no pisar un tema que sí dio.
@@ -1309,6 +1318,9 @@ export class WhatsappBotService {
     // Se guarda solo la dirección, aunque el LLM devuelva la frase completa.
     const extractedEmail = extractEmail(extracted.email);
     if (extractedEmail) answers.email = extractedEmail;
+    // Igual que el correo: si lo mencionó por su cuenta en el chat (no solo en
+    // el formulario), se guarda para no volver a pedírselo al agendar.
+    if (extracted.phone && looksLikePhone(extracted.phone)) answers.phone = digitsOnly(extracted.phone);
 
     // Lo que dijo sobre cuándo quiere la reunión ("a las 5 hoy") se guarda para
     // no volver a preguntárselo cuando toque elegir día y hora.
@@ -1655,7 +1667,7 @@ export class WhatsappBotService {
 
       const session = await this.getSession(waId);
       const answers = typeof session.answers === 'string' ? JSON.parse(session.answers) : (session.answers || {});
-      answers.__scheduling = { topic, email: email || null, mode: null, phone: null, discount: 0, when: when || answers.__when || null };
+      answers.__scheduling = { topic, email: email || null, mode: null, phone: answers.phone || null, discount: 0, when: when || answers.__when || null };
       await this.updateSession(waId, { status: 'scheduling_mode', answers: JSON.stringify(answers) });
 
       // Devolverle lo que entendimos antes de saltar a agendar: es el único
@@ -2306,8 +2318,14 @@ export class WhatsappBotService {
     scheduling.discount = mode === 'meet' ? MEET_DISCOUNT_PCT : 0;
 
     if (mode === 'phone') {
-      if (waIdIsPhone(waId)) {
-        scheduling.phone = digitsOnly(waId);
+      // Ya se tiene un número usable sin preguntar: el wa_id es un teléfono
+      // real, o ya lo dejó antes en el formulario del anuncio o en el chat
+      // (ver extractLeadFormFields / extracted.phone más arriba). Pedirlo de
+      // nuevo cuando ya está delante es la pregunta redundante que más nota
+      // el lead — se siente como si nadie hubiera leído el formulario.
+      const knownPhone = waIdIsPhone(waId) ? digitsOnly(waId) : scheduling.phone;
+      if (knownPhone) {
+        scheduling.phone = knownPhone;
         await this.updateSession(waId, { answers: JSON.stringify(answers) });
         await this.promptForDate(waId);
       } else {
@@ -2432,6 +2450,7 @@ export class WhatsappBotService {
 
     this._clearStepMisses(scheduling);
     scheduling.phone = digitsOnly(text);
+    answers.phone = scheduling.phone;
     await this.updateSession(waId, { answers: JSON.stringify(answers) });
     // Si el número era lo único que faltaba para cerrar un horario ya elegido,
     // se confirma ese mismo en vez de devolverlo a elegir día otra vez.
