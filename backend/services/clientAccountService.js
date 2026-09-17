@@ -25,6 +25,36 @@ export class ClientAccountService {
     return db('client_accounts').where({ email: email.trim().toLowerCase() }).first();
   }
 
+  async getById(id) {
+    return db('client_accounts').where({ id }).first();
+  }
+
+  /**
+   * Todas las cuentas del portal, para el panel de administración
+   * (`/admin/roles`), con la cantidad de proyectos asociados a cada correo.
+   */
+  async listAll() {
+    const accounts = await db('client_accounts').orderBy('created_at', 'desc');
+    if (accounts.length === 0) return [];
+
+    const counts = await db('projects')
+      .whereIn('client_email', accounts.map((a) => a.email))
+      .select('client_email')
+      .count({ count: '*' })
+      .groupBy('client_email');
+    const countByEmail = new Map(counts.map((c) => [c.client_email, Number(c.count)]));
+
+    return accounts.map((account) => ({
+      ...account,
+      project_count: countByEmail.get(account.email) || 0
+    }));
+  }
+
+  /** Revoca el acceso al portal (el equipo lo vuelve a invitar si hace falta). */
+  async deleteAccount(id) {
+    return db('client_accounts').where({ id }).del();
+  }
+
   /**
    * Crea la cuenta si no existe (idempotente por correo). Si ya existe —
    * cliente recurrente con otro proyecto nuevo— no la toca ni reenvía token

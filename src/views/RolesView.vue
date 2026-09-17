@@ -178,6 +178,129 @@
       </div>
     </section>
 
+    <!-- ===================== Clientes del portal ===================== -->
+    <section class="pf-section">
+      <div class="pf-section-head">
+        <div>
+          <h3 class="pf-section-title">Clientes del portal <span class="pf-count-badge">{{ clientAccounts.length }}</span></h3>
+          <p class="pf-section-note">Quién puede loguearse en /portal a ver su proyecto y subir comprobantes.</p>
+        </div>
+        <div class="pf-section-actions">
+          <div class="pf-search">
+            <span class="pf-search-icon">🔍</span>
+            <input v-model="clientSearch" type="text" class="pf-search-input" placeholder="Buscar por nombre o correo" />
+            <button v-if="clientSearch" type="button" class="pf-search-clear" @click="clientSearch = ''">✕</button>
+          </div>
+          <button type="button" class="btn-secondary pf-mini-btn" @click="openInviteClientModal">+ Invitar cliente</button>
+        </div>
+      </div>
+
+      <p v-if="clientAccountsError" class="info-box pf-alert">⚠️ {{ clientAccountsError }}</p>
+
+      <div v-else-if="visibleClientAccounts.length === 0" class="empty-state pf-empty">
+        <p class="empty-state-title">{{ clientSearch ? 'Sin coincidencias' : 'Todavía no hay clientes invitados' }}</p>
+        <p class="empty-state-text">
+          {{ clientSearch ? 'Prueba con otro nombre o correo.' : 'Se invitan solos al crear su proyecto, o invita uno a mano con "+ Invitar cliente".' }}
+        </p>
+      </div>
+
+      <div v-else class="data-table-wrapper pf-table-wrapper">
+        <table class="data-table pf-table">
+          <thead>
+            <tr>
+              <th>Cliente</th>
+              <th>Proyectos</th>
+              <th>Estado</th>
+              <th>Última conexión</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="account in visibleClientAccounts" :key="account.id">
+              <td>
+                <div class="pf-cell-user">
+                  <span class="pf-avatar" :style="{ background: hueOf(account.name || account.email) }">{{ initials(account.name || account.email) }}</span>
+                  <span class="pf-cell-user-texts">
+                    <span class="pf-cell-user-name">{{ account.name || 'Sin nombre' }}</span>
+                    <span class="data-mono pf-cell-email">{{ account.email }}</span>
+                  </span>
+                </div>
+              </td>
+              <td>
+                <span class="pf-tool-chip">{{ account.project_count }} 📁</span>
+              </td>
+              <td>
+                <span class="pf-client-status" :class="clientStatusClass(account)">{{ clientStatusLabel(account) }}</span>
+              </td>
+              <td class="data-mono pf-cell-date">{{ account.last_login_at ? formatDate(account.last_login_at) : 'Nunca' }}</td>
+              <td class="pf-cell-menu">
+                <button
+                  type="button"
+                  class="pf-menu-trigger"
+                  :aria-expanded="openClientMenuId === account.id"
+                  @click.stop="toggleClientMenu(account.id)"
+                >⋮</button>
+                <div v-if="openClientMenuId === account.id" class="pf-menu" @click.stop>
+                  <button
+                    v-if="account.invite_pending"
+                    type="button"
+                    class="pf-menu-item"
+                    :disabled="clientActionBusyId === account.id"
+                    @click="resendInvite(account)"
+                  >📧 Reenviar invitación</button>
+                  <button
+                    v-else
+                    type="button"
+                    class="pf-menu-item"
+                    :disabled="clientActionBusyId === account.id"
+                    @click="sendResetLink(account)"
+                  >🔒 Mandar link de restablecer</button>
+                  <button
+                    type="button"
+                    class="pf-menu-item pf-menu-item-danger"
+                    :disabled="clientActionBusyId === account.id"
+                    @click="removeClientAccount(account)"
+                  >🗑️ Quitar acceso al portal</button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p v-if="clientActionMessage" class="pf-client-action-msg" :class="{ 'is-error': clientActionIsError }">{{ clientActionMessage }}</p>
+    </section>
+
+    <!-- ===================== Modal: Invitar cliente ===================== -->
+    <div v-if="showInviteClientModal" class="modal-overlay" @click.self="showInviteClientModal = false">
+      <div class="modal-content pf-modal pf-modal-narrow">
+        <div class="modal-header">
+          <h3 class="pf-modal-title">+ Invitar cliente</h3>
+          <button type="button" class="btn-secondary pf-close-btn" @click="showInviteClientModal = false">✕ Cerrar</button>
+        </div>
+        <form class="modal-body" @submit.prevent="createClientInvite">
+          <p class="pf-modal-note">
+            Le mandamos un correo con el link para que active su portal y ponga su propia contraseña.
+            No hace falta si el correo ya tiene un proyecto — ahí se invita solo.
+          </p>
+          <div class="form-group">
+            <label class="form-label">Correo del cliente</label>
+            <input v-model="newClientInvite.email" type="email" class="form-input" required autofocus />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Nombre (opcional)</label>
+            <input v-model="newClientInvite.name" type="text" class="form-input" />
+          </div>
+          <p v-if="inviteClientError" class="pf-form-error">{{ inviteClientError }}</p>
+          <div class="pf-modal-actions">
+            <button type="button" class="btn-secondary" @click="showInviteClientModal = false">Cancelar</button>
+            <button type="submit" class="btn-primary" :disabled="isSavingClientInvite">
+              {{ isSavingClientInvite ? 'Invitando…' : 'Invitar' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <!-- ===================== Modal: Gestionar rol ===================== -->
     <div v-if="managingRole" class="modal-overlay" @click.self="managingRole = null">
       <div class="modal-content pf-modal">
@@ -345,6 +468,19 @@ const newPermission = reactive({ key: '', label: '' });
 const newRole = reactive({ name: '', description: '' });
 const newUser = reactive({ name: '', email: '', password: '', roleId: '' });
 
+/* ---------- clientes del portal ---------- */
+const clientAccounts = ref([]);
+const clientAccountsError = ref('');
+const clientSearch = ref('');
+const openClientMenuId = ref(null);
+const showInviteClientModal = ref(false);
+const newClientInvite = reactive({ email: '', name: '' });
+const inviteClientError = ref('');
+const isSavingClientInvite = ref(false);
+const clientActionBusyId = ref(null);
+const clientActionMessage = ref('');
+const clientActionIsError = ref(false);
+
 /* ---------- helpers ---------- */
 function initials(name) {
   const parts = (name || '').trim().split(/\s+/).filter(Boolean);
@@ -429,6 +565,126 @@ async function fetchAll() {
     await Promise.all([fetchRoles(), fetchPermissions(), fetchUsers()]);
   } catch (err) {
     loadError.value = err.message;
+  }
+}
+
+/* ---------- clientes del portal ---------- */
+async function fetchClientAccounts() {
+  clientAccountsError.value = '';
+  try {
+    const res = await apiFetch('/api/client-accounts');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudieron obtener los clientes del portal.');
+    clientAccounts.value = data.accounts || [];
+  } catch (err) {
+    clientAccountsError.value = err.message;
+  }
+}
+
+const visibleClientAccounts = computed(() => {
+  const q = clientSearch.value.trim().toLowerCase();
+  if (!q) return clientAccounts.value;
+  return clientAccounts.value.filter((a) =>
+    (a.name || '').toLowerCase().includes(q) || (a.email || '').toLowerCase().includes(q)
+  );
+});
+
+function clientStatusLabel(account) {
+  if (account.is_activated) return 'Activada';
+  if (account.invite_expired) return 'Invitación expirada';
+  return 'Invitación pendiente';
+}
+
+function clientStatusClass(account) {
+  if (account.is_activated) return 'is-active';
+  if (account.invite_expired) return 'is-expired';
+  return 'is-pending';
+}
+
+function toggleClientMenu(id) {
+  openClientMenuId.value = openClientMenuId.value === id ? null : id;
+}
+
+function flashClientAction(message, isError = false) {
+  clientActionMessage.value = message;
+  clientActionIsError.value = isError;
+  setTimeout(() => { clientActionMessage.value = ''; }, 4000);
+}
+
+function openInviteClientModal() {
+  inviteClientError.value = '';
+  newClientInvite.email = '';
+  newClientInvite.name = '';
+  showInviteClientModal.value = true;
+}
+
+async function createClientInvite() {
+  inviteClientError.value = '';
+  isSavingClientInvite.value = true;
+  try {
+    const res = await apiFetch('/api/client-accounts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: newClientInvite.email.trim(), name: newClientInvite.name.trim() })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo invitar al cliente.');
+    await fetchClientAccounts();
+    showInviteClientModal.value = false;
+    flashClientAction(data.emailSent ? 'Invitación enviada.' : 'Cuenta creada, pero el correo no pudo salir — revisa la configuración de SMTP.', !data.emailSent);
+  } catch (err) {
+    inviteClientError.value = err.message;
+  } finally {
+    isSavingClientInvite.value = false;
+  }
+}
+
+async function resendInvite(account) {
+  closeClientMenu();
+  clientActionBusyId.value = account.id;
+  try {
+    const res = await apiFetch(`/api/client-accounts/${account.id}/reenviar-invitacion`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo reenviar la invitación.');
+    await fetchClientAccounts();
+    flashClientAction(data.emailSent ? `Invitación reenviada a ${account.email}.` : `No se pudo mandar el correo a ${account.email} — revisa la configuración de SMTP.`, !data.emailSent);
+  } catch (err) {
+    flashClientAction(err.message, true);
+  } finally {
+    clientActionBusyId.value = null;
+  }
+}
+
+async function sendResetLink(account) {
+  closeClientMenu();
+  clientActionBusyId.value = account.id;
+  try {
+    const res = await apiFetch(`/api/client-accounts/${account.id}/restablecer-password`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo mandar el link de restablecer.');
+    flashClientAction(data.emailSent ? `Link de restablecer mandado a ${account.email}.` : `No se pudo mandar el correo a ${account.email} — revisa la configuración de SMTP.`, !data.emailSent);
+  } catch (err) {
+    flashClientAction(err.message, true);
+  } finally {
+    clientActionBusyId.value = null;
+  }
+}
+
+async function removeClientAccount(account) {
+  closeClientMenu();
+  if (!confirm(`¿Quitar el acceso al portal de ${account.email}? Va a necesitar una invitación nueva para volver a entrar.`)) return;
+
+  clientActionBusyId.value = account.id;
+  try {
+    const res = await apiFetch(`/api/client-accounts/${account.id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo quitar el acceso.');
+    clientAccounts.value = clientAccounts.value.filter((a) => a.id !== account.id);
+    flashClientAction(`Acceso de ${account.email} eliminado.`);
+  } catch (err) {
+    flashClientAction(err.message, true);
+  } finally {
+    clientActionBusyId.value = null;
   }
 }
 
@@ -535,6 +791,11 @@ function toggleMenu(id) {
 }
 function closeMenu() {
   openMenuId.value = null;
+  openClientMenuId.value = null;
+}
+
+function closeClientMenu() {
+  openClientMenuId.value = null;
 }
 
 async function changeUserRole(user, roleId) {
@@ -561,6 +822,7 @@ async function changeUserRole(user, roleId) {
 
 onMounted(() => {
   fetchAll();
+  fetchClientAccounts();
   document.addEventListener('click', closeMenu);
 });
 onBeforeUnmount(() => {
@@ -916,6 +1178,82 @@ onBeforeUnmount(() => {
   font-size: 0.78rem;
   color: var(--text-muted);
   white-space: nowrap;
+}
+
+.pf-cell-user-texts {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.pf-client-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+  white-space: nowrap;
+}
+
+.pf-client-status::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.pf-client-status.is-active {
+  color: var(--accent-emerald);
+  background: rgba(46, 125, 70, 0.12);
+}
+.pf-client-status.is-active::before {
+  background: var(--accent-emerald);
+}
+
+.pf-client-status.is-pending {
+  color: var(--accent-amber);
+  background: rgba(222, 117, 75, 0.12);
+}
+.pf-client-status.is-pending::before {
+  background: var(--accent-amber);
+}
+
+.pf-client-status.is-expired {
+  color: var(--accent-rose);
+  background: rgba(200, 85, 50, 0.12);
+}
+.pf-client-status.is-expired::before {
+  background: var(--accent-rose);
+}
+
+.pf-menu-item-danger {
+  color: var(--accent-rose);
+  border-top: 1px solid var(--border-color);
+  margin-top: 0.2rem;
+  padding-top: 0.55rem;
+}
+
+.pf-menu-item-danger:hover {
+  background: rgba(200, 85, 50, 0.1);
+  color: var(--accent-rose);
+}
+
+.pf-menu-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pf-client-action-msg {
+  font-size: 0.82rem;
+  color: var(--accent-emerald);
+  margin: 0;
+}
+
+.pf-client-action-msg.is-error {
+  color: var(--accent-rose);
 }
 
 .pf-role-pill {

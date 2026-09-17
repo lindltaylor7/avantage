@@ -2876,6 +2876,112 @@ app.patch('/api/users/:id/role', requireAuth, requirePermission('roles.manage'),
   }
 });
 
+/**
+ * Administración de las cuentas del portal de clientes (no confundir con
+ * `/api/users`, que son las cuentas internas del equipo): mismo permiso
+ * `roles.manage`, vive en la pestaña "Clientes del portal" de /admin/roles.
+ * Nunca se envían `password_hash`, `activation_token` ni `reset_token` al
+ * frontend — solo si la cuenta está activada/pendiente y si el token vigente
+ * ya expiró.
+ */
+function toClientAccountSummary(account) {
+  const now = new Date();
+  const inviteExpired = Boolean(
+    account.activation_token && account.activation_token_expires_at && new Date(account.activation_token_expires_at) < now
+  );
+  return {
+    id: account.id,
+    email: account.email,
+    name: account.name,
+    project_count: account.project_count ?? 0,
+    is_activated: Boolean(account.password_hash),
+    invite_pending: !account.password_hash,
+    invite_expired: inviteExpired,
+    last_login_at: account.last_login_at,
+    created_at: account.created_at
+  };
+}
+
+app.get('/api/client-accounts', requireAuth, requirePermission('roles.manage'), async (req, res) => {
+  try {
+    const accounts = await clientAccountService.listAll();
+    res.json({ accounts: accounts.map(toClientAccountSummary) });
+  } catch (error) {
+    console.error('❌ Error al obtener las cuentas del portal de clientes:', error);
+    res.status(500).json({ error: 'Error al obtener las cuentas del portal.', details: error.message });
+  }
+});
+
+app.post('/api/client-accounts', requireAuth, requirePermission('roles.manage'), async (req, res) => {
+  try {
+    const { email, name } = req.body || {};
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({ error: 'Proporcione un correo válido.' });
+    }
+
+    const { account, isNew } = await clientAccountService.ensureAccountForEmail(email, name);
+    if (!isNew) {
+      return res.status(409).json({ error: 'Ya existe una cuenta del portal con ese correo. Usa "Reenviar invitación" en su lugar.' });
+    }
+
+    const activationUrl = `${(process.env.APP_BASE_URL || '').replace(/\/$/, '')}/portal/activar?token=${account.activation_token}`;
+    const result = await emailService.sendClientPortalInviteEmail(account.email, { name: account.name, activationUrl });
+    if (!result?.success) {
+      console.warn(`⚠️ [Portal] No se pudo enviar la invitación manual a ${account.email}:`, result?.error);
+    }
+
+    res.status(201).json({ account: toClientAccountSummary(account), emailSent: Boolean(result?.success) });
+  } catch (error) {
+    console.error('❌ Error al invitar al cliente al portal:', error);
+    res.status(400).json({ error: error.message || 'No se pudo invitar al cliente.' });
+  }
+});
+
+app.post('/api/client-accounts/:id/reenviar-invitacion', requireAuth, requirePermission('roles.manage'), async (req, res) => {
+  try {
+    const existing = await clientAccountService.getById(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Cuenta no encontrada.' });
+    if (existing.password_hash) {
+      return res.status(400).json({ error: 'Esta cuenta ya está activada — usa "Mandar link de restablecer" si perdió su contraseña.' });
+    }
+
+    const account = await clientAccountService.regenerateInvite(existing.email);
+    const activationUrl = `${(process.env.APP_BASE_URL || '').replace(/\/$/, '')}/portal/activar?token=${account.activation_token}`;
+    const result = await emailService.sendClientPortalInviteEmail(account.email, { name: account.name, activationUrl });
+
+    res.json({ account: toClientAccountSummary(account), emailSent: Boolean(result?.success), error: result?.success ? undefined : result?.error });
+  } catch (error) {
+    console.error('❌ Error al reenviar la invitación del portal:', error);
+    res.status(400).json({ error: error.message || 'No se pudo reenviar la invitación.' });
+  }
+});
+
+app.post('/api/client-accounts/:id/restablecer-password', requireAuth, requirePermission('roles.manage'), async (req, res) => {
+  try {
+    const existing = await clientAccountService.getById(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Cuenta no encontrada.' });
+
+    const result = await clientAccountService.requestPasswordReset(existing.email);
+    const resetUrl = `${(process.env.APP_BASE_URL || '').replace(/\/$/, '')}/portal/restablecer?token=${result.resetToken}`;
+    const emailResult = await emailService.sendClientPortalResetEmail(result.account.email, { name: result.account.name, resetUrl });
+
+    res.json({ emailSent: Boolean(emailResult?.success), error: emailResult?.success ? undefined : emailResult?.error });
+  } catch (error) {
+    console.error('❌ Error al mandar el restablecimiento del portal:', error);
+    res.status(400).json({ error: error.message || 'No se pudo mandar el link de restablecimiento.' });
+  }
+});
+
+app.delete('/api/client-accounts/:id', requireAuth, requirePermission('roles.manage'), async (req, res) => {
+  try {
+    await clientAccountService.deleteAccount(req.params.id);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error al eliminar la cuenta del portal:', error);
+    res.status(500).json({ error: 'Error al eliminar la cuenta del portal.', details: error.message });
+  }
+});
+
 // Servir frontend en producción si existe dist/
 const distPath = path.join(__dirname, '..', 'dist');
 app.use(express.static(distPath));
