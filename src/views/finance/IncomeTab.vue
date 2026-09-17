@@ -56,7 +56,7 @@
             <label class="form-label">Mes</label>
             <input :value="mesPreview" type="text" class="form-input" readonly />
           </div>
-          <div class="form-group">
+          <div class="form-group ledger-form-wide">
             <label class="form-label">Lead</label>
             <select v-model="form.leadId" class="form-select">
               <option :value="null">— Sin asociar —</option>
@@ -64,6 +64,31 @@
                 {{ lead.name }}{{ lead.dni ? ` · DNI ${lead.dni}` : "" }}
               </option>
             </select>
+            <div v-if="selectedLead" class="lead-total-box">
+              <template v-if="editingTotal">
+                <input
+                  v-model="totalAmountDraft"
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  class="form-input lead-total-input"
+                  placeholder="Precio total (S/)"
+                />
+                <button type="button" class="btn-secondary lead-total-btn" @click="saveTotalAmount">Guardar</button>
+                <button type="button" class="btn-secondary lead-total-btn" @click="editingTotal = false">Cancelar</button>
+              </template>
+              <template v-else>
+                <span v-if="selectedLead.total_amount != null">
+                  Precio total: <strong>S/ {{ formatAmount(selectedLead.total_amount) }}</strong>
+                  · Registrado: S/ {{ formatAmount(selectedLead.registered_amount) }}
+                  · Saldo: <strong :class="{ 'is-out': selectedLead.balance_amount > 0 }">
+                    S/ {{ formatAmount(selectedLead.balance_amount) }}
+                  </strong>
+                </span>
+                <span v-else class="ledger-muted">Este lead no tiene un precio total registrado.</span>
+                <button type="button" class="lead-total-edit-btn" @click="startEditTotal">✎ editar precio total</button>
+              </template>
+            </div>
           </div>
           <div class="form-group">
             <label class="form-label">Cuota</label>
@@ -435,8 +460,37 @@ const verifySaving = ref(null);
 const canVerify = hasPermission("finance.verify");
 const sendModalRow = ref(null);
 const editingRow = ref(null);
+const editingTotal = ref(false);
+const totalAmountDraft = ref("");
 let pendingFiles = [];
 let pendingTributarioFile = null;
+
+/** Lead elegido en el formulario, con su precio total y saldo pendiente (si tiene). */
+const selectedLead = computed(() => leads.value.find((l) => l.id === form.leadId) || null);
+
+function startEditTotal() {
+  totalAmountDraft.value = selectedLead.value?.total_amount ?? "";
+  editingTotal.value = true;
+}
+
+async function saveTotalAmount() {
+  const lead = selectedLead.value;
+  if (!lead) return;
+  errorMessage.value = "";
+  try {
+    const response = await apiFetch(`/api/finance/leads/${lead.id}/total-amount`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ totalAmount: totalAmountDraft.value === "" ? null : totalAmountDraft.value }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "No se pudo actualizar el precio total.");
+    editingTotal.value = false;
+    await fetchLeads();
+  } catch (error) {
+    errorMessage.value = error.message;
+  }
+}
 
 const {
   search, estado: estadoFilter, banco: bancoFilter, sort, page, pageSize,
@@ -519,6 +573,7 @@ function resetForm() {
   Object.assign(form, emptyForm());
   pendingFiles = [];
   pendingTributarioFile = null;
+  editingTotal.value = false;
   if (fileInput.value) fileInput.value.value = "";
   if (tributarioInput.value) tributarioInput.value.value = "";
 }
@@ -584,6 +639,7 @@ async function hydrateReceipts() {
 }
 
 watch(paged, hydrateReceipts);
+watch(() => form.leadId, () => { editingTotal.value = false; });
 
 async function fetchLeads() {
   try {
@@ -808,6 +864,43 @@ onBeforeUnmount(releaseUrls);
 </script>
 
 <style scoped>
+.lead-total-box {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.lead-total-box .is-out {
+  color: var(--accent-rose);
+}
+
+.lead-total-edit-btn {
+  border: none;
+  background: none;
+  color: var(--primary);
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+.lead-total-edit-btn:hover {
+  text-decoration: underline;
+}
+
+.lead-total-input {
+  width: 140px;
+  padding: 0.25rem 0.5rem;
+}
+
+.lead-total-btn {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.75rem;
+}
+
 .lead-dni {
   display: block;
   font-family: var(--font-mono);

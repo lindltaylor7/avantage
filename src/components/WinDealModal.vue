@@ -14,19 +14,38 @@
         <p v-if="errorMessage" class="info-box win-alert">⚠️ {{ errorMessage }}</p>
 
         <form @submit.prevent="submit">
-          <div class="form-group">
-            <label class="form-label">Monto del primer pago (S/) *</label>
-            <input
-              ref="montoInput"
-              v-model="monto"
-              type="number"
-              step="0.01"
-              min="0.01"
-              class="form-input win-monto-input"
-              placeholder="0.00"
-              required
-            />
+          <div class="win-grid">
+            <div class="form-group">
+              <label class="form-label">Precio total del cierre (S/) *</label>
+              <input
+                ref="montoInput"
+                v-model="totalAmount"
+                type="number"
+                step="0.01"
+                min="0.01"
+                class="form-input win-monto-input"
+                placeholder="0.00"
+                required
+              />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Monto de este primer pago (S/) *</label>
+              <input
+                v-model="monto"
+                type="number"
+                step="0.01"
+                min="0.01"
+                class="form-input win-monto-input"
+                placeholder="0.00"
+                required
+              />
+            </div>
           </div>
+          <p class="win-hint">
+            Si el cliente aún no paga el total, registra aquí solo lo que ya pagó — el resto
+            queda como saldo pendiente y Finanzas puede registrar las siguientes cuotas después,
+            sin que se pueda pasar del precio total.
+          </p>
 
           <div class="win-grid">
             <div class="form-group">
@@ -99,6 +118,7 @@ const BANCOS = ['BCP', 'Interbank', 'Efectivo'];
 const EMITIR_OPCIONES = ['factura', 'boleta', 'nrus', 'rxh', 'c. interno'];
 
 const monto = ref('');
+const totalAmount = ref('');
 const banco = ref('BCP');
 const emitir = ref('boleta');
 const vouchers = ref([]);
@@ -129,8 +149,17 @@ function close() {
  */
 async function submit() {
   const amount = Number(monto.value);
+  const total = Number(totalAmount.value);
+  if (!Number.isFinite(total) || total <= 0) {
+    errorMessage.value = 'El precio total del cierre debe ser mayor a 0.';
+    return;
+  }
   if (!Number.isFinite(amount) || amount <= 0) {
     errorMessage.value = 'El monto del primer pago debe ser mayor a 0.';
+    return;
+  }
+  if (amount > total) {
+    errorMessage.value = 'El primer pago no puede ser mayor al precio total del cierre.';
     return;
   }
 
@@ -139,6 +168,7 @@ async function submit() {
   try {
     const fd = new FormData();
     fd.append('monto', String(amount));
+    fd.append('totalAmount', String(total));
     fd.append('banco', banco.value);
     fd.append('emitir', emitir.value);
     for (const file of vouchers.value) fd.append('receipts', file);

@@ -679,6 +679,20 @@ app.get('/api/finance/leads-directory', requireAuth, requirePermission('finance.
   }
 });
 
+/**
+ * Fija o corrige el precio total del cierre de un lead, contra el que se
+ * valida la suma de sus cuotas en Finanzas (ver `createIncome`/`updateIncome`).
+ */
+app.patch('/api/finance/leads/:id/total-amount', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const lead = await financeLedgerService.setLeadTotalAmount(req.params.id, req.body?.totalAmount);
+    res.json({ lead });
+  } catch (error) {
+    console.error('❌ Error al actualizar el precio total del lead:', error);
+    res.status(400).json({ error: error.message || 'Error al actualizar el precio total.' });
+  }
+});
+
 // --- Ingresos ---
 app.get('/api/finance/income', requireAuth, requirePermission('finance.view'), async (req, res) => {
   try {
@@ -1262,21 +1276,24 @@ app.patch('/api/leads/:id/status', requireAuth, requirePermission('leads.view'),
 
 /**
  * Cierre de venta desde el funnel: el vendedor arrastra el lead a "Ganado" y
- * registra en el mismo paso el monto del primer pago. Las tres cosas ocurren
- * juntas porque son una sola decisión comercial:
+ * registra en el mismo paso el precio total del cierre y el monto del primer
+ * pago (pueden ser distintos si el cliente paga en cuotas). Varias cosas
+ * ocurren juntas porque son una sola decisión comercial:
  *
  *   1. el lead pasa a la etapa ganadora,
- *   2. se crea su proyecto, bloqueado hasta que el pago se verifique,
- *   3. nace el ingreso en Finanzas — "pagado" si ya adjuntó el voucher,
+ *   2. se fija `leads.total_amount`, el precio total contra el que Finanzas
+ *      valida la suma de todas las cuotas que se registren después,
+ *   3. se crea su proyecto, bloqueado hasta que el pago se verifique,
+ *   4. nace el ingreso en Finanzas — "pagado" si ya adjuntó el voucher,
  *      "pendiente" si lo subirá después.
  *
- * Solo el monto es obligatorio; banco y tipo de comprobante tienen valor por
- * defecto y Finanzas los puede corregir después desde la tabla de ingresos.
+ * Banco y tipo de comprobante tienen valor por defecto y Finanzas los puede
+ * corregir después desde la tabla de ingresos.
  */
 app.post('/api/leads/:id/win', requireAuth, requirePermission('leads.view'), uploadFinanceReceipt, async (req, res) => {
   const vouchers = req.receipts || [];
   try {
-    const { monto, banco, emitir } = req.body || {};
+    const { monto, banco, emitir, totalAmount } = req.body || {};
     const lead = await leadService.getLeadById(req.params.id);
     if (!lead) return res.status(404).json({ error: 'Lead no encontrado.' });
 
@@ -1286,6 +1303,12 @@ app.post('/api/leads/:id/win', requireAuth, requirePermission('leads.view'), upl
         error: `Este lead ya tiene registrado su primer pago (${existing.code}).`,
         income: existing
       });
+    }
+
+    // El precio total se fija antes de crear el ingreso, para que la validación
+    // de "la suma de cuotas no supera el total" también corra sobre este primer pago.
+    if (totalAmount !== undefined && totalAmount !== null && totalAmount !== '') {
+      await financeLedgerService.setLeadTotalAmount(lead.id, totalAmount);
     }
 
     const updatedLead = await leadService.updateLeadStatus(lead.id, FUNNEL_FINAL_STATUS);

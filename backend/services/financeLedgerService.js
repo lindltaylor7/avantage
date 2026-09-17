@@ -92,12 +92,89 @@ async function attachReceipts(rows, table, foreignKey) {
  * pestañas de ingresos/diario calculan el ITF automáticamente.
  */
 export class FinanceLedgerService {
-  /** Directorio ligero de leads para el selector de la pestaña INGRESOS. */
+  /**
+   * Directorio ligero de leads para el selector de la pestaña INGRESOS, con el
+   * precio total del cierre (si ya se registró) y cuánto se lleva cobrado en
+   * cuotas, para que Finanzas vea de un vistazo el saldo pendiente de cada uno.
+   */
   async listLeadsDirectory() {
-    return db('leads')
-      .select('id', 'dni')
+    const leads = await db('leads')
+      .select('id', 'dni', 'total_amount')
       .select(db.raw("COALESCE(NULLIF(full_name, ''), topic) as name"))
       .orderBy('name', 'asc');
+
+    const sums = await db('finance_income')
+      .whereNotNull('lead_id')
+      .groupBy('lead_id')
+      .select('lead_id')
+      .sum('monto as registered');
+    const registeredByLead = new Map(sums.map((s) => [s.lead_id, Number(s.registered) || 0]));
+
+    return leads.map((lead) => {
+      const total = lead.total_amount != null ? Number(lead.total_amount) : null;
+      const registered = registeredByLead.get(lead.id) || 0;
+      return {
+        ...lead,
+        total_amount: total,
+        registered_amount: registered,
+        balance_amount: total != null ? Math.round((total - registered) * 100) / 100 : null
+      };
+    });
+  }
+
+  /**
+   * Fija (o quita, con `null`) el precio total del cierre de un lead. No se
+   * puede bajar por debajo de lo que ya tiene registrado en cuotas — eso
+   * dejaría ingresos existentes "sin sitio" en el total.
+   */
+  async setLeadTotalAmount(leadId, totalAmount) {
+    const lead = await db('leads').where({ id: leadId }).first();
+    if (!lead) throw new Error('Lead no encontrado.');
+
+    let value = null;
+    if (totalAmount !== null && totalAmount !== undefined && totalAmount !== '') {
+      const numeric = Number(totalAmount);
+      if (!Number.isFinite(numeric) || numeric <= 0) {
+        throw new Error('El precio total debe ser un número mayor a 0.');
+      }
+      const { registered } = await db('finance_income').where({ lead_id: leadId }).sum('monto as registered').first();
+      const registeredTotal = Number(registered) || 0;
+      if (numeric < registeredTotal - 0.01) {
+        throw new Error(
+          `El precio total no puede ser menor a lo ya registrado en cuotas (S/ ${registeredTotal.toFixed(2)}).`
+        );
+      }
+      value = numeric;
+    }
+
+    await db('leads').where({ id: leadId }).update({ total_amount: value });
+    return db('leads').where({ id: leadId }).first();
+  }
+
+  /**
+   * Un ingreso ligado a un lead no puede hacer que la suma de sus cuotas
+   * supere el precio total del cierre. Si el lead no tiene precio total
+   * definido (leads viejos, o ingresos sin lead asociado), no hay nada que
+   * validar.
+   */
+  async #assertWithinLeadTotal(leadId, monto, excludeIncomeId = null) {
+    if (!leadId) return;
+    const lead = await db('leads').where({ id: leadId }).select('total_amount').first();
+    if (!lead || lead.total_amount == null) return;
+
+    const total = Number(lead.total_amount);
+    let query = db('finance_income').where({ lead_id: leadId });
+    if (excludeIncomeId) query = query.whereNot('id', excludeIncomeId);
+    const { registered } = await query.sum('monto as registered').first();
+    const registeredTotal = Number(registered) || 0;
+    const remaining = Math.round((total - registeredTotal) * 100) / 100;
+
+    if (monto > remaining + 0.01) {
+      throw new Error(
+        `El monto (S/ ${monto.toFixed(2)}) supera el saldo pendiente de este lead: ` +
+        `S/ ${remaining.toFixed(2)} de un precio total de S/ ${total.toFixed(2)}.`
+      );
+    }
   }
 
   // ---------------------------------------------------------------- INGRESOS
@@ -198,6 +275,7 @@ export class FinanceLedgerService {
 
   async createIncome({ createdBy, isInitialPayment, ...fields }) {
     const values = this.#normalizeIncome(fields);
+    await this.#assertWithinLeadTotal(values.lead_id, values.monto);
     const [id] = await db('finance_income').insert({
       ...values,
       code: await nextCode('finance_income', values.fecha),
@@ -215,6 +293,7 @@ export class FinanceLedgerService {
     const existing = await db('finance_income').where({ id }).first();
     if (!existing) return null;
     const values = this.#normalizeIncome(fields);
+    await this.#assertWithinLeadTotal(values.lead_id, values.monto, id);
     // Verificar es un acto de finanzas, no un campo más del formulario: editar
     // el ingreso no puede darle ni quitarle el visto bueno.
     if (existing.estado === 'verificado' || values.estado === 'verificado') {
