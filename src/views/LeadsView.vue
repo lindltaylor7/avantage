@@ -270,6 +270,29 @@
                 <span>🎓 {{ formatAcademic(lead.academic_level, lead.field_of_study) }}</span>
               </div>
 
+              <!-- Primer pago: el vendedor ve en qué va y sube el voucher sin
+                   tener que entrar a Finanzas. -->
+              <div v-if="lead.initial_payment_id" class="card-payment-row" @click.stop>
+                <span :class="['payment-chip', paymentChipClass(lead.initial_payment_estado)]">
+                  {{ paymentChipLabel(lead.initial_payment_estado) }} · S/ {{ formatMoney(lead.initial_payment_monto) }}
+                </span>
+                <label
+                  v-if="lead.initial_payment_estado === 'pendiente'"
+                  class="payment-upload-btn"
+                  :title="voucherUploading === lead.id ? 'Subiendo...' : 'Subir el voucher del primer pago'"
+                >
+                  <input
+                    type="file"
+                    accept="image/*,application/pdf"
+                    multiple
+                    hidden
+                    :disabled="voucherUploading === lead.id"
+                    @change="(e) => uploadVoucher(lead, e)"
+                  />
+                  {{ voucherUploading === lead.id ? '…' : '📎 Voucher' }}
+                </label>
+              </div>
+
               <div class="card-footer-line">
                 <span v-if="lead.project_id" class="project-created-tag">
                   🚀 Proyecto #{{ lead.project_id }}
@@ -712,7 +735,7 @@
             <select
               :value="selectedLead.status"
               class="form-select custom-select"
-              @change="moveLeadToStatus(selectedLead, $event.target.value)"
+              @change="moveLeadToStatusOrWin(selectedLead, $event.target.value)"
             >
               <option v-for="col in columns" :key="col.key" :value="col.key">
                 {{ col.icon }} {{ col.label }}
@@ -877,12 +900,21 @@
         </div>
       </div>
     </div>
+
+    <!-- Cierre de venta: monto del primer pago al pasar el lead a la etapa ganadora -->
+    <WinDealModal
+      v-if="winModalLead"
+      :lead="winModalLead"
+      @close="winModalLead = null"
+      @won="onDealWon"
+    />
   </main>
 </template>
 
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { apiFetch } from '../apiClient.js';
+import WinDealModal from '../components/WinDealModal.vue';
 
 // Columnas predeterminadas del sistema (usadas solo para "Restablecer columnas")
 const DEFAULT_COLUMNS = [
@@ -926,6 +958,8 @@ const loadError = ref('');
 const draggedLead = ref(null);
 const hoveredColumn = ref(null);
 const projectToast = ref(null);
+const winModalLead = ref(null);
+const voucherUploading = ref(null);
 
 // Filtros y Búsqueda
 const searchQuery = ref('');
@@ -1443,7 +1477,7 @@ function onDrop(columnKey) {
   const lead = draggedLead.value;
   draggedLead.value = null;
   if (!lead || lead.status === columnKey) return;
-  moveLeadToStatus(lead, columnKey);
+  moveLeadToStatusOrWin(lead, columnKey);
 }
 
 // Servicios API
@@ -1471,6 +1505,82 @@ async function fetchAll() {
   } finally {
     isLoading.value = false;
   }
+}
+
+/**
+ * Mover un lead a la etapa ganadora no es un cambio de estado más: abre el
+ * modal de cierre para registrar el primer pago, y solo si el vendedor lo
+ * completa se mueve el lead, se crea el proyecto y nace el ingreso. Los leads
+ * que ya tienen su pago registrado (o vuelven a "Ganado") pasan derecho.
+ */
+function moveLeadToStatusOrWin(lead, newStatus) {
+  const finalKey = columns.value.find((c) => c.final)?.key;
+  if (newStatus === finalKey && !lead.initial_payment_id) {
+    winModalLead.value = lead;
+    return;
+  }
+  moveLeadToStatus(lead, newStatus);
+}
+
+function onDealWon(data) {
+  const lead = winModalLead.value;
+  winModalLead.value = null;
+  if (!lead) return;
+
+  lead.status = data.lead.status;
+  lead.project_id = data.project?.id ?? lead.project_id;
+  lead.project_status = data.project?.status ?? lead.project_status;
+  lead.initial_payment_id = data.income.id;
+  lead.initial_payment_code = data.income.code;
+  lead.initial_payment_monto = data.income.monto;
+  lead.initial_payment_estado = data.income.estado;
+
+  if (data.project) {
+    projectToast.value = data.project;
+    setTimeout(() => {
+      if (projectToast.value?.id === data.project.id) projectToast.value = null;
+    }, 7000);
+  }
+}
+
+/** Subida del voucher desde la tarjeta: deja el ingreso en "pagado". */
+async function uploadVoucher(lead, event) {
+  const files = Array.from(event.target.files || []).slice(0, 10);
+  event.target.value = '';
+  if (files.length === 0 || !lead.initial_payment_id) return;
+
+  voucherUploading.value = lead.id;
+  try {
+    const fd = new FormData();
+    for (const file of files) fd.append('receipts', file);
+    const response = await apiFetch(`/api/finance/income/${lead.initial_payment_id}/receipts`, {
+      method: 'POST',
+      body: fd
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No se pudo subir el voucher.');
+    lead.initial_payment_estado = 'pagado';
+  } catch (err) {
+    alert('No se pudo subir el voucher: ' + err.message);
+  } finally {
+    voucherUploading.value = null;
+  }
+}
+
+function paymentChipLabel(estado) {
+  if (estado === 'verificado') return '✅ Pago verificado';
+  if (estado === 'pagado') return '🧾 Por verificar';
+  return '⏳ Pago pendiente';
+}
+
+function paymentChipClass(estado) {
+  if (estado === 'verificado') return 'is-verified';
+  if (estado === 'pagado') return 'is-paid';
+  return 'is-pending';
+}
+
+function formatMoney(value) {
+  return Number(value || 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 async function moveLeadToStatus(lead, newStatus) {
@@ -2369,6 +2479,62 @@ onMounted(() => {
   font-weight: 600;
   font-family: var(--font-heading);
   color: var(--accent-emerald);
+}
+
+/* Estado del primer pago en la tarjeta del lead ganado. El proyecto no se
+   puede gestionar hasta que finanzas verifica ese pago, así que el vendedor
+   necesita verlo (y poder subir el voucher) sin salir del funnel. */
+.card-payment-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  margin-top: 0.4rem;
+}
+
+.payment-chip {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0.18rem 0.42rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.payment-chip.is-pending {
+  color: var(--accent-amber);
+  background: rgba(222, 117, 75, 0.1);
+  border-color: rgba(222, 117, 75, 0.35);
+}
+
+.payment-chip.is-paid {
+  color: var(--primary);
+  background: rgba(200, 85, 50, 0.08);
+  border-color: rgba(200, 85, 50, 0.3);
+}
+
+.payment-chip.is-verified {
+  color: var(--accent-emerald);
+  background: rgba(46, 125, 70, 0.1);
+  border-color: rgba(46, 125, 70, 0.35);
+}
+
+.payment-upload-btn {
+  font-size: 0.62rem;
+  font-weight: 600;
+  padding: 0.18rem 0.45rem;
+  border-radius: 999px;
+  border: 1px dashed var(--border-color);
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.payment-upload-btn:hover {
+  color: var(--primary);
+  border-color: var(--primary);
 }
 
 .lead-date-tag {

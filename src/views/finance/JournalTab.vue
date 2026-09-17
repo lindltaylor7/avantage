@@ -461,12 +461,13 @@ async function fetchRows() {
   try {
     const response = await apiFetch('/api/finance/journal');
     const data = await response.json();
-    if (response.ok) {
-      rows.value = data.journal || [];
-      await hydrateReceipts();
-    }
+    // Un fallo del servidor no puede parecer "libro diario vacío": sin este
+    // aviso una tabla que no se pudo leer se ve igual que una sin asientos.
+    if (!response.ok) throw new Error(data.error || 'No se pudo obtener el libro diario.');
+    rows.value = data.journal || [];
+    await hydrateReceipts();
   } catch (error) {
-    errorMessage.value = 'No se pudo obtener el libro diario.';
+    errorMessage.value = error.message || 'No se pudo obtener el libro diario.';
   } finally {
     isLoading.value = false;
   }

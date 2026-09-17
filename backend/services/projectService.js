@@ -1,6 +1,50 @@
 import { db } from '../db/connection.js';
 
 /**
+ * Estado con el que nace un proyecto recién ganado, todavía sin el primer pago
+ * verificado, y estado al que pasa cuando finanzas lo verifica.
+ */
+export const PROJECT_STATUS_LOCKED = 'Creado';
+export const PROJECT_STATUS_ACTIVE = 'Activo';
+
+/**
+ * Añade a cada proyecto el pago inicial de su lead (`initial_payment`) y si eso
+ * lo mantiene bloqueado (`is_locked`).
+ *
+ * El bloqueo se deriva del ingreso, no se guarda en el proyecto: así no hay dos
+ * fuentes de verdad que puedan desincronizarse. Un proyecto sin pago inicial
+ * registrado —los creados a mano y todos los anteriores a este flujo— no se
+ * bloquea nunca.
+ */
+async function attachPaymentGate(rows) {
+  if (rows.length === 0) return rows;
+  const leadIds = rows.map((r) => r.lead_id).filter(Boolean);
+  if (leadIds.length === 0) {
+    return rows.map((r) => ({ ...r, initial_payment: null, is_locked: false }));
+  }
+
+  const payments = await db('finance_income')
+    .whereIn('lead_id', leadIds)
+    .where('is_initial_payment', true)
+    .select('id', 'lead_id', 'code', 'monto', 'estado')
+    .orderBy('id', 'asc');
+
+  const byLead = new Map();
+  for (const p of payments) {
+    if (!byLead.has(p.lead_id)) byLead.set(p.lead_id, p);
+  }
+
+  return rows.map((row) => {
+    const payment = row.lead_id ? byLead.get(row.lead_id) || null : null;
+    return {
+      ...row,
+      initial_payment: payment,
+      is_locked: Boolean(payment) && payment.estado !== 'verificado'
+    };
+  });
+}
+
+/**
  * Servicio de acceso a datos para los proyectos generados automáticamente
  * cuando un lead alcanza el estado final del funnel de ventas ("ganado").
  */
@@ -49,7 +93,7 @@ export class ProjectService {
       .groupBy('projects.id')
       .orderBy('projects.created_at', 'desc');
 
-    return rows.map(this.withProgress);
+    return attachPaymentGate(rows.map(this.withProgress));
   }
 
   async getProjectById(id) {
@@ -68,7 +112,46 @@ export class ProjectService {
     if (!row) return undefined;
 
     const collaborators = await this.getCollaborators(id);
-    return { ...this.withProgress(row), collaborators };
+    const [withGate] = await attachPaymentGate([this.withProgress(row)]);
+    return { ...withGate, collaborators };
+  }
+
+  /**
+   * Puerta que usan las rutas que modifican un proyecto: mientras el primer
+   * pago no esté verificado por finanzas, el proyecto se puede mirar pero no
+   * gestionar. Devuelve el proyecto si se puede tocar; lanza si no.
+   */
+  async assertManageable(id) {
+    const project = await this.getProjectById(id);
+    if (!project) return null;
+    if (project.is_locked) {
+      const monto = Number(project.initial_payment?.monto || 0).toFixed(2);
+      const error = new Error(
+        `Este proyecto está a la espera de que Finanzas verifique el primer pago (S/ ${monto}). ` +
+        'Hasta entonces solo se puede consultar.'
+      );
+      error.code = 'PROJECT_LOCKED';
+      throw error;
+    }
+    return project;
+  }
+
+  /**
+   * Sincroniza el estado del proyecto de un lead con la verificación de su
+   * pago inicial. Solo mueve la pareja "Creado" ⇄ "Activo": si el equipo ya
+   * avanzó el proyecto a otro estado, no se le toca.
+   */
+  async syncStatusWithPayment(leadId, { verified } = {}) {
+    if (!leadId) return null;
+    const project = await db('projects').where({ lead_id: leadId }).first();
+    if (!project) return null;
+
+    const from = verified ? PROJECT_STATUS_LOCKED : PROJECT_STATUS_ACTIVE;
+    const to = verified ? PROJECT_STATUS_ACTIVE : PROJECT_STATUS_LOCKED;
+    if (project.status !== from) return this.getProjectById(project.id);
+
+    await db('projects').where({ id: project.id }).update({ status: to });
+    return this.getProjectById(project.id);
   }
 
   async updateProjectStatus(id, status) {

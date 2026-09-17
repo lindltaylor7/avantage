@@ -12,7 +12,12 @@ export const CUOTAS = ['1era', '2da', '3era'];
 export const EMITIR_OPCIONES = ['factura', 'boleta', 'nrus', 'rxh', 'c. interno'];
 export const BANCOS = ['BCP', 'Interbank', 'Efectivo'];
 export const MONEDAS = ['soles', 'dolares'];
-export const ESTADOS_INGRESO = ['pagado', 'no pagado'];
+/**
+ * Ciclo de vida de un ingreso. "verificado" es el único estado que suma en las
+ * cifras de Finanzas y el que desbloquea el proyecto asociado; solo lo pone
+ * finanzas, con el permiso `finance.verify`.
+ */
+export const ESTADOS_INGRESO = ['pendiente', 'pagado', 'verificado'];
 export const ESTADOS_DIARIO = ['pagado', 'pendiente'];
 
 /** ITF según la fórmula del Excel: IF(H<1000, 0, INT(H/1000)*0.05), sobre el valor absoluto. */
@@ -159,16 +164,32 @@ export class FinanceLedgerService {
       monto: numericMonto,
       itf: calcItf(numericMonto),
       banco,
-      estado: ESTADOS_INGRESO.includes(estado) ? estado : 'no pagado',
+      estado: ESTADOS_INGRESO.includes(estado) ? estado : 'pendiente',
       tributario: tributario?.trim() || null
     };
   }
 
-  async createIncome({ createdBy, ...fields }) {
+  /** El pago inicial ya registrado de un lead, si lo tiene (uno por lead). */
+  async findInitialPaymentByLead(leadId) {
+    if (!leadId) return null;
+    const row = await db('finance_income')
+      .where({ lead_id: leadId, is_initial_payment: true })
+      .orderBy('id', 'asc')
+      .first();
+    return row || null;
+  }
+
+  /** Borra del disco un archivo recién subido cuya operación no prosperó. */
+  discardUploadedFile(file) {
+    unlinkQuiet(file?.filename);
+  }
+
+  async createIncome({ createdBy, isInitialPayment, ...fields }) {
     const values = this.#normalizeIncome(fields);
     const [id] = await db('finance_income').insert({
       ...values,
       code: await nextCode('finance_income', values.fecha),
+      is_initial_payment: Boolean(isInitialPayment),
       created_by: createdBy || null
     });
     return this.getIncomeById(id);
@@ -181,16 +202,61 @@ export class FinanceLedgerService {
   async updateIncome(id, fields) {
     const existing = await db('finance_income').where({ id }).first();
     if (!existing) return null;
-    await db('finance_income').where({ id }).update(this.#normalizeIncome(fields));
+    const values = this.#normalizeIncome(fields);
+    // Verificar es un acto de finanzas, no un campo más del formulario: editar
+    // el ingreso no puede darle ni quitarle el visto bueno.
+    if (existing.estado === 'verificado' || values.estado === 'verificado') {
+      values.estado = existing.estado;
+    }
+    await db('finance_income').where({ id }).update(values);
     return this.getIncomeById(id);
   }
 
+  /**
+   * Marca el ingreso como cobrado o lo devuelve a pendiente. No pasa por aquí
+   * la verificación: esa tiene su propio método porque exige otro permiso y
+   * arrastra el desbloqueo del proyecto.
+   */
   async updateIncomeEstado(id, estado) {
-    if (!ESTADOS_INGRESO.includes(estado)) {
-      throw new Error('El estado debe ser "pagado" o "no pagado".');
+    if (!['pendiente', 'pagado'].includes(estado)) {
+      throw new Error('El estado debe ser "pendiente" o "pagado".');
     }
-    const updated = await db('finance_income').where({ id }).update({ estado });
-    if (!updated) return null;
+    const existing = await db('finance_income').where({ id }).first();
+    if (!existing) return null;
+    if (existing.estado === 'verificado') {
+      throw new Error('Este ingreso ya está verificado: quita la verificación antes de cambiar su estado.');
+    }
+    await db('finance_income').where({ id }).update({ estado });
+    return this.getIncomeById(id);
+  }
+
+  /**
+   * Visto bueno de finanzas (permiso `finance.verify`). Es lo que hace que el
+   * ingreso empiece a sumar en las cifras del módulo y que el proyecto del
+   * lead pase de "Creado" (bloqueado) a "Activo".
+   *
+   * Al quitar la verificación el proyecto vuelve a quedar bloqueado, pero se
+   * respeta el avance: solo se devuelve a "Creado" si seguía en "Activo".
+   */
+  async setIncomeVerificacion(id, { verified, verifiedBy } = {}) {
+    const income = await db('finance_income').where({ id }).first();
+    if (!income) return null;
+
+    if (verified) {
+      await db('finance_income').where({ id }).update({
+        estado: 'verificado',
+        verified_at: db.fn.now(),
+        verified_by: verifiedBy || null
+      });
+    } else {
+      await db('finance_income').where({ id }).update({
+        // Sin verificación vuelve a "pagado" si tiene comprobante, y a
+        // "pendiente" si nunca llegó a tenerlo.
+        estado: (await db('finance_income_receipts').where('income_id', id).first()) ? 'pagado' : 'pendiente',
+        verified_at: null,
+        verified_by: null
+      });
+    }
     return this.getIncomeById(id);
   }
 
@@ -245,6 +311,11 @@ export class FinanceLedgerService {
       throw new Error('Ingreso no encontrado.');
     }
     await db('finance_income_receipts').insert(rows);
+    // Adjuntar el voucher es lo que da por cobrado el ingreso; la verificación
+    // la sigue haciendo finanzas aparte.
+    if (income.estado === 'pendiente') {
+      await db('finance_income').where({ id: incomeId }).update({ estado: 'pagado' });
+    }
     return db('finance_income_receipts')
       .where('income_id', incomeId)
       .whereIn('filename', rows.map((r) => r.filename))
@@ -507,8 +578,9 @@ export class FinanceLedgerService {
    *  - Ingresos = `finance_income` + asientos positivos del libro diario (en soles).
    *  - Egresos  = asientos negativos del libro diario (en soles, en valor absoluto).
    *
-   * Solo cuentan los registros ya cobrados/pagados: lo que sigue "pendiente" o
-   * "no pagado" es dinero que todavía no se movió y falsearía el balance.
+   * Solo cuenta el dinero confirmado: los ingresos verificados por finanzas y
+   * los asientos del libro diario ya pagados. Lo pendiente (o pagado pero sin
+   * verificar) todavía no es dinero en caja y falsearía el balance.
    */
   async getOverview({ monthsBack = 6 } = {}) {
     const months = Math.min(Math.max(Number(monthsBack) || 6, 1), 24);
@@ -525,7 +597,7 @@ export class FinanceLedgerService {
       .select(db.raw("DATE_FORMAT(fecha, '%Y-%m') as month"))
       .sum('monto as total')
       .where('fecha', '>=', earliest)
-      .where('estado', 'pagado')
+      .where('estado', 'verificado')
       .groupBy('banco', 'month');
 
     const journalRows = await db('finance_journal')

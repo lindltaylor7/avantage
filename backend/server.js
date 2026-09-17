@@ -39,6 +39,7 @@ import { FinanceLedgerService } from './services/financeLedgerService.js';
 import { signToken, requireAuth, requirePermission, signGoogleOAuthState, verifyGoogleOAuthState } from './middleware/auth.js';
 
 import { uploadProjectUpdateAttachment, uploadDir, uploadFinanceReceipt, uploadFinanceFile, financeReceiptDir, whatsappMediaDir, campaignAdImageDir } from './middleware/upload.js';
+import { db } from './db/connection.js';
 
 // Estado del funnel Kanban que marca el fin del proceso comercial: al llegar
 // aquí se genera automáticamente el proyecto asociado al lead.
@@ -519,6 +520,34 @@ app.patch('/api/finance/income/:id/estado', requireAuth, requirePermission('fina
   } catch (error) {
     console.error('❌ Error al actualizar el estado del ingreso:', error);
     res.status(400).json({ error: error.message || 'Error al actualizar el estado del ingreso.' });
+  }
+});
+
+/**
+ * Visto bueno de Finanzas sobre un ingreso. Es la única puerta que lo hace
+ * sumar en las cifras del módulo y que desbloquea el proyecto del lead, así
+ * que va detrás de su propio permiso (`finance.verify`), no del de ver.
+ */
+app.patch('/api/finance/income/:id/verificacion', requireAuth, requirePermission('finance.verify'), async (req, res) => {
+  try {
+    const verified = req.body?.verified !== false;
+    const income = await financeLedgerService.setIncomeVerificacion(req.params.id, {
+      verified,
+      verifiedBy: req.user.id
+    });
+    if (!income) return res.status(404).json({ error: 'Ingreso no encontrado.' });
+
+    // Un pago inicial verificado es lo que activa el proyecto del lead.
+    let project = null;
+    if (income.is_initial_payment) {
+      project = await projectService.syncStatusWithPayment(income.lead_id, { verified });
+      console.log(`💰 [Finanzas] Ingreso ${income.code} ${verified ? 'verificado' : 'sin verificar'}` +
+        (project ? ` · proyecto #${project.id} → ${project.status}` : ''));
+    }
+    res.json({ income, project });
+  } catch (error) {
+    console.error('❌ Error al verificar el ingreso:', error);
+    res.status(400).json({ error: error.message || 'Error al verificar el ingreso.' });
   }
 });
 
@@ -1023,6 +1052,69 @@ app.patch('/api/leads/:id/status', requireAuth, requirePermission('leads.view'),
   } catch (error) {
     console.error('❌ Error al actualizar el lead:', error);
     res.status(500).json({ error: 'Error al actualizar el lead.', details: error.message });
+  }
+});
+
+/**
+ * Cierre de venta desde el funnel: el vendedor arrastra el lead a "Ganado" y
+ * registra en el mismo paso el monto del primer pago. Las tres cosas ocurren
+ * juntas porque son una sola decisión comercial:
+ *
+ *   1. el lead pasa a la etapa ganadora,
+ *   2. se crea su proyecto, bloqueado hasta que el pago se verifique,
+ *   3. nace el ingreso en Finanzas — "pagado" si ya adjuntó el voucher,
+ *      "pendiente" si lo subirá después.
+ *
+ * Solo el monto es obligatorio; banco y tipo de comprobante tienen valor por
+ * defecto y Finanzas los puede corregir después desde la tabla de ingresos.
+ */
+app.post('/api/leads/:id/win', requireAuth, requirePermission('leads.view'), uploadFinanceReceipt, async (req, res) => {
+  const vouchers = req.receipts || [];
+  try {
+    const { monto, banco, emitir } = req.body || {};
+    const lead = await leadService.getLeadById(req.params.id);
+    if (!lead) return res.status(404).json({ error: 'Lead no encontrado.' });
+
+    const existing = await financeLedgerService.findInitialPaymentByLead(lead.id);
+    if (existing) {
+      return res.status(409).json({
+        error: `Este lead ya tiene registrado su primer pago (${existing.code}).`,
+        income: existing
+      });
+    }
+
+    const updatedLead = await leadService.updateLeadStatus(lead.id, FUNNEL_FINAL_STATUS);
+    const created = await projectService.createProjectFromLead(updatedLead);
+
+    const income = await financeLedgerService.createIncome({
+      fecha: new Date().toISOString().slice(0, 10),
+      leadId: lead.id,
+      cuota: '1era',
+      emitir: emitir || 'boleta',
+      monto,
+      banco: banco || 'BCP',
+      estado: 'pendiente',
+      isInitialPayment: true,
+      createdBy: req.user.id
+    });
+
+    // El voucher es opcional; si viene, el ingreso queda cobrado de una vez.
+    let withVoucher = income;
+    if (vouchers.length > 0) {
+      await financeLedgerService.addIncomeReceipts(income.id, vouchers);
+      withVoucher = await financeLedgerService.getIncomeById(income.id);
+    }
+
+    // Se relee el proyecto ya con su pago inicial: el bloqueo se deriva del
+    // ingreso, que no existía cuando se creó el proyecto unas líneas antes.
+    const project = await projectService.getProjectById(created.id);
+
+    console.log(`🏆 [Ventas] Lead #${lead.id} ganado · proyecto #${project.id} · ingreso ${withVoucher.code} (${withVoucher.estado})`);
+    res.status(201).json({ lead: updatedLead, project, income: withVoucher });
+  } catch (error) {
+    vouchers.forEach((f) => financeLedgerService.discardUploadedFile(f));
+    console.error('❌ Error al registrar el cierre de venta:', error);
+    res.status(400).json({ error: error.message || 'Error al registrar el cierre de venta.' });
   }
 });
 
@@ -2184,6 +2276,28 @@ app.post('/api/projects', requireAuth, requirePermission('projects.view'), async
 });
 
 /**
+ * Envuelve una ruta que modifica un proyecto: si su primer pago todavía no lo
+ * verificó Finanzas, el proyecto es de solo lectura y se responde 409 con el
+ * motivo, en vez de dejar que el cambio entre por la API sin pasar por la UI.
+ */
+async function guardProjectManageable(projectId, res) {
+  try {
+    const project = await projectService.assertManageable(projectId);
+    if (!project) {
+      res.status(404).json({ error: 'Proyecto no encontrado.' });
+      return false;
+    }
+    return true;
+  } catch (error) {
+    if (error.code === 'PROJECT_LOCKED') {
+      res.status(409).json({ error: error.message, projectLocked: true });
+      return false;
+    }
+    throw error;
+  }
+}
+
+/**
  * Actualizar el estado de ejecución de un proyecto
  */
 app.patch('/api/projects/:id/status', requireAuth, requirePermission('projects.view'), async (req, res) => {
@@ -2192,6 +2306,7 @@ app.patch('/api/projects/:id/status', requireAuth, requirePermission('projects.v
     if (!status || typeof status !== 'string') {
       return res.status(400).json({ error: 'El estado (status) es requerido.' });
     }
+    if (!await guardProjectManageable(req.params.id, res)) return;
     const project = await projectService.updateProjectStatus(req.params.id, status);
     if (!project) {
       return res.status(404).json({ error: 'Proyecto no encontrado.' });
@@ -2209,6 +2324,7 @@ app.patch('/api/projects/:id/status', requireAuth, requirePermission('projects.v
 app.patch('/api/projects/:id/deadline', requireAuth, requirePermission('projects.view'), async (req, res) => {
   try {
     const { deadline } = req.body;
+    if (!await guardProjectManageable(req.params.id, res)) return;
     const project = await projectService.updateDeadline(req.params.id, deadline);
     if (!project) {
       return res.status(404).json({ error: 'Proyecto no encontrado.' });
@@ -2226,6 +2342,7 @@ app.patch('/api/projects/:id/deadline', requireAuth, requirePermission('projects
 app.patch('/api/projects/:id/leader', requireAuth, requirePermission('projects.view'), async (req, res) => {
   try {
     const { userId } = req.body;
+    if (!await guardProjectManageable(req.params.id, res)) return;
     const project = await projectService.updateLeader(req.params.id, userId);
     if (!project) {
       return res.status(404).json({ error: 'Proyecto no encontrado.' });
@@ -2246,6 +2363,7 @@ app.post('/api/projects/:id/collaborators', requireAuth, requirePermission('proj
     if (!userId) {
       return res.status(400).json({ error: 'userId es requerido.' });
     }
+    if (!await guardProjectManageable(req.params.id, res)) return;
     const project = await projectService.addCollaborator(req.params.id, userId);
     res.json({ project });
   } catch (error) {
@@ -2259,6 +2377,7 @@ app.post('/api/projects/:id/collaborators', requireAuth, requirePermission('proj
  */
 app.delete('/api/projects/:id/collaborators/:userId', requireAuth, requirePermission('projects.view'), async (req, res) => {
   try {
+    if (!await guardProjectManageable(req.params.id, res)) return;
     const project = await projectService.removeCollaborator(req.params.id, req.params.userId);
     res.json({ project });
   } catch (error) {
@@ -2305,6 +2424,7 @@ app.post('/api/projects/:id/tasks', requireAuth, requirePermission('projects.vie
     if (!title || !title.trim()) {
       return res.status(400).json({ error: 'El título de la tarea es requerido.' });
     }
+    if (!await guardProjectManageable(req.params.id, res)) return;
     const task = await taskService.createTask(req.params.id, title.trim());
     res.json({ task });
   } catch (error) {
@@ -2322,6 +2442,11 @@ app.patch('/api/tasks/:id/status', requireAuth, requirePermission('projects.view
     if (!status || typeof status !== 'string') {
       return res.status(400).json({ error: 'El estado (status) es requerido.' });
     }
+    const existingTask = await taskService.getTaskById(req.params.id);
+    if (!existingTask) {
+      return res.status(404).json({ error: 'Tarea no encontrada.' });
+    }
+    if (!await guardProjectManageable(existingTask.project_id, res)) return;
     const task = await taskService.updateTaskStatus(req.params.id, status);
     if (!task) {
       return res.status(404).json({ error: 'Tarea no encontrada.' });
@@ -2338,6 +2463,8 @@ app.patch('/api/tasks/:id/status', requireAuth, requirePermission('projects.view
  */
 app.delete('/api/tasks/:id', requireAuth, requirePermission('projects.view'), async (req, res) => {
   try {
+    const task = await taskService.getTaskById(req.params.id);
+    if (task && !await guardProjectManageable(task.project_id, res)) return;
     await taskService.deleteTask(req.params.id);
     res.json({ success: true });
   } catch (error) {
@@ -2369,6 +2496,7 @@ app.post('/api/projects/:id/updates', requireAuth, requirePermission('projects.v
     if (!content || !content.trim()) {
       return res.status(400).json({ error: 'El contenido de la actualización es requerido.' });
     }
+    if (!await guardProjectManageable(req.params.id, res)) return;
     const update = await projectUpdateService.createUpdate({
       projectId: req.params.id,
       authorId: req.user.id,
@@ -2539,9 +2667,32 @@ app.get('*', (req, res, next) => {
   });
 });
 
+/**
+ * Aviso al arrancar si el despliegue trae codigo nuevo pero la base de datos se
+ * quedo atras: una tabla o columna que el codigo espera y no existe hace que la
+ * pantalla que la usa falle, y una tabla que no se puede leer es indistinguible
+ * de una tabla sin datos.
+ */
+async function warnAboutPendingMigrations() {
+  try {
+    const [, pending] = await db.migrate.list();
+    if (pending.length === 0) return;
+    console.warn(`
+[!] Hay ${pending.length} migracion(es) SIN APLICAR en esta base de datos.`);
+    console.warn('    Las pantallas que dependan de ellas fallaran (pueden verse vacias).');
+    console.warn('    Ejecuta:  npm run migrate');
+    for (const m of pending) console.warn(`    - ${m.file || m}`);
+    console.warn('');
+  } catch (error) {
+    console.error('No se pudo comprobar el estado de las migraciones:', error.message);
+  }
+}
+
 app.listen(PORT, () => {
   console.log(`\n🚀 Servidor de Evaluación de Tesis corriendo en http://localhost:${PORT}`);
   console.log(`- API Status: http://localhost:${PORT}/api/health`);
+
+  warnAboutPendingMigrations();
 
   if (process.env.META_PAGE_ACCESS_TOKEN) {
     pageFollowerService.pollAndStore().catch((error) => {

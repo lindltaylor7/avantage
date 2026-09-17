@@ -3,6 +3,9 @@
     <p class="ledger-hint">
       El código se genera automáticamente (AAAAMMDD + correlativo del día) y el ITF se
       calcula con la fórmula <code>|monto|&lt;1000 ? 0 : INT(|monto|/1000)×0.05</code>.
+      Un ingreso recorre <strong>pendiente → pagado</strong> (al adjuntar el comprobante)
+      <strong>→ verificado</strong>; solo lo verificado suma en las cifras de Finanzas y,
+      si es el primer pago de un proyecto, lo activa.
     </p>
 
     <div class="ledger-controls">
@@ -18,8 +21,9 @@
       </label>
       <select v-model="estadoFilter" class="ledger-filter" aria-label="Filtrar por estado">
         <option value="">Todo estado</option>
-        <option value="pagado">Pagado</option>
-        <option value="no pagado">No pagado</option>
+        <option value="pendiente">Pendiente</option>
+        <option value="pagado">Pagado (por verificar)</option>
+        <option value="verificado">Verificado</option>
       </select>
       <select v-model="bancoFilter" class="ledger-filter" aria-label="Filtrar por banco">
         <option value="">Todo banco</option>
@@ -97,10 +101,13 @@
           </div>
           <div class="form-group">
             <label class="form-label">Estado</label>
-            <select v-model="form.estado" class="form-select">
-              <option value="no pagado">No pagado</option>
+            <select v-model="form.estado" class="form-select" :disabled="editingRow?.estado === 'verificado'">
+              <option value="pendiente">Pendiente</option>
               <option value="pagado">Pagado</option>
             </select>
+            <p v-if="editingRow?.estado === 'verificado'" class="ledger-receipt-hint">
+              Ingreso verificado: usa el botón ✓ de su fila para quitar la verificación.
+            </p>
           </div>
           <div class="form-group">
             <label class="form-label">Tributario</label>
@@ -163,13 +170,17 @@
           <dt>Total</dt>
           <dd>S/ {{ formatAmount(totals.total) }}</dd>
         </div>
-        <div class="ledger-summary-item">
-          <dt>Cobrado</dt>
-          <dd class="is-in">S/ {{ formatAmount(totals.cobrado) }}</dd>
+        <div class="ledger-summary-item" title="Verificado por Finanzas: es lo único que suma en las cifras del módulo">
+          <dt>Verificado</dt>
+          <dd class="is-in">S/ {{ formatAmount(totals.verificado) }}</dd>
         </div>
-        <div class="ledger-summary-item">
+        <div class="ledger-summary-item" title="Cobrado pero a la espera del visto bueno de Finanzas">
+          <dt>Por verificar</dt>
+          <dd class="is-pending">S/ {{ formatAmount(totals.porVerificar) }}</dd>
+        </div>
+        <div class="ledger-summary-item" title="Todavía sin cobrar">
           <dt>Por cobrar</dt>
-          <dd class="is-out">S/ {{ formatAmount(totals.total - totals.cobrado) }}</dd>
+          <dd class="is-out">S/ {{ formatAmount(totals.porCobrar) }}</dd>
         </div>
         <div class="ledger-summary-item">
           <dt>ITF</dt>
@@ -239,16 +250,40 @@
                 </td>
                 <td>{{ row.banco }}</td>
                 <td>
-                  <button
-                    type="button"
-                    class="pill pill-toggle"
-                    :class="row.estado === 'pagado' ? 'pill-success' : 'pill-warning'"
-                    :disabled="estadoSaving === row.id"
-                    title="Clic para cambiar el estado"
-                    @click="toggleEstado(row)"
-                  >
-                    {{ row.estado }}
-                  </button>
+                  <div class="estado-cell">
+                    <span v-if="row.estado === 'verificado'" class="pill pill-success" title="Verificado por Finanzas">
+                      ✅ verificado
+                    </span>
+                    <button
+                      v-else
+                      type="button"
+                      class="pill pill-toggle"
+                      :class="row.estado === 'pagado' ? 'pill-info' : 'pill-warning'"
+                      :disabled="estadoSaving === row.id"
+                      title="Clic para marcarlo como cobrado o devolverlo a pendiente"
+                      @click="toggleEstado(row)"
+                    >
+                      {{ row.estado }}
+                    </button>
+
+                    <!-- El visto bueno es exclusivo de Finanzas (finance.verify) -->
+                    <button
+                      v-if="canVerify && row.estado !== 'pendiente'"
+                      type="button"
+                      class="verify-btn"
+                      :class="{ 'is-verified': row.estado === 'verificado' }"
+                      :disabled="verifySaving === row.id"
+                      :title="row.estado === 'verificado'
+                        ? 'Quitar la verificación (vuelve a bloquear el proyecto)'
+                        : 'Verificar: empieza a sumar en Finanzas y activa el proyecto'"
+                      @click="toggleVerificacion(row)"
+                    >
+                      {{ verifySaving === row.id ? '…' : (row.estado === 'verificado' ? '✓ Verificado' : 'Verificar') }}
+                    </button>
+                    <span v-if="row.is_initial_payment" class="initial-payment-tag" title="Primer pago: activa el proyecto del lead">
+                      1er pago
+                    </span>
+                  </div>
                 </td>
                 <td>
                   <div class="tributario-cell">
@@ -364,6 +399,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { apiFetch } from "../../apiClient.js";
+import { hasPermission } from "../../auth.js";
 import { isPdfReceipt, loadReceiptUrl } from "./receiptImage.js";
 import { dayOnly, formatAmount, formatDate } from "./format.js";
 import { useLedgerTable } from "./useLedgerTable.js";
@@ -394,6 +430,9 @@ const tributarioUrls = reactive({});
 const fileInput = ref(null);
 const tributarioInput = ref(null);
 const estadoSaving = ref(null);
+const verifySaving = ref(null);
+// El visto bueno de un ingreso es competencia exclusiva de Finanzas.
+const canVerify = hasPermission("finance.verify");
 const sendModalRow = ref(null);
 const editingRow = ref(null);
 let pendingFiles = [];
@@ -412,18 +451,26 @@ const {
   defaultSort: { key: "fecha", dir: "desc" },
 });
 
-/** Totales del subconjunto que se está mirando (búsqueda y filtros incluidos). */
+/**
+ * Totales del subconjunto que se está mirando (búsqueda y filtros incluidos),
+ * separados por etapa del cobro: solo lo verificado es dinero confirmado y es
+ * lo que suma en las cifras generales de Finanzas.
+ */
 const totals = computed(() => {
   let total = 0;
-  let cobrado = 0;
+  let verificado = 0;
+  let porVerificar = 0;
+  let porCobrar = 0;
   let itf = 0;
   for (const row of filtered.value) {
     const monto = Number(row.monto) || 0;
     total += monto;
-    if (row.estado === "pagado") cobrado += monto;
+    if (row.estado === "verificado") verificado += monto;
+    else if (row.estado === "pagado") porVerificar += monto;
+    else porCobrar += monto;
     itf += Number(row.itf) || 0;
   }
-  return { total, cobrado, itf };
+  return { total, verificado, porVerificar, porCobrar, itf };
 });
 
 function emptyForm() {
@@ -434,7 +481,7 @@ function emptyForm() {
     emitir: "factura",
     monto: "",
     banco: "BCP",
-    estado: "no pagado",
+    estado: "pendiente",
     tributario: "",
   };
 }
@@ -499,7 +546,7 @@ function startEdit(row) {
     emitir: row.emitir || "factura",
     monto: row.monto ?? "",
     banco: row.banco || "BCP",
-    estado: row.estado || "no pagado",
+    estado: row.estado || "pendiente",
     tributario: row.tributario || "",
   });
   isFormOpen.value = true;
@@ -553,12 +600,12 @@ async function fetchRows() {
   try {
     const response = await apiFetch("/api/finance/income");
     const data = await response.json();
-    if (response.ok) {
-      rows.value = data.income || [];
-      await hydrateReceipts();
-    }
+    // Un fallo del servidor no puede parecer "sin ingresos registrados".
+    if (!response.ok) throw new Error(data.error || "No se pudieron obtener los ingresos.");
+    rows.value = data.income || [];
+    await hydrateReceipts();
   } catch (error) {
-    errorMessage.value = "No se pudieron obtener los ingresos.";
+    errorMessage.value = error.message || "No se pudieron obtener los ingresos.";
   } finally {
     isLoading.value = false;
   }
@@ -690,8 +737,36 @@ async function removeTributarioFile(incomeId) {
   }
 }
 
+async function toggleVerificacion(row) {
+  const verified = row.estado !== "verificado";
+  if (!verified && !confirm("¿Quitar la verificación? El proyecto asociado volverá a quedar bloqueado.")) {
+    return;
+  }
+  verifySaving.value = row.id;
+  errorMessage.value = "";
+  try {
+    const response = await apiFetch(`/api/finance/income/${row.id}/verificacion`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ verified }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "No se pudo actualizar la verificación.");
+    row.estado = data.income?.estado ?? row.estado;
+    if (data.project) {
+      successMessage.value = `Ingreso ${data.income.code} ${verified ? "verificado" : "sin verificar"} · ` +
+        `proyecto #${data.project.id} → ${data.project.status}.`;
+      setTimeout(() => { successMessage.value = ""; }, 4000);
+    }
+  } catch (error) {
+    errorMessage.value = error.message;
+  } finally {
+    verifySaving.value = null;
+  }
+}
+
 async function toggleEstado(row) {
-  const nextEstado = row.estado === "pagado" ? "no pagado" : "pagado";
+  const nextEstado = row.estado === "pagado" ? "pendiente" : "pagado";
   estadoSaving.value = row.id;
   errorMessage.value = "";
   try {
@@ -788,6 +863,56 @@ onBeforeUnmount(releaseUrls);
   color: #fff;
   background: var(--accent-rose);
   border-color: var(--accent-rose);
+}
+
+.estado-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+}
+
+/* Verificar es la acción de Finanzas que confirma el dinero y activa el
+   proyecto: se separa del pill de estado para que no parezca otro toggle. */
+.verify-btn {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 0.18rem 0.45rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent-emerald);
+  background: transparent;
+  color: var(--accent-emerald);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.verify-btn:hover:not(:disabled) {
+  background: var(--accent-emerald);
+  color: #fff;
+}
+
+.verify-btn.is-verified {
+  border-style: dashed;
+  border-color: var(--border-color);
+  color: var(--text-muted);
+}
+
+.verify-btn.is-verified:hover:not(:disabled) {
+  background: transparent;
+  border-color: var(--accent-rose);
+  color: var(--accent-rose);
+}
+
+.verify-btn:disabled { opacity: 0.6; cursor: wait; }
+
+.initial-payment-tag {
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
 .pill-toggle {

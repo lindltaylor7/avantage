@@ -50,6 +50,11 @@
               <router-link :to="`/admin/projects/${project.id}`" style="color: var(--text-main); text-decoration: none; font-weight: 600;">
                 {{ project.topic }}
               </router-link>
+              <!-- Bloqueado hasta que Finanzas verifique el primer pago -->
+              <div v-if="project.is_locked" class="locked-note" :title="lockedTitle(project)">
+                🔒 Esperando la verificación del primer pago
+                (S/ {{ formatMoney(project.initial_payment?.monto) }})
+              </div>
             </td>
             <td>
               <div>{{ project.client_email }}</div>
@@ -61,12 +66,16 @@
             </td>
             <td>
               <select
+                v-if="!project.is_locked"
                 :value="project.status"
                 class="form-select status-select"
                 @change="updateStatus(project, $event.target.value)"
               >
                 <option v-for="s in STATUSES" :key="s" :value="s">{{ s }}</option>
               </select>
+              <span v-else class="status-pill status-creado" :title="lockedTitle(project)">
+                🔒 {{ project.status }}
+              </span>
             </td>
             <td style="min-width: 140px;">
               <div class="metric-bar-bg" style="margin-bottom: 0.25rem;">
@@ -167,7 +176,7 @@
 import { ref, reactive, computed, onMounted } from 'vue';
 import { apiFetch } from '../apiClient.js';
 
-const STATUSES = ['Creado', 'Iniciado', 'En Desarrollo', 'Entregado', 'Cancelado'];
+const STATUSES = ['Creado', 'Activo', 'Iniciado', 'En Desarrollo', 'Entregado', 'Cancelado'];
 
 const projects = ref([]);
 const isLoading = ref(false);
@@ -229,12 +238,22 @@ async function updateStatus(project, newStatus) {
 function statusClass(status) {
   const map = {
     'Creado': 'status-creado',
+    'Activo': 'status-activo',
     'Iniciado': 'status-iniciado',
     'En Desarrollo': 'status-en-desarrollo',
     'Entregado': 'status-entregado',
     'Cancelado': 'status-cancelado'
   };
   return map[status] || 'status-creado';
+}
+
+function lockedTitle(project) {
+  return `El proyecto se puede consultar pero no gestionar hasta que Finanzas verifique ` +
+    `el primer pago (${project.initial_payment?.code || 'ingreso'}).`;
+}
+
+function formatMoney(value) {
+  return Number(value || 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function progressColor(percentage) {
@@ -346,7 +365,17 @@ onMounted(() => {
   font-weight: 600;
 }
 
-.status-creado { background: rgba(46, 125, 70, 0.15); color: #5FBE79; border: 1px solid rgba(46, 125, 70, 0.35); }
+.status-creado { background: rgba(191, 194, 199, 0.18); color: var(--text-muted); border: 1px solid rgba(191, 194, 199, 0.4); }
+.status-activo { background: rgba(46, 125, 70, 0.15); color: #5FBE79; border: 1px solid rgba(46, 125, 70, 0.35); }
+
+/* Aviso de proyecto a la espera del visto bueno de Finanzas. */
+.locked-note {
+  margin-top: 0.3rem;
+  font-size: 0.7rem;
+  line-height: 1.35;
+  color: var(--accent-amber);
+  cursor: help;
+}
 .status-iniciado { background: rgba(201, 146, 46, 0.15); color: var(--accent-amber); border: 1px solid rgba(201, 146, 46, 0.35); }
 .status-en-desarrollo { background: rgba(111, 129, 37, 0.15); color: var(--on-tint-strong); border: 1px solid rgba(111, 129, 37, 0.35); }
 .status-entregado { background: rgba(191, 194, 199, 0.15); color: var(--accent-silver); border: 1px solid rgba(191, 194, 199, 0.35); }

@@ -1,0 +1,259 @@
+<template>
+  <div class="modal-overlay" @click.self="close">
+    <div class="modal-content win-modal">
+      <div class="win-hero">
+        <span class="win-confetti" aria-hidden="true">🎉</span>
+        <h3 class="win-title">¡Felicitaciones!</h3>
+        <p class="win-subtitle">
+          Cerraste el trato con <strong>{{ clientName }}</strong>.
+          Registra el monto del primer pago para abrir el proyecto.
+        </p>
+      </div>
+
+      <div class="modal-body">
+        <p v-if="errorMessage" class="info-box win-alert">⚠️ {{ errorMessage }}</p>
+
+        <form @submit.prevent="submit">
+          <div class="form-group">
+            <label class="form-label">Monto del primer pago (S/) *</label>
+            <input
+              ref="montoInput"
+              v-model="monto"
+              type="number"
+              step="0.01"
+              min="0.01"
+              class="form-input win-monto-input"
+              placeholder="0.00"
+              required
+            />
+          </div>
+
+          <div class="win-grid">
+            <div class="form-group">
+              <label class="form-label">Banco</label>
+              <select v-model="banco" class="form-select">
+                <option v-for="b in BANCOS" :key="b" :value="b">{{ b }}</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Comprobante a emitir</label>
+              <select v-model="emitir" class="form-select">
+                <option v-for="e in EMITIR_OPCIONES" :key="e" :value="e">{{ e }}</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Voucher del pago (opcional)</label>
+            <input
+              type="file"
+              accept="image/*,application/pdf"
+              multiple
+              class="form-input"
+              @change="onVoucherChange"
+            />
+            <p class="win-hint">
+              <template v-if="vouchers.length > 0">
+                {{ vouchers.length }} archivo(s) — el ingreso quedará como <strong>pagado</strong>,
+                a la espera de que Finanzas lo verifique.
+              </template>
+              <template v-else>
+                Si todavía no lo tienes, el ingreso queda <strong>pendiente</strong> y lo puedes
+                subir después desde la tarjeta del lead.
+              </template>
+            </p>
+          </div>
+
+          <div class="win-flow">
+            <span :class="['win-step', 'is-done']">1. Venta cerrada</span>
+            <span class="win-arrow">→</span>
+            <span :class="['win-step', vouchers.length > 0 ? 'is-done' : '']">2. Voucher</span>
+            <span class="win-arrow">→</span>
+            <span class="win-step">3. Finanzas verifica</span>
+            <span class="win-arrow">→</span>
+            <span class="win-step">4. Proyecto activo</span>
+          </div>
+
+          <div class="win-actions">
+            <button type="button" class="btn-secondary" :disabled="isSaving" @click="close">
+              Cancelar
+            </button>
+            <button type="submit" class="btn-primary win-submit" :disabled="isSaving">
+              {{ isSaving ? 'Registrando...' : '🏆 Registrar y ganar el lead' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { computed, onMounted, ref } from 'vue';
+import { apiFetch } from '../apiClient.js';
+
+const props = defineProps({ lead: { type: Object, required: true } });
+const emit = defineEmits(['close', 'won']);
+
+const BANCOS = ['BCP', 'Interbank', 'Efectivo'];
+const EMITIR_OPCIONES = ['factura', 'boleta', 'nrus', 'rxh', 'c. interno'];
+
+const monto = ref('');
+const banco = ref('BCP');
+const emitir = ref('boleta');
+const vouchers = ref([]);
+const isSaving = ref(false);
+const errorMessage = ref('');
+const montoInput = ref(null);
+
+const clientName = computed(() => {
+  const lead = props.lead;
+  return (lead.full_name || '').trim() || lead.topic || `Lead #${lead.id}`;
+});
+
+onMounted(() => montoInput.value?.focus());
+
+function onVoucherChange(event) {
+  vouchers.value = Array.from(event.target.files || []).slice(0, 10);
+}
+
+function close() {
+  if (isSaving.value) return;
+  emit('close');
+}
+
+/**
+ * El cierre es una sola llamada: mueve el lead a la etapa ganadora, crea su
+ * proyecto (bloqueado) y registra el ingreso. Si falla, el lead no se mueve,
+ * y así no quedan proyectos ganados sin su primer pago registrado.
+ */
+async function submit() {
+  const amount = Number(monto.value);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    errorMessage.value = 'El monto del primer pago debe ser mayor a 0.';
+    return;
+  }
+
+  isSaving.value = true;
+  errorMessage.value = '';
+  try {
+    const fd = new FormData();
+    fd.append('monto', String(amount));
+    fd.append('banco', banco.value);
+    fd.append('emitir', emitir.value);
+    for (const file of vouchers.value) fd.append('receipts', file);
+
+    const response = await apiFetch(`/api/leads/${props.lead.id}/win`, { method: 'POST', body: fd });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No se pudo registrar el cierre de venta.');
+
+    emit('won', data);
+  } catch (error) {
+    errorMessage.value = error.message;
+  } finally {
+    isSaving.value = false;
+  }
+}
+</script>
+
+<style scoped>
+.win-modal {
+  max-width: 540px;
+  overflow: hidden;
+}
+
+.win-hero {
+  padding: 1.75rem 1.5rem 1.4rem;
+  text-align: center;
+  background: linear-gradient(160deg, rgba(46, 125, 70, 0.14), rgba(46, 125, 70, 0.02));
+  border-bottom: 1px solid var(--border-color);
+}
+
+.win-confetti {
+  font-size: 2.2rem;
+  display: block;
+  line-height: 1;
+  margin-bottom: 0.5rem;
+}
+
+.win-title {
+  margin: 0 0 0.35rem;
+  font-family: var(--font-heading);
+  font-size: 1.35rem;
+  color: var(--accent-emerald);
+}
+
+.win-subtitle {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.win-subtitle strong { color: var(--text-main); }
+
+.win-alert {
+  border-color: rgba(200, 85, 50, 0.4);
+  color: var(--accent-rose);
+  margin-bottom: 1rem;
+}
+
+.win-monto-input {
+  font-family: var(--font-mono);
+  font-size: 1.35rem;
+  font-weight: 600;
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+
+.win-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1rem;
+}
+
+.win-hint {
+  margin: 0.45rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+/* Recordatorio de que el proyecto no se abre hasta el visto bueno de finanzas. */
+.win-flow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 1.1rem 0 0.25rem;
+  padding: 0.6rem;
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.win-step {
+  font-family: var(--font-mono);
+  font-size: 0.63rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.win-step.is-done { color: var(--accent-emerald); font-weight: 600; }
+.win-arrow { font-size: 0.7rem; color: var(--text-muted); }
+
+.win-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 1.25rem;
+}
+
+.win-actions .btn-secondary,
+.win-actions .win-submit {
+  width: auto;
+  padding: 0.6rem 1.15rem;
+  font-size: 0.85rem;
+}
+</style>

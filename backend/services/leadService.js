@@ -77,8 +77,19 @@ export class LeadService {
 
   async getAllLeads() {
     return db('leads')
-      .select('leads.*', 'projects.id as project_id', 'projects.status as project_status')
+      .select(
+        'leads.*',
+        'projects.id as project_id',
+        'projects.status as project_status',
+        'pago.id as initial_payment_id',
+        'pago.code as initial_payment_code',
+        'pago.monto as initial_payment_monto',
+        'pago.estado as initial_payment_estado'
+      )
       .leftJoin('projects', 'projects.lead_id', 'leads.id')
+      .leftJoin('finance_income as pago', function () {
+        this.on('pago.lead_id', '=', 'leads.id').andOn('pago.is_initial_payment', '=', db.raw('1'));
+      })
       .orderBy('leads.created_at', 'desc');
   }
 
@@ -113,8 +124,19 @@ export class LeadService {
 
   async getLeadById(id) {
     return db('leads')
-      .select('leads.*', 'projects.id as project_id', 'projects.status as project_status')
+      .select(
+        'leads.*',
+        'projects.id as project_id',
+        'projects.status as project_status',
+        'pago.id as initial_payment_id',
+        'pago.code as initial_payment_code',
+        'pago.monto as initial_payment_monto',
+        'pago.estado as initial_payment_estado'
+      )
       .leftJoin('projects', 'projects.lead_id', 'leads.id')
+      .leftJoin('finance_income as pago', function () {
+        this.on('pago.lead_id', '=', 'leads.id').andOn('pago.is_initial_payment', '=', db.raw('1'));
+      })
       .where('leads.id', id)
       .first();
   }

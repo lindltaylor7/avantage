@@ -17,7 +17,28 @@
             ✉️ {{ project.client_email }} | 📱 {{ project.client_phone }} | {{ project.academic_level }} — {{ project.field_of_study }}
           </p>
         </div>
-        <span :class="['status-pill', statusClass(project.status)]" style="font-size: 0.85rem; padding: 0.35rem 0.9rem;">{{ project.status }}</span>
+        <span :class="['status-pill', statusClass(project.status)]" style="font-size: 0.85rem; padding: 0.35rem 0.9rem;">
+          <span v-if="isLocked">🔒 </span>{{ project.status }}
+        </span>
+      </div>
+
+      <!-- Mientras Finanzas no verifique el primer pago, el proyecto se consulta
+           pero no se gestiona: el backend rechaza igual cualquier cambio. -->
+      <div v-if="isLocked" class="locked-banner">
+        <div class="locked-banner-text">
+          <h4>⚠️ Esperando la verificación del primer pago</h4>
+          <p>
+            El pago de <strong>S/ {{ formatMoney(project.initial_payment?.monto) }}</strong>
+            ({{ project.initial_payment?.code }}) está en estado
+            <strong>{{ project.initial_payment?.estado }}</strong>. Hasta que Finanzas lo
+            verifique, este proyecto es de solo lectura: no se pueden crear tareas, asignar
+            equipo ni publicar avances.
+          </p>
+        </div>
+        <label v-if="project.initial_payment?.estado === 'pendiente'" class="locked-upload-btn">
+          <input type="file" accept="image/*,application/pdf" multiple hidden :disabled="isUploadingVoucher" @change="uploadVoucher" />
+          {{ isUploadingVoucher ? 'Subiendo...' : '📎 Subir voucher' }}
+        </label>
       </div>
 
       <!-- Equipo y Plazo -->
@@ -28,15 +49,15 @@
           <div class="form-group" style="margin-bottom: 0;">
             <label class="form-label">📅 Fecha límite</label>
             <div style="display: flex; gap: 0.5rem;">
-              <input v-model="deadlineInput" type="date" class="form-input" style="border-radius: 10px;" />
-              <button class="btn-secondary" style="white-space: nowrap;" @click="saveDeadline">Guardar</button>
+              <input v-model="deadlineInput" type="date" class="form-input" style="border-radius: 10px;" :disabled="isLocked" />
+              <button class="btn-secondary" style="white-space: nowrap;" :disabled="isLocked" @click="saveDeadline">Guardar</button>
             </div>
             <p v-if="isOverdue" style="color: var(--accent-rose); font-size: 0.78rem; margin-top: 0.4rem;">⚠️ Plazo vencido</p>
           </div>
 
           <div class="form-group" style="margin-bottom: 0;">
             <label class="form-label">🧭 Líder del Proyecto</label>
-            <select :value="project.leader_id || ''" class="form-select" @change="saveLeader($event.target.value)">
+            <select :value="project.leader_id || ''" class="form-select" :disabled="isLocked" @change="saveLeader($event.target.value)">
               <option value="">Sin asignar</option>
               <option v-for="member in teamDirectory" :key="member.id" :value="member.id">{{ member.name }}</option>
             </select>
@@ -48,18 +69,18 @@
           <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem;">
             <span v-for="collaborator in project.collaborators" :key="collaborator.id" class="collaborator-chip">
               {{ collaborator.name }}
-              <button type="button" title="Quitar colaborador" @click="removeCollaborator(collaborator.id)">✕</button>
+              <button v-if="!isLocked" type="button" title="Quitar colaborador" @click="removeCollaborator(collaborator.id)">✕</button>
             </span>
             <span v-if="!project.collaborators || project.collaborators.length === 0" style="color: var(--text-muted); font-size: 0.82rem;">
               Sin colaboradores asignados.
             </span>
           </div>
           <div style="display: flex; gap: 0.5rem;">
-            <select v-model="collaboratorToAdd" class="form-select">
+            <select v-model="collaboratorToAdd" class="form-select" :disabled="isLocked">
               <option value="" disabled>Selecciona un colaborador para agregar</option>
               <option v-for="member in availableCollaborators" :key="member.id" :value="member.id">{{ member.name }}</option>
             </select>
-            <button class="btn-secondary" style="white-space: nowrap;" :disabled="!collaboratorToAdd" @click="addCollaborator">Agregar</button>
+            <button class="btn-secondary" style="white-space: nowrap;" :disabled="!collaboratorToAdd || isLocked" @click="addCollaborator">Agregar</button>
           </div>
         </div>
       </div>
@@ -96,8 +117,9 @@
               class="form-input"
               placeholder="Ej: Redactar marco teórico, capítulo 2..."
               style="border-radius: 10px;"
+              :disabled="isLocked"
             />
-            <button type="submit" class="btn-primary" style="width: auto; padding: 0 1.5rem; border-radius: 10px;" :disabled="!newTaskTitle.trim()">
+            <button type="submit" class="btn-primary" style="width: auto; padding: 0 1.5rem; border-radius: 10px;" :disabled="!newTaskTitle.trim() || isLocked">
               Agregar
             </button>
           </form>
@@ -124,7 +146,7 @@
                 v-for="task in tasksByColumn[col.key]"
                 :key="task.id"
                 class="task-card"
-                draggable="true"
+                :draggable="!isLocked"
                 @dragstart="onDragStart(task)"
                 @dragend="hoveredColumn = null"
               >
@@ -132,13 +154,14 @@
                   <input
                     type="checkbox"
                     :checked="task.status === 'completado'"
+                    :disabled="isLocked"
                     @change="toggleComplete(task, $event.target.checked)"
                   />
                   <span :style="{ textDecoration: task.status === 'completado' ? 'line-through' : 'none', opacity: task.status === 'completado' ? 0.6 : 1 }">
                     {{ task.title }}
                   </span>
                 </label>
-                <button class="task-delete-btn" title="Eliminar tarea" @click="removeTask(task)">✕</button>
+                <button v-if="!isLocked" class="task-delete-btn" title="Eliminar tarea" @click="removeTask(task)">✕</button>
               </div>
 
               <div v-if="(tasksByColumn[col.key] || []).length === 0" class="kanban-empty">
@@ -160,11 +183,12 @@
                 class="form-textarea"
                 style="min-height: 80px;"
                 placeholder="Describe el hito o avance (ej: Se sustentó el capítulo 1 ante el asesor)..."
+                :disabled="isLocked"
               ></textarea>
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
-              <input type="file" @change="onFileSelected" class="update-file-input" />
-              <button type="submit" class="btn-primary" style="width: auto; padding: 0 1.5rem; border-radius: 10px;" :disabled="!newUpdateContent.trim() || isPublishing">
+              <input type="file" class="update-file-input" :disabled="isLocked" @change="onFileSelected" />
+              <button type="submit" class="btn-primary" style="width: auto; padding: 0 1.5rem; border-radius: 10px;" :disabled="!newUpdateContent.trim() || isPublishing || isLocked">
                 {{ isPublishing ? 'Publicando...' : 'Publicar Actualización' }}
               </button>
             </div>
@@ -226,6 +250,40 @@ const collaboratorToAdd = ref('');
 const newUpdateContent = ref('');
 const newUpdateFile = ref(null);
 const isPublishing = ref(false);
+const isUploadingVoucher = ref(false);
+
+/**
+ * El proyecto está a la espera de que Finanzas verifique su primer pago. Lo
+ * decide el backend (`is_locked`), que además rechaza cualquier cambio: aquí
+ * solo se refleja en la UI para no ofrecer botones que van a fallar.
+ */
+const isLocked = computed(() => Boolean(project.value?.is_locked));
+
+function formatMoney(value) {
+  return Number(value || 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** Atajo para que el responsable del proyecto adjunte el voucher del primer pago. */
+async function uploadVoucher(event) {
+  const files = Array.from(event.target.files || []).slice(0, 10);
+  event.target.value = '';
+  const incomeId = project.value?.initial_payment?.id;
+  if (files.length === 0 || !incomeId) return;
+
+  isUploadingVoucher.value = true;
+  try {
+    const fd = new FormData();
+    for (const file of files) fd.append('receipts', file);
+    const response = await apiFetch(`/api/finance/income/${incomeId}/receipts`, { method: 'POST', body: fd });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No se pudo subir el voucher.');
+    await fetchProject();
+  } catch (err) {
+    alert('No se pudo subir el voucher: ' + err.message);
+  } finally {
+    isUploadingVoucher.value = false;
+  }
+}
 
 const tasksByColumn = computed(() => {
   const grouped = {};
@@ -482,6 +540,7 @@ async function moveTaskToStatus(task, newStatus) {
 function statusClass(status) {
   const map = {
     'Creado': 'status-creado',
+    'Activo': 'status-activo',
     'Iniciado': 'status-iniciado',
     'En Desarrollo': 'status-en-desarrollo',
     'Entregado': 'status-entregado',
@@ -511,7 +570,51 @@ onMounted(() => {
   font-weight: 600;
 }
 
-.status-creado { background: rgba(46, 125, 70, 0.15); color: #5FBE79; border: 1px solid rgba(46, 125, 70, 0.35); }
+.status-creado { background: rgba(191, 194, 199, 0.18); color: var(--text-muted); border: 1px solid rgba(191, 194, 199, 0.4); }
+.status-activo { background: rgba(46, 125, 70, 0.15); color: #5FBE79; border: 1px solid rgba(46, 125, 70, 0.35); }
+
+/* Aviso de proyecto en espera del visto bueno de Finanzas. */
+.locked-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.5rem;
+  border: 1px solid rgba(222, 117, 75, 0.45);
+  border-left: 4px solid var(--accent-amber);
+  border-radius: var(--radius-md);
+  background: rgba(222, 117, 75, 0.07);
+}
+
+.locked-banner-text { flex: 1 1 340px; }
+
+.locked-banner h4 {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+  color: var(--accent-amber);
+}
+
+.locked-banner p {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--text-sub);
+}
+
+.locked-upload-btn {
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent-amber);
+  color: var(--accent-amber);
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.locked-upload-btn:hover { background: var(--accent-amber); color: #fff; }
 .status-iniciado { background: rgba(201, 146, 46, 0.15); color: var(--accent-amber); border: 1px solid rgba(201, 146, 46, 0.35); }
 .status-en-desarrollo { background: rgba(111, 129, 37, 0.15); color: var(--on-tint-strong); border: 1px solid rgba(111, 129, 37, 0.35); }
 .status-entregado { background: rgba(191, 194, 199, 0.15); color: var(--accent-silver); border: 1px solid rgba(191, 194, 199, 0.35); }

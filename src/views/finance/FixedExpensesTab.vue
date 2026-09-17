@@ -280,9 +280,11 @@ async function fetchRows() {
   try {
     const response = await apiFetch('/api/finance/fixed-expenses');
     const data = await response.json();
-    if (response.ok) rows.value = data.expenses || [];
+    // Un fallo del servidor no puede parecer "sin gastos fijos".
+    if (!response.ok) throw new Error(data.error || 'No se pudieron obtener los gastos fijos.');
+    rows.value = data.expenses || [];
   } catch (error) {
-    errorMessage.value = 'No se pudieron obtener los gastos fijos.';
+    errorMessage.value = error.message || 'No se pudieron obtener los gastos fijos.';
   } finally {
     isLoading.value = false;
   }
