@@ -228,6 +228,7 @@
           <table class="data-table ledger-table">
             <thead>
               <tr>
+                <th class="ledger-col-expand" aria-label="Plan de cobro"></th>
                 <th>Código</th>
                 <th>
                   <button type="button" class="ledger-sort" :class="{ 'is-active': sort.key === 'fecha' }" @click="toggleSort('fecha')">
@@ -250,16 +251,52 @@
               </tr>
             </thead>
             <tbody>
+              <template v-for="row in paged" :key="row.id">
               <tr
-                v-for="row in paged"
-                :key="row.id"
-                :class="row.estado === 'pagado' ? 'ledger-row-in' : 'ledger-row-pending'"
+                :class="[
+                  row.estado === 'pagado' ? 'ledger-row-in' : 'ledger-row-pending',
+                  { 'is-expanded': expandedId === row.id },
+                ]"
               >
+                <td class="ledger-col-expand">
+                  <button
+                    v-if="row.lead_id"
+                    type="button"
+                    class="plan-toggle"
+                    :class="{ 'is-open': expandedId === row.id }"
+                    :aria-expanded="expandedId === row.id"
+                    :title="expandedId === row.id
+                      ? 'Ocultar el plan de cobro'
+                      : 'Ver y agregar los pagos de este lead'"
+                    @click="toggleExpand(row)"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="m9 6 6 6-6 6" />
+                    </svg>
+                  </button>
+                </td>
                 <td class="ledger-code">{{ row.code }}</td>
                 <td class="ledger-date">{{ formatDate(row.fecha) }}</td>
                 <td>
                   <span class="ledger-stack-main">{{ row.lead_name || "— Sin asociar —" }}</span>
                   <span v-if="row.lead_dni" class="lead-dni">DNI {{ row.lead_dni }}</span>
+                  <button
+                    v-if="plans[row.lead_id]?.total != null"
+                    type="button"
+                    class="plan-mini"
+                    :title="`Registrado S/ ${formatAmount(plans[row.lead_id].registered)} ` +
+                      `de un precio total de S/ ${formatAmount(plans[row.lead_id].total)} · clic para ver el plan`"
+                    @click="toggleExpand(row)"
+                  >
+                    <span class="plan-mini-bar">
+                      <span class="plan-mini-fill" :style="{ width: `${plans[row.lead_id].pct}%` }"></span>
+                    </span>
+                    <span class="plan-mini-text">
+                      S/ {{ formatAmount(plans[row.lead_id].registered) }}
+                      de S/ {{ formatAmount(plans[row.lead_id].total) }}
+                      · {{ plans[row.lead_id].pct }}%
+                    </span>
+                  </button>
                 </td>
                 <td>
                   <span class="ledger-eyebrow">{{ row.emitir }}</span>
@@ -403,6 +440,17 @@
                   </div>
                 </td>
               </tr>
+              <tr v-if="expandedId === row.id && plans[row.lead_id]" class="plan-row">
+                <td :colspan="12">
+                  <PaymentPlanPanel
+                    :plan="plans[row.lead_id]"
+                    :lead-name="row.lead_name || '— Sin asociar —'"
+                    :current-id="row.id"
+                    @saved="onPlanSaved"
+                  />
+                </td>
+              </tr>
+              </template>
             </tbody>
           </table>
         </div>
@@ -427,14 +475,13 @@ import { apiFetch } from "../../apiClient.js";
 import { hasPermission } from "../../auth.js";
 import { isPdfReceipt, loadReceiptUrl } from "./receiptImage.js";
 import { dayOnly, formatAmount, formatDate } from "./format.js";
+import { BANCOS, CUOTAS, EMITIR_OPCIONES, calcItf } from "./incomeOptions.js";
 import { useLedgerTable } from "./useLedgerTable.js";
 import LedgerPagination from "./LedgerPagination.vue";
+import PaymentPlanPanel from "./PaymentPlanPanel.vue";
 import SendTributarioModal from "./SendTributarioModal.vue";
 import "./ledger.css";
 
-const CUOTAS = ["1era", "2da", "3era"];
-const EMITIR_OPCIONES = ["factura", "boleta", "nrus", "rxh", "c. interno"];
-const BANCOS = ["BCP", "Interbank", "Efectivo"];
 // Debe coincidir con MAX_FINANCE_RECEIPTS del backend.
 const MAX_RECEIPTS = 10;
 const MESES = [
@@ -460,6 +507,8 @@ const verifySaving = ref(null);
 const canVerify = hasPermission("finance.verify");
 const sendModalRow = ref(null);
 const editingRow = ref(null);
+/** Fila cuyo plan de cobro está desplegado (solo uno abierto a la vez). */
+const expandedId = ref(null);
 const editingTotal = ref(false);
 const totalAmountDraft = ref("");
 let pendingFiles = [];
@@ -506,6 +555,55 @@ const {
 });
 
 /**
+ * Plan de cobro de cada lead con ingresos: su precio total del cierre, cuánto
+ * se lleva registrado en cuotas y en qué etapa está cada sol. Se arma sobre la
+ * lista completa de ingresos (no la página visible) para que el desplegable de
+ * una fila muestre todas las cuotas del lead, no solo las que pasaron el filtro.
+ */
+const plans = computed(() => {
+  const byLead = {};
+  for (const row of rows.value) {
+    if (!row.lead_id) continue;
+    const plan = byLead[row.lead_id] || (byLead[row.lead_id] = {
+      leadId: row.lead_id,
+      payments: [],
+      registered: 0,
+      verificado: 0,
+      porVerificar: 0,
+      pendiente: 0,
+    });
+    plan.payments.push(row);
+    const monto = Number(row.monto) || 0;
+    plan.registered += monto;
+    if (row.estado === "verificado") plan.verificado += monto;
+    else if (row.estado === "pagado") plan.porVerificar += monto;
+    else plan.pendiente += monto;
+  }
+
+  const totalByLead = new Map(leads.value.map((lead) => [lead.id, lead.total_amount]));
+  for (const plan of Object.values(byLead)) {
+    plan.payments.sort((a, b) => dayOnly(a.fecha).localeCompare(dayOnly(b.fecha)) || a.id - b.id);
+    plan.registered = Math.round(plan.registered * 100) / 100;
+    const total = totalByLead.get(plan.leadId);
+    plan.total = total != null ? Number(total) : null;
+    plan.saldo = plan.total != null ? Math.round((plan.total - plan.registered) * 100) / 100 : null;
+    plan.pct = plan.total > 0 ? Math.min(100, Math.round((plan.registered / plan.total) * 100)) : 0;
+  }
+  return byLead;
+});
+
+function toggleExpand(row) {
+  expandedId.value = expandedId.value === row.id ? null : row.id;
+}
+
+/** El desplegable agregó un pago o cambió el total: hay que releer ambas cosas. */
+async function onPlanSaved(event) {
+  successMessage.value = event?.message || "Plan de cobro actualizado.";
+  setTimeout(() => { successMessage.value = ""; }, 3000);
+  await Promise.all([fetchRows(), fetchLeads()]);
+}
+
+/**
  * Totales del subconjunto que se está mirando (búsqueda y filtros incluidos),
  * separados por etapa del cobro: solo lo verificado es dinero confirmado y es
  * lo que suma en las cifras generales de Finanzas.
@@ -548,12 +646,6 @@ const mesPreview = computed(() => {
 });
 
 const itfPreview = computed(() => calcItf(form.monto));
-
-function calcItf(monto) {
-  const a = Math.abs(Number(monto) || 0);
-  if (a < 1000) return 0;
-  return Math.round(Math.floor(a / 1000) * 0.05 * 100) / 100;
-}
 
 function onFileChange(event) {
   pendingFiles = Array.from(event.target.files || []).slice(0, MAX_RECEIPTS);
@@ -864,6 +956,80 @@ onBeforeUnmount(releaseUrls);
 </script>
 
 <style scoped>
+/* --------------------------------------------------- Desplegable del plan */
+
+/* Columna del chevron: lo más angosta posible, que la tabla ya va apretada. */
+.ledger-tab :deep(.ledger-table) th.ledger-col-expand,
+.ledger-tab :deep(.ledger-table) td.ledger-col-expand {
+  width: 1%;
+  padding-right: 0;
+}
+
+.plan-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.plan-toggle svg { width: 14px; height: 14px; transition: transform 0.18s ease; }
+.plan-toggle:hover { color: var(--primary); border-color: var(--border-color); }
+.plan-toggle.is-open { color: var(--primary); }
+.plan-toggle.is-open svg { transform: rotate(90deg); }
+
+/* Resumen del plan dentro de la celda del lead: el precio total del cierre
+   sigue a la vista aunque la fila solo muestre el monto de su cuota. */
+.plan-mini {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  width: 100%;
+  max-width: 190px;
+  margin-top: 0.3rem;
+  padding: 0;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.plan-mini-bar {
+  display: block;
+  height: 4px;
+  border-radius: 9999px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.plan-mini-fill {
+  display: block;
+  height: 100%;
+  background: var(--primary);
+  transition: width 0.25s ease;
+}
+
+.plan-mini-text {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: var(--text-muted);
+}
+
+.plan-mini:hover .plan-mini-text { color: var(--text-main); }
+
+.ledger-tab :deep(.ledger-table) tr.is-expanded > td { background: var(--surface-1); }
+
+.ledger-tab :deep(.ledger-table) tr.plan-row > td {
+  padding: 0.9rem 1.05rem 1rem;
+  background: var(--surface-1);
+}
+
 .lead-total-box {
   display: flex;
   align-items: center;
