@@ -151,6 +151,7 @@
 
 .ledger-summary-item dd.is-in { color: var(--accent-emerald); }
 .ledger-summary-item dd.is-out { color: var(--accent-rose); }
+.ledger-summary-item dd.is-pending { color: var(--accent-amber); }
 
 /* ------------------------------------------------------------ Formulario */
 
@@ -198,6 +199,14 @@
 }
 
 .ledger-receipt-current input { width: auto; margin: 0; }
+
+/* Nota bajo el selector de archivos (no es una etiqueta clicable). */
+.ledger-receipt-hint {
+  margin: 0.5rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
 
 /* ----------------------------------------------------------------- Tabla */
 
@@ -412,6 +421,23 @@
 }
 
 .receipt-thumb-loading { font-size: 0.75rem; color: var(--text-muted); }
+
+/* El archivo del comprobante ya no está en el servidor: se avisa en la propia
+   miniatura en vez de dejarla cargando para siempre. */
+.receipt-thumb-missing {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--accent-rose);
+  background: rgba(200, 85, 50, 0.08);
+  border: 1px dashed var(--accent-rose);
+  border-radius: var(--radius-sm);
+  cursor: help;
+}
 
 .receipt-remove {
   position: absolute;

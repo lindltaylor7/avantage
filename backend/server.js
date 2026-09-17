@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { OllamaService } from './services/ollamaService.js';
 import { EmailService } from './services/emailService.js';
@@ -445,6 +446,23 @@ app.get('/api/finance/summary', requireAuth, requirePermission('finance.view'), 
  * Libro contable de Finanzas (pestañas INGRESOS, LIBRO DIARIO y GASTOS FIJOS).
  * Todo el módulo se controla con el permiso `finance.view`.
  */
+
+/**
+ * Sirve un archivo de `uploads/finance-receipts/`. Si la fila apunta a un
+ * archivo que ya no está en disco (un despliegue que no conservó `uploads/`,
+ * por ejemplo) responde un 404 explícito en vez de dejar que `res.sendFile`
+ * falle a medias: así la UI puede avisar en lugar de quedarse cargando.
+ */
+function sendFinanceFile(res, filename, label = 'El comprobante') {
+  const filePath = path.join(financeReceiptDir, filename);
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({
+      error: `${label} ya no está en el servidor (el archivo se perdió).`,
+      missingFile: true
+    });
+  }
+  res.sendFile(filePath);
+}
 app.get('/api/finance/leads-directory', requireAuth, requirePermission('finance.view'), async (req, res) => {
   try {
     const leads = await financeLedgerService.listLeadsDirectory();
@@ -516,8 +534,8 @@ app.delete('/api/finance/income/:id', requireAuth, requirePermission('finance.vi
 
 app.post('/api/finance/income/:id/receipts', requireAuth, requirePermission('finance.view'), uploadFinanceReceipt, async (req, res) => {
   try {
-    const receipt = await financeLedgerService.addIncomeReceipt(req.params.id, req.file);
-    res.status(201).json({ receipt });
+    const receipts = await financeLedgerService.addIncomeReceipts(req.params.id, req.receipts);
+    res.status(201).json({ receipts, receipt: receipts[0] || null });
   } catch (error) {
     console.error('❌ Error al subir el comprobante del ingreso:', error);
     res.status(400).json({ error: error.message || 'Error al subir el comprobante.' });
@@ -538,7 +556,7 @@ app.get('/api/finance/income/:id/tributario', requireAuth, requirePermission('fi
   try {
     const income = await financeLedgerService.getIncomeById(req.params.id);
     if (!income || !income.tributario_filename) return res.status(404).json({ error: 'Archivo no encontrado.' });
-    res.sendFile(path.join(financeReceiptDir, income.tributario_filename));
+    sendFinanceFile(res, income.tributario_filename, 'El archivo tributario');
   } catch (error) {
     console.error('❌ Error al obtener el archivo tributario:', error);
     res.status(500).json({ error: 'Error al obtener el archivo tributario.', details: error.message });
@@ -612,7 +630,7 @@ app.get('/api/finance/receipts/:id', requireAuth, requirePermission('finance.vie
   try {
     const receipt = await financeLedgerService.getReceiptById(req.params.id);
     if (!receipt) return res.status(404).json({ error: 'Comprobante no encontrado.' });
-    res.sendFile(path.join(financeReceiptDir, receipt.filename));
+    sendFinanceFile(res, receipt.filename);
   } catch (error) {
     console.error('❌ Error al obtener el comprobante:', error);
     res.status(500).json({ error: 'Error al obtener el comprobante.', details: error.message });
@@ -645,7 +663,7 @@ app.post('/api/finance/journal', requireAuth, requirePermission('finance.view'),
     const { fecha, detalle, monto, moneda, banco, estado, area, asientoPorDestino } = req.body || {};
     const record = await financeLedgerService.createJournal({
       fecha, detalle, monto, moneda, banco, estado, area, asientoPorDestino,
-      receipt: req.file, createdBy: req.user.id
+      receipts: req.receipts, createdBy: req.user.id
     });
     res.status(201).json({ journal: record });
   } catch (error) {
@@ -656,10 +674,10 @@ app.post('/api/finance/journal', requireAuth, requirePermission('finance.view'),
 
 app.put('/api/finance/journal/:id', requireAuth, requirePermission('finance.view'), uploadFinanceReceipt, async (req, res) => {
   try {
-    const { fecha, detalle, monto, moneda, banco, estado, area, asientoPorDestino, removeReceipt } = req.body || {};
+    const { fecha, detalle, monto, moneda, banco, estado, area, asientoPorDestino } = req.body || {};
     const record = await financeLedgerService.updateJournal(req.params.id, {
       fecha, detalle, monto, moneda, banco, estado, area, asientoPorDestino,
-      receipt: req.file, removeReceipt: removeReceipt === 'true' || removeReceipt === true
+      receipts: req.receipts
     });
     if (!record) return res.status(404).json({ error: 'Asiento no encontrado.' });
     res.json({ journal: record });
@@ -669,14 +687,35 @@ app.put('/api/finance/journal/:id', requireAuth, requirePermission('finance.view
   }
 });
 
-app.get('/api/finance/journal/:id/receipt', requireAuth, requirePermission('finance.view'), async (req, res) => {
+// Los comprobantes del libro diario son 1:N, igual que los de los ingresos.
+app.post('/api/finance/journal/:id/receipts', requireAuth, requirePermission('finance.view'), uploadFinanceReceipt, async (req, res) => {
   try {
-    const row = await financeLedgerService.getJournalById(req.params.id);
-    if (!row || !row.receipt_filename) return res.status(404).json({ error: 'Comprobante no encontrado.' });
-    res.sendFile(path.join(financeReceiptDir, row.receipt_filename));
+    const receipts = await financeLedgerService.addJournalReceipts(req.params.id, req.receipts);
+    res.status(201).json({ receipts });
+  } catch (error) {
+    console.error('❌ Error al subir el comprobante del libro diario:', error);
+    res.status(400).json({ error: error.message || 'Error al subir el comprobante.' });
+  }
+});
+
+app.get('/api/finance/journal-receipts/:id', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const receipt = await financeLedgerService.getJournalReceiptById(req.params.id);
+    if (!receipt) return res.status(404).json({ error: 'Comprobante no encontrado.' });
+    sendFinanceFile(res, receipt.filename);
   } catch (error) {
     console.error('❌ Error al obtener el comprobante del libro diario:', error);
     res.status(500).json({ error: 'Error al obtener el comprobante.', details: error.message });
+  }
+});
+
+app.delete('/api/finance/journal-receipts/:id', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    await financeLedgerService.deleteJournalReceipt(req.params.id);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error al eliminar el comprobante del libro diario:', error);
+    res.status(500).json({ error: 'Error al eliminar el comprobante.', details: error.message });
   }
 });
 

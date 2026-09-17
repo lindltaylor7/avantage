@@ -123,14 +123,18 @@
             <input ref="tributarioInput" type="file" class="form-input" @change="onTributarioChange" />
           </div>
           <div v-if="!editingRow" class="form-group ledger-form-wide">
-            <label class="form-label">Comprobante (imagen o PDF, opcional)</label>
+            <label class="form-label">Comprobantes (imágenes o PDF, opcional)</label>
             <input
               ref="fileInput"
               type="file"
               accept="image/*,application/pdf"
+              multiple
               class="form-input"
               @change="onFileChange"
             />
+            <p class="ledger-receipt-hint">
+              Puedes seleccionar varios archivos a la vez (hasta {{ MAX_RECEIPTS }}).
+            </p>
           </div>
         </div>
 
@@ -289,7 +293,7 @@
                       v-for="rcpt in row.receipts"
                       :key="rcpt.id"
                       class="receipt-thumb"
-                      :title="rcpt.original_name || 'Comprobante'"
+                      :title="receiptTitle(rcpt)"
                     >
                       <a
                         v-if="receiptUrls[rcpt.id]"
@@ -301,6 +305,7 @@
                         <span v-if="isPdfReceipt(rcpt.mime_type, rcpt.original_name)" class="receipt-thumb-pdf">PDF</span>
                         <img v-else :src="receiptUrls[rcpt.id]" alt="Comprobante" />
                       </a>
+                      <span v-else-if="rcpt.missing" class="receipt-thumb-missing">!</span>
                       <span v-else class="receipt-thumb-loading">…</span>
                       <button
                         type="button"
@@ -309,12 +314,13 @@
                         @click="removeReceipt(rcpt.id)"
                       >✕</button>
                     </span>
-                    <label class="receipt-add" title="Agregar comprobante (imagen o PDF)">
+                    <label class="receipt-add" title="Agregar comprobantes (imágenes o PDF)">
                       <input
                         type="file"
                         accept="image/*,application/pdf"
+                        multiple
                         hidden
-                        @change="(e) => uploadReceipt(row.id, e)"
+                        @change="(e) => uploadReceipts(row.id, e)"
                       />
                       +
                     </label>
@@ -368,6 +374,8 @@ import "./ledger.css";
 const CUOTAS = ["1era", "2da", "3era"];
 const EMITIR_OPCIONES = ["factura", "boleta", "nrus", "rxh", "c. interno"];
 const BANCOS = ["BCP", "Interbank", "Efectivo"];
+// Debe coincidir con MAX_FINANCE_RECEIPTS del backend.
+const MAX_RECEIPTS = 10;
 const MESES = [
   "enero", "febrero", "marzo", "abril", "mayo", "junio",
   "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
@@ -388,7 +396,7 @@ const tributarioInput = ref(null);
 const estadoSaving = ref(null);
 const sendModalRow = ref(null);
 const editingRow = ref(null);
-let pendingFile = null;
+let pendingFiles = [];
 let pendingTributarioFile = null;
 
 const {
@@ -447,7 +455,13 @@ function calcItf(monto) {
 }
 
 function onFileChange(event) {
-  pendingFile = event.target.files?.[0] || null;
+  pendingFiles = Array.from(event.target.files || []).slice(0, MAX_RECEIPTS);
+}
+
+/** Texto del tooltip de una miniatura, avisando si el archivo ya no está. */
+function receiptTitle(rcpt) {
+  const name = rcpt.original_name || "Comprobante";
+  return rcpt.missing ? `${name} — el archivo ya no está en el servidor` : name;
 }
 
 function onTributarioChange(event) {
@@ -456,7 +470,7 @@ function onTributarioChange(event) {
 
 function resetForm() {
   Object.assign(form, emptyForm());
-  pendingFile = null;
+  pendingFiles = [];
   pendingTributarioFile = null;
   if (fileInput.value) fileInput.value.value = "";
   if (tributarioInput.value) tributarioInput.value.value = "";
@@ -505,10 +519,14 @@ function releaseUrls() {
 async function hydrateReceipts() {
   await Promise.all(paged.value.map(async (row) => {
     await Promise.all((row.receipts || []).map(async (rcpt) => {
-      if (receiptUrls[rcpt.id]) return;
+      // `missing` lo marca el backend: el archivo ya no está en disco, así que
+      // no tiene sentido pedirlo (la fila muestra el aviso en su lugar).
+      if (rcpt.missing || receiptUrls[rcpt.id]) return;
       try {
         receiptUrls[rcpt.id] = await loadReceiptUrl(`/api/finance/receipts/${rcpt.id}`);
-      } catch { /* la miniatura simplemente no se muestra */ }
+      } catch {
+        rcpt.missing = true;
+      }
     }));
     if (row.tributario_filename && !tributarioUrls[row.id]) {
       try {
@@ -568,9 +586,9 @@ async function submit() {
       );
     }
 
-    if (pendingFile && data.income?.id) {
+    if (pendingFiles.length > 0 && data.income?.id) {
       const fd = new FormData();
-      fd.append("receipt", pendingFile);
+      for (const file of pendingFiles) fd.append("receipts", file);
       await apiFetch(`/api/finance/income/${data.income.id}/receipts`, { method: "POST", body: fd });
     }
 
@@ -595,14 +613,14 @@ async function submit() {
   }
 }
 
-async function uploadReceipt(incomeId, event) {
-  const file = event.target.files?.[0];
+async function uploadReceipts(incomeId, event) {
+  const files = Array.from(event.target.files || []).slice(0, MAX_RECEIPTS);
   event.target.value = "";
-  if (!file) return;
+  if (files.length === 0) return;
   errorMessage.value = "";
   try {
     const fd = new FormData();
-    fd.append("receipt", file);
+    for (const file of files) fd.append("receipts", file);
     const response = await apiFetch(`/api/finance/income/${incomeId}/receipts`, {
       method: "POST",
       body: fd,

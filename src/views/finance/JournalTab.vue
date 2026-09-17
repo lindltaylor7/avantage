@@ -2,7 +2,8 @@
   <section class="ledger-tab">
     <p class="ledger-hint">
       Código autogenerado por día. El monto admite valores negativos y el ITF se calcula
-      sobre su valor absoluto.
+      sobre su valor absoluto. Los asientos <strong>pendientes</strong> no suman en los
+      totales de arriba: solo cuenta el dinero que ya se movió.
     </p>
 
     <div class="ledger-controls">
@@ -92,13 +93,22 @@
             <textarea v-model="form.detalle" class="form-textarea" rows="2" placeholder="Descripción del movimiento" required></textarea>
           </div>
           <div class="form-group ledger-form-wide">
-            <label class="form-label">Comprobante (imagen o PDF, opcional)</label>
-            <input ref="fileInput" type="file" accept="image/*,application/pdf" class="form-input" @change="onFileChange" />
-            <label v-if="editingRow?.receipt_filename" class="ledger-receipt-current">
-              <input v-model="removeReceipt" type="checkbox" />
-              Eliminar el comprobante actual
-              ({{ editingRow.receipt_original_name || 'archivo' }})
-            </label>
+            <label class="form-label">Comprobantes (imágenes o PDF, opcional)</label>
+            <input
+              ref="fileInput"
+              type="file"
+              accept="image/*,application/pdf"
+              multiple
+              class="form-input"
+              @change="onFileChange"
+            />
+            <p class="ledger-receipt-hint">
+              Puedes seleccionar varios archivos a la vez (hasta {{ MAX_RECEIPTS }}).
+              <template v-if="editingRow">
+                Se añaden a los {{ editingRow.receipts?.length || 0 }} que ya tiene; para
+                quitar alguno usa la ✕ de su miniatura en la tabla.
+              </template>
+            </p>
           </div>
         </div>
 
@@ -121,19 +131,23 @@
           <dt>Asientos</dt>
           <dd>{{ range.total }}</dd>
         </div>
-        <div class="ledger-summary-item">
+        <div class="ledger-summary-item" title="Solo asientos pagados">
           <dt>Ingresos</dt>
           <dd class="is-in">S/ {{ formatAmount(totals.ingresos) }}</dd>
         </div>
-        <div class="ledger-summary-item">
+        <div class="ledger-summary-item" title="Solo asientos pagados">
           <dt>Egresos</dt>
           <dd class="is-out">S/ {{ formatAmount(totals.egresos) }}</dd>
         </div>
-        <div class="ledger-summary-item">
+        <div class="ledger-summary-item" title="Ingresos menos egresos ya pagados">
           <dt>Neto</dt>
           <dd>S/ {{ formatAmount(totals.ingresos - totals.egresos) }}</dd>
         </div>
-        <div class="ledger-summary-item">
+        <div class="ledger-summary-item" title="Saldo de los asientos que siguen pendientes (no entra en el neto)">
+          <dt>Pendiente</dt>
+          <dd class="is-pending">S/ {{ formatAmount(totals.pendiente) }}</dd>
+        </div>
+        <div class="ledger-summary-item" title="Solo asientos pagados">
           <dt>ITF</dt>
           <dd>S/ {{ formatAmount(totals.itf) }}</dd>
         </div>
@@ -170,7 +184,7 @@
                 <th>Banco</th>
                 <th>Estado</th>
                 <th>Clasificación</th>
-                <th>Comprobante</th>
+                <th>Comprobantes</th>
                 <th class="ledger-col-actions" aria-label="Acciones"></th>
               </tr>
             </thead>
@@ -204,22 +218,43 @@
                   <span class="ledger-stack-main">{{ row.asiento_por_destino || '—' }}</span>
                 </td>
                 <td>
-                  <a
-                    v-if="row.receipt_filename"
-                    class="receipt-thumb"
-                    :href="receiptUrls[row.id] || undefined"
-                    target="_blank"
-                    rel="noopener"
-                    :title="row.receipt_original_name || 'Comprobante'"
-                  >
-                    <span v-if="!receiptUrls[row.id]" class="receipt-thumb-loading">…</span>
+                  <div class="receipt-cell">
                     <span
-                      v-else-if="isPdfReceipt(row.receipt_mime_type, row.receipt_original_name)"
-                      class="receipt-thumb-pdf"
-                    >PDF</span>
-                    <img v-else :src="receiptUrls[row.id]" alt="Comprobante" />
-                  </a>
-                  <span v-else class="ledger-muted">—</span>
+                      v-for="rcpt in row.receipts"
+                      :key="rcpt.id"
+                      class="receipt-thumb"
+                      :title="receiptTitle(rcpt)"
+                    >
+                      <a
+                        v-if="receiptUrls[rcpt.id]"
+                        :href="receiptUrls[rcpt.id]"
+                        target="_blank"
+                        rel="noopener"
+                        class="receipt-thumb-link"
+                      >
+                        <span v-if="isPdfReceipt(rcpt.mime_type, rcpt.original_name)" class="receipt-thumb-pdf">PDF</span>
+                        <img v-else :src="receiptUrls[rcpt.id]" alt="Comprobante" />
+                      </a>
+                      <span v-else-if="rcpt.missing" class="receipt-thumb-missing">!</span>
+                      <span v-else class="receipt-thumb-loading">…</span>
+                      <button
+                        type="button"
+                        class="receipt-remove"
+                        title="Eliminar comprobante"
+                        @click="removeReceipt(rcpt.id)"
+                      >✕</button>
+                    </span>
+                    <label class="receipt-add" title="Agregar comprobantes (imágenes o PDF)">
+                      <input
+                        type="file"
+                        accept="image/*,application/pdf"
+                        multiple
+                        hidden
+                        @change="(e) => uploadReceipts(row.id, e)"
+                      />
+                      +
+                    </label>
+                  </div>
                 </td>
                 <td class="ledger-col-actions">
                   <div class="ledger-row-actions">
@@ -264,6 +299,8 @@ import LedgerPagination from './LedgerPagination.vue';
 import './ledger.css';
 
 const BANCOS = ['BCP', 'Interbank', 'Efectivo'];
+// Debe coincidir con MAX_FINANCE_RECEIPTS del backend.
+const MAX_RECEIPTS = 10;
 
 const isFormOpen = ref(false);
 const isSaving = ref(false);
@@ -275,8 +312,7 @@ const rows = ref([]);
 const receiptUrls = reactive({});
 const fileInput = ref(null);
 const editingRow = ref(null);
-const removeReceipt = ref(false);
-let pendingFile = null;
+let pendingFiles = [];
 
 const {
   search, estado: estadoFilter, banco: bancoFilter, sort, page, pageSize,
@@ -295,19 +331,28 @@ const {
  * Totales del subconjunto que se está mirando (búsqueda y filtros incluidos),
  * solo sobre los asientos en soles: sumar monedas distintas daría una cifra
  * que no significa nada.
+ *
+ * Ingresos, egresos e ITF cuentan únicamente los asientos en estado "pagado":
+ * un asiento pendiente es dinero que todavía no entró ni salió, así que
+ * inflaría el neto. Lo pendiente se muestra aparte en su propio total.
  */
 const totals = computed(() => {
   let ingresos = 0;
   let egresos = 0;
   let itf = 0;
+  let pendiente = 0;
   for (const row of filtered.value) {
     if (row.moneda !== 'soles') continue;
     const monto = Number(row.monto) || 0;
+    if (row.estado !== 'pagado') {
+      pendiente += monto;
+      continue;
+    }
     if (monto >= 0) ingresos += monto;
     else egresos += -monto;
     itf += Number(row.itf) || 0;
   }
-  return { ingresos, egresos, itf };
+  return { ingresos, egresos, itf, pendiente };
 });
 
 const itfPreview = computed(() => calcItf(form.monto));
@@ -334,14 +379,19 @@ function emptyForm() {
 const form = reactive(emptyForm());
 
 function onFileChange(event) {
-  pendingFile = event.target.files?.[0] || null;
+  pendingFiles = Array.from(event.target.files || []).slice(0, MAX_RECEIPTS);
 }
 
 function resetForm() {
   Object.assign(form, emptyForm());
-  pendingFile = null;
-  removeReceipt.value = false;
+  pendingFiles = [];
   if (fileInput.value) fileInput.value.value = '';
+}
+
+/** Texto del tooltip de una miniatura, avisando si el archivo ya no está. */
+function receiptTitle(rcpt) {
+  const name = rcpt.original_name || 'Comprobante';
+  return rcpt.missing ? `${name} — el archivo ya no está en el servidor` : name;
 }
 
 function openCreate() {
@@ -391,10 +441,16 @@ function forgetReceiptUrl(id) {
 /** Solo se descargan las miniaturas de la página visible. */
 async function hydrateReceipts() {
   await Promise.all(paged.value.map(async (row) => {
-    if (!row.receipt_filename || receiptUrls[row.id]) return;
-    try {
-      receiptUrls[row.id] = await loadReceiptUrl(`/api/finance/journal/${row.id}/receipt`);
-    } catch { /* la miniatura simplemente no se muestra */ }
+    await Promise.all((row.receipts || []).map(async (rcpt) => {
+      // `missing` lo marca el backend: el archivo ya no está en disco, así que
+      // no tiene sentido pedirlo (la fila muestra el aviso en su lugar).
+      if (rcpt.missing || receiptUrls[rcpt.id]) return;
+      try {
+        receiptUrls[rcpt.id] = await loadReceiptUrl(`/api/finance/journal-receipts/${rcpt.id}`);
+      } catch {
+        rcpt.missing = true;
+      }
+    }));
   }));
 }
 
@@ -431,8 +487,7 @@ async function submit() {
     fd.append('estado', form.estado);
     fd.append('area', form.area);
     fd.append('asientoPorDestino', form.asientoPorDestino);
-    if (pendingFile) fd.append('receipt', pendingFile);
-    if (editing && removeReceipt.value) fd.append('removeReceipt', 'true');
+    for (const file of pendingFiles) fd.append('receipts', file);
 
     const response = await apiFetch(
       editing ? `/api/finance/journal/${editing.id}` : '/api/finance/journal',
@@ -443,8 +498,6 @@ async function submit() {
       throw new Error(data.error || (editing ? 'No se pudo editar el asiento.' : 'No se pudo registrar el asiento.'));
     }
 
-    // El comprobante pudo cambiar: se descarta la miniatura cacheada del asiento.
-    if (editing) forgetReceiptUrl(editing.id);
     successMessage.value = editing
       ? `Asiento ${data.journal?.code || ''} actualizado.`
       : `Asiento ${data.journal?.code || ''} registrado.`;
@@ -458,12 +511,46 @@ async function submit() {
   }
 }
 
+async function uploadReceipts(journalId, event) {
+  const files = Array.from(event.target.files || []).slice(0, MAX_RECEIPTS);
+  event.target.value = '';
+  if (files.length === 0) return;
+  errorMessage.value = '';
+  try {
+    const fd = new FormData();
+    for (const file of files) fd.append('receipts', file);
+    const response = await apiFetch(`/api/finance/journal/${journalId}/receipts`, {
+      method: 'POST',
+      body: fd
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No se pudo subir el comprobante.');
+    await fetchRows();
+  } catch (error) {
+    errorMessage.value = error.message;
+  }
+}
+
+async function removeReceipt(receiptId) {
+  if (!confirm('¿Eliminar este comprobante?')) return;
+  try {
+    const response = await apiFetch(`/api/finance/journal-receipts/${receiptId}`, { method: 'DELETE' });
+    if (!response.ok) throw new Error('No se pudo eliminar el comprobante.');
+    forgetReceiptUrl(receiptId);
+    await fetchRows();
+  } catch (error) {
+    errorMessage.value = error.message;
+  }
+}
+
 async function removeRow(id) {
   if (!confirm('¿Eliminar este asiento? Esta acción no se puede deshacer.')) return;
   try {
     const response = await apiFetch(`/api/finance/journal/${id}`, { method: 'DELETE' });
     if (!response.ok) throw new Error('No se pudo eliminar el asiento.');
-    forgetReceiptUrl(id);
+    for (const rcpt of rows.value.find((r) => r.id === id)?.receipts || []) {
+      forgetReceiptUrl(rcpt.id);
+    }
     if (editingRow.value?.id === id) closeForm();
     await fetchRows();
   } catch (error) {

@@ -64,25 +64,38 @@ const financeReceiptStorage = multer.diskStorage({
   }
 });
 
-const financeReceiptUpload = multer({
+// Máximo de comprobantes que se pueden adjuntar de una sola vez a un registro
+// de Finanzas (ingreso o asiento del libro diario).
+export const MAX_FINANCE_RECEIPTS = 10;
+
+const financeReceiptMulter = multer({
   storage: financeReceiptStorage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB por archivo
   fileFilter: (req, file, cb) => {
     const mime = file.mimetype || '';
     if (mime.startsWith('image/') || mime === 'application/pdf') return cb(null, true);
     cb(new Error('El comprobante debe ser una imagen o un PDF.'));
   }
-}).single('receipt');
+});
+
+// Un registro admite varios comprobantes, pero se siguen aceptando las
+// peticiones antiguas que mandan uno solo en el campo "receipt".
+const financeReceiptUpload = financeReceiptMulter.fields([
+  { name: 'receipts', maxCount: MAX_FINANCE_RECEIPTS },
+  { name: 'receipt', maxCount: MAX_FINANCE_RECEIPTS }
+]);
 
 /**
- * Middleware para rutas de Finanzas: sube (opcionalmente) un único comprobante
- * (imagen o PDF) en el campo "receipt" y normaliza los errores de multer a JSON.
+ * Middleware para rutas de Finanzas: sube (opcionalmente) uno o varios
+ * comprobantes (imágenes o PDF) y los deja normalizados en `req.receipts`
+ * (array, posiblemente vacío). Los errores de multer se devuelven como JSON.
  */
 export function uploadFinanceReceipt(req, res, next) {
   financeReceiptUpload(req, res, (err) => {
     if (err) {
       return res.status(400).json({ error: 'Error al subir el comprobante: ' + err.message });
     }
+    req.receipts = [...(req.files?.receipts || []), ...(req.files?.receipt || [])];
     next();
   });
 }

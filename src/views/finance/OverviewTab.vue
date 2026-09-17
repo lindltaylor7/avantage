@@ -4,6 +4,7 @@
       <p class="ledger-hint">
         Ingresos (pestaña INGRESOS + asientos positivos del libro diario en soles) y
         egresos (asientos negativos del libro diario en soles), por mes y por banco.
+        Solo cuenta lo ya cobrado/pagado: lo pendiente todavía no movió dinero.
       </p>
       <div class="ov-range">
         <button

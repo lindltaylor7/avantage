@@ -44,13 +44,41 @@ function unlinkQuiet(filename) {
   fs.unlink(path.join(financeReceiptDir, filename), () => {});
 }
 
-function receiptColumnsFromFile(file) {
-  return {
-    receipt_filename: file?.filename || null,
-    receipt_original_name: file?.originalname || null,
-    receipt_mime_type: file?.mimetype || null,
-    receipt_size: file?.size || null
-  };
+/** ¿El archivo sigue en `uploads/finance-receipts/`? (se pierde si el despliegue borra `uploads/`). */
+export function receiptFileExists(filename) {
+  if (!filename) return false;
+  return fs.existsSync(path.join(financeReceiptDir, filename));
+}
+
+/** Filas de comprobante (1:N) a partir de los archivos subidos por multer. */
+function receiptRowsFromFiles(files, foreignKey, id) {
+  return (files || []).map((file) => ({
+    [foreignKey]: id,
+    filename: file.filename,
+    original_name: file.originalname || null,
+    mime_type: file.mimetype || null,
+    size: file.size || null
+  }));
+}
+
+/**
+ * Adjunta a cada fila su lista de comprobantes (`row.receipts`), marcando con
+ * `missing: true` los que ya no tienen archivo en disco para que la UI lo diga
+ * en vez de quedarse cargando una miniatura que nunca llegará.
+ */
+async function attachReceipts(rows, table, foreignKey) {
+  if (rows.length === 0) return rows;
+  const receipts = await db(table)
+    .whereIn(foreignKey, rows.map((r) => r.id))
+    .orderBy('id', 'asc');
+
+  const byOwner = new Map();
+  for (const rcpt of receipts) {
+    const list = byOwner.get(rcpt[foreignKey]) || [];
+    list.push({ ...rcpt, missing: !receiptFileExists(rcpt.filename) });
+    byOwner.set(rcpt[foreignKey], list);
+  }
+  return rows.map((r) => ({ ...r, receipts: byOwner.get(r.id) || [] }));
 }
 
 /**
@@ -84,18 +112,7 @@ export class FinanceLedgerService {
       .orderBy('finance_income.fecha', 'desc')
       .orderBy('finance_income.id', 'desc');
 
-    if (rows.length === 0) return rows;
-
-    const receipts = await db('finance_income_receipts')
-      .whereIn('income_id', rows.map((r) => r.id))
-      .orderBy('id', 'asc');
-
-    const byIncome = new Map();
-    for (const rcpt of receipts) {
-      if (!byIncome.has(rcpt.income_id)) byIncome.set(rcpt.income_id, []);
-      byIncome.get(rcpt.income_id).push(rcpt);
-    }
-    return rows.map((r) => ({ ...r, receipts: byIncome.get(r.id) || [] }));
+    return attachReceipts(rows, 'finance_income_receipts', 'income_id');
   }
 
   async getIncomeById(id) {
@@ -113,8 +130,8 @@ export class FinanceLedgerService {
       .where('finance_income.id', id)
       .first();
     if (!row) return null;
-    row.receipts = await db('finance_income_receipts').where('income_id', id).orderBy('id', 'asc');
-    return row;
+    const [withReceipts] = await attachReceipts([row], 'finance_income_receipts', 'income_id');
+    return withReceipts;
   }
 
   /**
@@ -218,21 +235,20 @@ export class FinanceLedgerService {
 
   // ------------------------------------------------------------ COMPROBANTES
 
-  async addIncomeReceipt(incomeId, file) {
-    if (!file) throw new Error('No se recibió ninguna imagen.');
+  /** Adjunta uno o varios comprobantes a un ingreso. */
+  async addIncomeReceipts(incomeId, files) {
+    const rows = receiptRowsFromFiles(files, 'income_id', incomeId);
+    if (rows.length === 0) throw new Error('No se recibió ningún comprobante.');
     const income = await db('finance_income').where({ id: incomeId }).first();
     if (!income) {
-      unlinkQuiet(file.filename);
+      rows.forEach((r) => unlinkQuiet(r.filename));
       throw new Error('Ingreso no encontrado.');
     }
-    const [id] = await db('finance_income_receipts').insert({
-      income_id: incomeId,
-      filename: file.filename,
-      original_name: file.originalname || null,
-      mime_type: file.mimetype || null,
-      size: file.size || null
-    });
-    return db('finance_income_receipts').where({ id }).first();
+    await db('finance_income_receipts').insert(rows);
+    return db('finance_income_receipts')
+      .where('income_id', incomeId)
+      .whereIn('filename', rows.map((r) => r.filename))
+      .orderBy('id', 'asc');
   }
 
   async getReceiptById(id) {
@@ -248,19 +264,23 @@ export class FinanceLedgerService {
   // ------------------------------------------------------------- LIBRO DIARIO
 
   async listJournal() {
-    return db('finance_journal')
+    const rows = await db('finance_journal')
       .leftJoin('users', 'users.id', 'finance_journal.created_by')
       .select('finance_journal.*', 'users.name as created_by_name')
       .orderBy('finance_journal.fecha', 'desc')
       .orderBy('finance_journal.id', 'desc');
+    return attachReceipts(rows, 'finance_journal_receipts', 'journal_id');
   }
 
   async getJournalById(id) {
-    return db('finance_journal')
+    const row = await db('finance_journal')
       .leftJoin('users', 'users.id', 'finance_journal.created_by')
       .select('finance_journal.*', 'users.name as created_by_name')
       .where('finance_journal.id', id)
       .first();
+    if (!row) return null;
+    const [withReceipts] = await attachReceipts([row], 'finance_journal_receipts', 'journal_id');
+    return withReceipts;
   }
 
   /** Valida y normaliza los campos editables de un asiento (alta y edición). */
@@ -284,53 +304,77 @@ export class FinanceLedgerService {
     };
   }
 
-  async createJournal({ receipt, createdBy, ...fields }) {
+  async createJournal({ receipts, createdBy, ...fields }) {
+    const files = receipts || [];
     try {
       const values = this.#normalizeJournal(fields);
       const [id] = await db('finance_journal').insert({
         ...values,
         code: await nextCode('finance_journal', values.fecha),
-        ...receiptColumnsFromFile(receipt),
         created_by: createdBy || null
       });
+      const rows = receiptRowsFromFiles(files, 'journal_id', id);
+      if (rows.length > 0) await db('finance_journal_receipts').insert(rows);
       return this.getJournalById(id);
     } catch (error) {
-      unlinkQuiet(receipt?.filename);
+      files.forEach((f) => unlinkQuiet(f.filename));
       throw error;
     }
   }
 
   /**
    * Edita un asiento del libro diario. El código se mantiene aunque cambie la
-   * fecha. Si llega un `receipt` nuevo reemplaza al anterior (borrándolo del
-   * disco); con `removeReceipt` se quita el comprobante sin subir otro.
+   * fecha. Los comprobantes que lleguen se suman a los que ya tenía (se
+   * eliminan de uno en uno con `deleteJournalReceipt`).
    */
-  async updateJournal(id, { receipt, removeReceipt, ...fields }) {
+  async updateJournal(id, { receipts, ...fields }) {
+    const files = receipts || [];
     const existing = await db('finance_journal').where({ id }).first();
     if (!existing) {
-      unlinkQuiet(receipt?.filename);
+      files.forEach((f) => unlinkQuiet(f.filename));
       return null;
     }
     try {
-      const values = this.#normalizeJournal(fields);
-      if (receipt) {
-        Object.assign(values, receiptColumnsFromFile(receipt));
-      } else if (removeReceipt) {
-        Object.assign(values, receiptColumnsFromFile(null));
-      }
-      await db('finance_journal').where({ id }).update(values);
-      if (receipt || removeReceipt) unlinkQuiet(existing.receipt_filename);
+      await db('finance_journal').where({ id }).update(this.#normalizeJournal(fields));
+      const rows = receiptRowsFromFiles(files, 'journal_id', id);
+      if (rows.length > 0) await db('finance_journal_receipts').insert(rows);
       return this.getJournalById(id);
     } catch (error) {
-      unlinkQuiet(receipt?.filename);
+      files.forEach((f) => unlinkQuiet(f.filename));
       throw error;
     }
   }
 
   async deleteJournal(id) {
-    const row = await db('finance_journal').where({ id }).select('receipt_filename').first();
-    if (row) unlinkQuiet(row.receipt_filename);
+    const receipts = await db('finance_journal_receipts').where('journal_id', id).select('filename');
+    receipts.forEach((r) => unlinkQuiet(r.filename));
     return db('finance_journal').where({ id }).del();
+  }
+
+  /** Adjunta uno o varios comprobantes a un asiento ya registrado. */
+  async addJournalReceipts(journalId, files) {
+    const rows = receiptRowsFromFiles(files, 'journal_id', journalId);
+    if (rows.length === 0) throw new Error('No se recibió ningún comprobante.');
+    const journal = await db('finance_journal').where({ id: journalId }).first();
+    if (!journal) {
+      rows.forEach((r) => unlinkQuiet(r.filename));
+      throw new Error('Asiento no encontrado.');
+    }
+    await db('finance_journal_receipts').insert(rows);
+    return db('finance_journal_receipts')
+      .where('journal_id', journalId)
+      .whereIn('filename', rows.map((r) => r.filename))
+      .orderBy('id', 'asc');
+  }
+
+  async getJournalReceiptById(id) {
+    return db('finance_journal_receipts').where({ id }).first();
+  }
+
+  async deleteJournalReceipt(id) {
+    const receipt = await db('finance_journal_receipts').where({ id }).first();
+    if (receipt) unlinkQuiet(receipt.filename);
+    return db('finance_journal_receipts').where({ id }).del();
   }
 
   // ------------------------------------------------------------- GASTOS FIJOS
@@ -462,6 +506,9 @@ export class FinanceLedgerService {
    *
    *  - Ingresos = `finance_income` + asientos positivos del libro diario (en soles).
    *  - Egresos  = asientos negativos del libro diario (en soles, en valor absoluto).
+   *
+   * Solo cuentan los registros ya cobrados/pagados: lo que sigue "pendiente" o
+   * "no pagado" es dinero que todavía no se movió y falsearía el balance.
    */
   async getOverview({ monthsBack = 6 } = {}) {
     const months = Math.min(Math.max(Number(monthsBack) || 6, 1), 24);
@@ -478,6 +525,7 @@ export class FinanceLedgerService {
       .select(db.raw("DATE_FORMAT(fecha, '%Y-%m') as month"))
       .sum('monto as total')
       .where('fecha', '>=', earliest)
+      .where('estado', 'pagado')
       .groupBy('banco', 'month');
 
     const journalRows = await db('finance_journal')
@@ -487,6 +535,7 @@ export class FinanceLedgerService {
       .select(db.raw('SUM(CASE WHEN monto < 0 THEN -monto ELSE 0 END) as egreso'))
       .where('fecha', '>=', earliest)
       .where('moneda', 'soles')
+      .where('estado', 'pagado')
       .groupBy('banco', 'month');
 
     const emptyGrid = () => Object.fromEntries(
