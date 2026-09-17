@@ -40,6 +40,32 @@ export class ScheduledMeetingService {
   }
 
   /**
+   * Todas las reuniones de un día del calendario de Lima, de la primera a la
+   * última. Es la agenda que se le manda al vendedor cada mañana.
+   *
+   * Perú no cambia de hora en todo el año (UTC-5 siempre), así que el día
+   * local va de las 05:00 UTC de ese día a las 05:00 UTC del siguiente — el
+   * mismo corte que usa el volcado diario de conversaciones.
+   */
+  async getForDay(dateIso) {
+    const [y, m, d] = String(dateIso).split('-').map(Number);
+    const start = new Date(Date.UTC(y, m - 1, d, 5, 0, 0));
+    const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+
+    return db('scheduled_meetings')
+      .leftJoin('leads', 'leads.id', 'scheduled_meetings.lead_id')
+      .select(
+        'scheduled_meetings.*',
+        'leads.full_name as lead_full_name',
+        'leads.phone as lead_phone',
+        'leads.topic as lead_topic'
+      )
+      .where('scheduled_meetings.start_time', '>=', start)
+      .where('scheduled_meetings.start_time', '<', end)
+      .orderBy('scheduled_meetings.start_time', 'asc');
+  }
+
+  /**
    * Reuniones que ya toca recordarle al contacto: empiezan dentro de las
    * próximas `leadMs` (pero todavía no empezaron) y aún no tienen
    * recordatorio. `minAgeMs` deja fuera las que se acaban de agendar: si

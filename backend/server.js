@@ -1799,6 +1799,21 @@ app.put('/api/whatsapp/bot-settings', requireAuth, requirePermission('leads.view
 });
 
 /**
+ * Manda AHORA la agenda del día al vendedor, sin esperar a las 8 de la mañana
+ * ni marcar el día como enviado. Sirve para probar el aviso —y para reenviarlo
+ * si el vendedor lo perdió— desde el panel del bot.
+ */
+app.post('/api/whatsapp/bot/daily-agenda', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const result = await whatsappBotService.sendDailyAgendaToSalesperson({ force: true });
+    res.json({ result });
+  } catch (error) {
+    console.error('❌ Error al mandar la agenda diaria al vendedor:', error);
+    res.status(500).json({ error: 'Error al mandar la agenda diaria.', details: error.message });
+  }
+});
+
+/**
  * Bitácora en memoria de la actividad del bot de WhatsApp: cuándo agrupa
  * mensajes de un contacto nuevo, qué le manda al LLM de Ollama Cloud, qué
  * respondió, y si el envío por WhatsApp tuvo éxito. Permite verificar
@@ -2713,6 +2728,13 @@ app.listen(PORT, () => {
     // horas para la reunión, así que basta con revisar cada diez minutos.
     whatsappBotService.sendMeetingReminders().catch((error) => {
       console.error('❌ [WhatsApp Bot] Error en el barrido de recordatorios de reuniones:', error);
+    });
+    // La agenda diaria del vendedor se cuelga del mismo barrido en vez de
+    // tener su propio temporizador: el método decide solo si ya es su hora
+    // (8 a.m. de Lima) y si no se mandó ya la de hoy, así que revisarlo cada
+    // diez minutos alcanza y el aviso sale entre las 8:00 y las 8:10.
+    whatsappBotService.sendDailyAgendaToSalesperson().catch((error) => {
+      console.error('❌ [WhatsApp Bot] Error al mandar la agenda diaria al vendedor:', error);
     });
   }, STALE_CONVERSATION_SWEEP_INTERVAL_MS);
 });

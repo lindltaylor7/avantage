@@ -217,6 +217,24 @@
             escribió al bot en las últimas 24 horas — si no, igual queda el aviso en el panel (🔔 arriba).
           </p>
         </div>
+
+        <div class="agenda-block">
+          <h4 class="agenda-title">📅 Agenda diaria</h4>
+          <p class="bot-field-hint agenda-hint">
+            Todos los días a las <strong>8:00 a.m.</strong> este mismo número recibe la lista de reuniones y
+            llamadas agendadas para hoy, con la hora, el nombre del lead y el link de Meet o el número al que
+            llamar. Si no hay ninguna, igual llega el aviso. Como con el resto, si la ventana de 24 horas de
+            WhatsApp está cerrada la agenda queda en las notificaciones del panel.
+          </p>
+          <div class="agenda-actions">
+            <button type="button" class="btn-secondary agenda-btn" :disabled="sendingAgenda" @click="sendDailyAgenda">
+              {{ sendingAgenda ? 'Enviando...' : '📤 Enviarme la agenda de hoy ahora' }}
+            </button>
+            <span v-if="agendaResult" class="agenda-result" :class="{ 'is-error': !agendaResult.ok }">
+              {{ agendaResult.message }}
+            </span>
+          </div>
+        </div>
       </section>
 
       <section class="glass-panel bot-info-panel">
@@ -254,6 +272,8 @@ const errorMessage = ref('');
 const savedMessage = ref('');
 const savedSnapshot = ref('');
 const promptDefaults = ref(null);
+const sendingAgenda = ref(false);
+const agendaResult = ref(null);
 
 const form = reactive({
   toneInstructions: '',
@@ -319,6 +339,38 @@ function restoreDefaults() {
 }
 
 const isDirty = computed(() => JSON.stringify(form) !== savedSnapshot.value);
+
+/**
+ * Manda la agenda de hoy en el momento, sin esperar a las 8 a.m. y sin
+ * consumir el envío automático del día: sirve para comprobar que el aviso
+ * llega y para reenviarlo si el vendedor lo perdió.
+ */
+async function sendDailyAgenda() {
+  sendingAgenda.value = true;
+  agendaResult.value = null;
+  try {
+    const response = await apiFetch('/api/whatsapp/bot/daily-agenda', { method: 'POST' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No se pudo mandar la agenda.');
+
+    const { sent, meetings, reason } = data.result || {};
+    const cuantas = `${meetings} ${meetings === 1 ? 'reunión' : 'reuniones'}`;
+    if (sent) {
+      agendaResult.value = { ok: true, message: `Enviada (${cuantas} hoy).` };
+    } else if (reason === 'sin_numero') {
+      agendaResult.value = { ok: false, message: 'Falta el WhatsApp del vendedor arriba.' };
+    } else {
+      agendaResult.value = {
+        ok: false,
+        message: `No salió por WhatsApp (${reason || 'error de envío'}), pero quedó en las notificaciones del panel.`
+      };
+    }
+  } catch (error) {
+    agendaResult.value = { ok: false, message: error.message };
+  } finally {
+    sendingAgenda.value = false;
+  }
+}
 
 async function fetchSettings() {
   isLoading.value = true;
@@ -507,6 +559,45 @@ onMounted(fetchSettings);
   margin-top: 0.4rem;
   line-height: 1.5;
 }
+
+/* Agenda diaria: bloque secundario dentro de la tarjeta del aviso al
+   vendedor, separado por una línea porque es otro envío al mismo número. */
+.agenda-block {
+  margin-top: 1.1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.agenda-title {
+  margin: 0 0 0.3rem;
+  font-size: 0.85rem;
+  color: var(--text-main);
+}
+
+.agenda-hint { margin-top: 0; }
+
+.agenda-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+  margin-top: 0.75rem;
+}
+
+.agenda-btn {
+  width: auto;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.agenda-result {
+  font-size: 0.78rem;
+  color: var(--accent-emerald);
+  line-height: 1.4;
+}
+
+.agenda-result.is-error { color: var(--accent-rose); }
 
 .bot-defaults-grid {
   display: grid;

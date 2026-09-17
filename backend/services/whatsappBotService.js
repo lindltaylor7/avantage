@@ -181,6 +181,14 @@ const INACTIVITY_FREEZE_MS = 60 * 60 * 1000;
 const MEETING_REMINDER_LEAD_MS = 2 * 60 * 60 * 1000;
 const MEETING_REMINDER_MIN_AGE_MS = 30 * 60 * 1000;
 
+// Agenda diaria al vendedor: sale a partir de las 8 de la mañana (hora de
+// Lima). El barrido que la dispara corre cada diez minutos, así que llega
+// entre las 8:00 y las 8:10. La hora de corte evita que un servidor que
+// estuvo caído toda la mañana mande la agenda del día a media tarde, cuando
+// ya no le sirve a nadie: si no salió antes de esa hora, se da por perdida.
+const DAILY_AGENDA_HOUR = 8;
+const DAILY_AGENDA_CUTOFF_HOUR = 12;
+
 const SHORT_DAY_FORMATTER = new Intl.DateTimeFormat('es-PE', {
   timeZone: 'America/Lima', weekday: 'long', day: 'numeric'
 });
@@ -364,6 +372,10 @@ const MEETING_DATETIME_FORMATTER = new Intl.DateTimeFormat('es-PE', {
   timeZone: 'America/Lima', weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true
 });
 
+const LIMA_LONG_DATE_FORMATTER = new Intl.DateTimeFormat('es-PE', {
+  timeZone: 'America/Lima', weekday: 'long', day: 'numeric', month: 'long'
+});
+
 const LIMA_TIME_FORMATTER = new Intl.DateTimeFormat('en-GB', {
   timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
 });
@@ -415,6 +427,51 @@ function formatClockLabel(hhmm) {
   const period = h < 12 ? 'a.m.' : 'p.m.';
   const h12 = h % 12 === 0 ? 12 : h % 12;
   return `${h12}:${String(m).padStart(2, '0')} ${period}`;
+}
+
+/**
+ * "YYYY-MM-DD" de un valor que puede venir como Date (lo que devuelve MySQL
+ * para una columna DATE) o como cadena. Se usa para comparar el día del último
+ * envío de la agenda con el de hoy.
+ */
+function dayOnlyIso(value) {
+  if (!value) return null;
+  if (value instanceof Date) {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit'
+    }).format(value);
+  }
+  return String(value).slice(0, 10);
+}
+
+/**
+ * El mensaje de la agenda diaria, tal como lo recibe el vendedor por WhatsApp.
+ * Cada línea trae lo que necesita para presentarse a la cita sin abrir el
+ * panel: la hora, con quién, y por dónde (link de Meet o número al que llamar).
+ */
+function buildDailyAgendaMessage(dateIso, meetings) {
+  const [y, m, d] = String(dateIso).split('-').map(Number);
+  const fecha = LIMA_LONG_DATE_FORMATTER.format(new Date(Date.UTC(y, m - 1, d, 12)));
+  const encabezado = `📅 *Agenda de hoy* — ${fecha}`;
+
+  if (meetings.length === 0) {
+    return `${encabezado}\n\nNo hay reuniones agendadas para hoy. ¡Buen día! 🙌`;
+  }
+
+  const lineas = meetings.map((meeting, i) => {
+    const hora = formatClockLabel(limaTimeOf(meeting.start_time));
+    const quien = meeting.lead_full_name?.trim() || meeting.wa_id;
+    const tema = (meeting.topic || meeting.lead_topic || '').trim();
+    // Sin link de Meet es una llamada telefónica: el vendedor necesita el
+    // número a la vista, no tener que ir a buscarlo al panel.
+    const canal = meeting.meet_link
+      ? `💻 ${meeting.meet_link}`
+      : `📞 ${meeting.lead_phone?.trim() || meeting.wa_id}`;
+    return `*${i + 1}. ${hora}* — ${quien}\n   ${canal}` + (tema ? `\n   📄 ${tema}` : '');
+  });
+
+  const total = `${meetings.length} ${meetings.length === 1 ? 'reunión' : 'reuniones'}`;
+  return `${encabezado}\n_${total}_\n\n${lineas.join('\n\n')}`;
 }
 
 function formatMeetingDateTimeLabel(isoStr) {
@@ -2922,6 +2979,76 @@ export class WhatsappBotService {
       }
 
       await this.scheduledMeetingService.markReminderSent(meeting.id);
+    }
+  }
+
+  /**
+   * Agenda del día para el vendedor: cada mañana, a partir de las 8, le manda
+   * al número de `sales_notification_phone` las reuniones y llamadas que tiene
+   * agendadas para hoy.
+   *
+   * Lo llama el mismo barrido de cada diez minutos que los recordatorios, así
+   * que este método decide por su cuenta si toca mandarla: ya pasaron las 8,
+   * todavía no es mediodía, y no se mandó ya la de hoy. La marca del último
+   * envío vive en la base (`daily_agenda_sent_on`) para que un reinicio del
+   * servidor no la repita.
+   *
+   * El aviso se registra SIEMPRE en las notificaciones del panel, aunque el
+   * envío por WhatsApp falle: a las 8 de la mañana lo normal es que la ventana
+   * de 24 h de WhatsApp con el vendedor esté cerrada (ver la nota del panel),
+   * y la agenda no se puede perder por eso.
+   */
+  async sendDailyAgendaToSalesperson({ force = false } = {}) {
+    if (!this.scheduledMeetingService) return null;
+
+    const today = limaTodayIso();
+    const settings = await this.settingsService.get();
+
+    if (!force) {
+      const hour = Number(LIMA_TIME_FORMATTER.format(new Date()).slice(0, 2));
+      if (hour < DAILY_AGENDA_HOUR || hour >= DAILY_AGENDA_CUTOFF_HOUR) return null;
+      if (dayOnlyIso(settings.daily_agenda_sent_on) === today) return null;
+    }
+
+    const meetings = await this.scheduledMeetingService.getForDay(today);
+    const body = buildDailyAgendaMessage(today, meetings);
+
+    // Se marca ANTES de mandar: si el envío falla, reintentarlo en el barrido
+    // siguiente repetiría el mismo error (la ventana de 24 h no se abre sola)
+    // y el vendedor recibiría la agenda dos veces si justo funciona a medias.
+    if (!force) {
+      await db('whatsapp_bot_settings').where({ id: settings.id }).update({ daily_agenda_sent_on: today });
+    }
+
+    if (this.notificationService) {
+      try {
+        await this.notificationService.create({
+          type: 'whatsapp_daily_agenda',
+          title: meetings.length > 0
+            ? `Agenda de hoy: ${meetings.length} ${meetings.length === 1 ? 'reunión' : 'reuniones'}`
+            : 'Agenda de hoy: sin reuniones',
+          body,
+          link: '/admin/whatsapp'
+        });
+      } catch (error) {
+        console.error('❌ [WhatsApp Bot] Error al registrar la notificación de la agenda diaria:', error);
+      }
+    }
+
+    const salesPhone = settings.sales_notification_phone;
+    if (!salesPhone) {
+      console.warn('⚠️ [WhatsApp Bot] Agenda diaria sin destinatario: falta el WhatsApp del vendedor en el panel del bot.');
+      return { sent: false, meetings: meetings.length, reason: 'sin_numero' };
+    }
+
+    try {
+      await this.whatsappMessageService.sendTextMessage(salesPhone, body);
+      this.logActivity({ type: 'daily_agenda_sent', waId: salesPhone, meetings: meetings.length });
+      console.log(`📅 [WhatsApp Bot] Agenda del ${today} enviada al vendedor (${meetings.length} reuniones).`);
+      return { sent: true, meetings: meetings.length };
+    } catch (error) {
+      console.error('❌ [WhatsApp Bot] No se pudo mandar la agenda diaria al vendedor:', error.message);
+      return { sent: false, meetings: meetings.length, reason: error.message };
     }
   }
 
