@@ -18,10 +18,14 @@ function compare(a, b) {
  *
  * @param rows       ref con las filas crudas del API.
  * @param searchText (fila) => texto sobre el que busca el campo de búsqueda.
- * @param sorters    { clave: (fila) => valor comparable } de columnas ordenables.
+ * @param sorters    { clave: (fila|grupo) => valor comparable } de columnas ordenables.
  * @param defaultSort { key, dir } orden inicial.
+ * @param groupBy    opcional: (filas filtradas) => grupos. Cuando se pasa, lo
+ *                   que se ordena y se pagina son los grupos (INGRESOS muestra
+ *                   un registro por cierre, con sus cuotas dentro), mientras que
+ *                   la búsqueda y los filtros se siguen aplicando fila a fila.
  */
-export function useLedgerTable(rows, { searchText, sorters, defaultSort }) {
+export function useLedgerTable(rows, { searchText, sorters, defaultSort, groupBy = null }) {
   const search = ref('');
   const estado = ref('');
   const banco = ref('');
@@ -38,11 +42,13 @@ export function useLedgerTable(rows, { searchText, sorters, defaultSort }) {
     });
   });
 
+  const grouped = computed(() => (groupBy ? groupBy(filtered.value) : filtered.value));
+
   const sorted = computed(() => {
     const get = sorters[sort.key];
-    if (!get) return filtered.value;
+    if (!get) return grouped.value;
     const factor = sort.dir === 'asc' ? 1 : -1;
-    return [...filtered.value].sort((a, b) => compare(get(a), get(b)) * factor);
+    return [...grouped.value].sort((a, b) => compare(get(a), get(b)) * factor);
   });
 
   const totalPages = computed(() => Math.max(1, Math.ceil(sorted.value.length / pageSize.value)));
@@ -89,7 +95,7 @@ export function useLedgerTable(rows, { searchText, sorters, defaultSort }) {
 
   return {
     search, estado, banco, sort, page, pageSize,
-    filtered, paged, totalPages, range, isFiltered,
+    filtered, grouped, paged, totalPages, range, isFiltered,
     toggleSort, sortCaret, clearFilters
   };
 }
