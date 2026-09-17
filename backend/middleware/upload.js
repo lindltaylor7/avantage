@@ -1,31 +1,55 @@
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 
+// Este módulo lee process.env.UPLOADS_DIR apenas se importa (más abajo), así
+// que no puede depender de que server.js ya haya llamado dotenv.config() —
+// el orden de ejecución de imports de ES modules no lo garantiza. Mismo
+// patrón defensivo que ya usa emailService.js.
+dotenv.config();
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const uploadDir = path.join(__dirname, '..', '..', 'uploads', 'project-updates');
+
+/**
+ * Carpeta base de todo lo que el sistema guarda en disco (comprobantes,
+ * adjuntos de proyectos, medios de WhatsApp, etc.). Por defecto vive dentro
+ * del propio repo (`uploads/`, como siempre), pero en producción con
+ * despliegue automático por Git (Hostinger) eso es un problema: esa carpeta
+ * nunca se versiona (ver .gitignore) y cada deploy deja el directorio de la
+ * app tal cual está en el repo, así que el contenido no versionado se pierde.
+ *
+ * `UPLOADS_DIR` permite apuntar esta carpeta a una ruta ABSOLUTA fuera de la
+ * raíz que gestiona el despliegue por Git, para que sobreviva a cada deploy —
+ * ver la nota "Persistencia de uploads entre despliegues" en README.md.
+ */
+const uploadsBase = process.env.UPLOADS_DIR
+  ? path.resolve(process.env.UPLOADS_DIR)
+  : path.join(__dirname, '..', '..', 'uploads');
+
+const uploadDir = path.join(uploadsBase, 'project-updates');
 fs.mkdirSync(uploadDir, { recursive: true });
 
-const financeReceiptDir = path.join(__dirname, '..', '..', 'uploads', 'finance-receipts');
+const financeReceiptDir = path.join(uploadsBase, 'finance-receipts');
 fs.mkdirSync(financeReceiptDir, { recursive: true });
 
 // Copias locales de las miniaturas de posts de Facebook/Instagram (sus URLs
 // firmadas de Meta caducan a las pocas horas), descargadas bajo demanda.
-const socialPostImageDir = path.join(__dirname, '..', '..', 'uploads', 'social-posts');
+const socialPostImageDir = path.join(uploadsBase, 'social-posts');
 fs.mkdirSync(socialPostImageDir, { recursive: true });
 
 // Copias locales de los adjuntos (imagen/video/audio/documento) que un
 // contacto envía por WhatsApp: el link de descarga que da Meta o YCloud
 // caduca, así que se descargan una sola vez apenas llega el webhook.
-const whatsappMediaDir = path.join(__dirname, '..', '..', 'uploads', 'whatsapp-media');
+const whatsappMediaDir = path.join(uploadsBase, 'whatsapp-media');
 fs.mkdirSync(whatsappMediaDir, { recursive: true });
 
 // Copia local del thumbnail/imagen del creativo del primer anuncio de cada
 // campaña de Meta Ads (para reconocerla de un vistazo en el panel) — el
 // thumbnail_url/image_url que da la Marketing API es una URL firmada que
 // caduca, así que se descarga una sola vez en cada sincronización.
-const campaignAdImageDir = path.join(__dirname, '..', '..', 'uploads', 'campaign-ads');
+const campaignAdImageDir = path.join(uploadsBase, 'campaign-ads');
 fs.mkdirSync(campaignAdImageDir, { recursive: true });
 
 const storage = multer.diskStorage({

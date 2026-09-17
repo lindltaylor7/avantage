@@ -108,6 +108,8 @@ adelante) desde **hPanel → Avanzado → Node.js**. Pasos:
   no necesitas configurar un dominio ni proxy aparte para el frontend.
 - Los archivos adjuntos de la línea de tiempo de proyectos se guardan en `uploads/` en disco;
   asegúrate de que esa carpeta persista entre despliegues (no la borres al re-subir código).
+  Si usas el despliegue automático por Git de Hostinger, ver la nota siguiente —
+  probablemente ya te está pasando esto.
 - Cada despliegue nuevo de código requiere repetir `npm install` y `npm run build` (y
   `npm run migrate` si hay migraciones nuevas) antes de reiniciar la app.
 - **Por qué `boot.cjs` y no `server.js` como archivo de inicio**: el hosting de Node.js de
@@ -119,3 +121,23 @@ adelante) desde **hPanel → Avanzado → Node.js**. Pasos:
   un archivo interno de Hostinger (p. ej. `preload-timestamp.js`), es porque su plataforma copia tu
   `package.json` a su propia configuración interna; por eso el `package.json` de la raíz ya **no**
   declara `"type": "module"` (solo `backend/package.json` lo hace).
+- **Persistencia de uploads entre despliegues**: con Git de Hostinger apuntando directo a la
+  raíz de la app, cada deploy deja esa carpeta tal cual está en el repo — y como `uploads/`
+  nunca se versiona (`.gitignore`), su contenido (comprobantes de Finanzas, adjuntos de
+  proyectos, medios de WhatsApp) se pierde en cada redeploy. La solución es guardar esos
+  archivos en una carpeta **fuera** de la raíz que gestiona el despliegue por Git, apuntando
+  ahí con la variable `UPLOADS_DIR` (ver `.env.example` y `backend/middleware/upload.js`).
+  Pasos:
+  1. Por SSH o la Terminal/Administrador de archivos de hPanel, crea una carpeta un nivel
+     **arriba** de la raíz de tu app Git (p. ej. si Git apunta a
+     `domains/tu-dominio.com/public_html`, crea
+     `domains/tu-dominio.com/uploads-persistentes`, como hermana de `public_html`, no dentro).
+  2. Si ya tenías archivos en `public_html/uploads/` que sobrevivieron, cópialos ahí antes de
+     seguir (`cp -r public_html/uploads/* domains/tu-dominio.com/uploads-persistentes/`).
+  3. En hPanel → Avanzado → Node.js → tu app → Variables de entorno, agrega `UPLOADS_DIR` con
+     la ruta absoluta completa de esa carpeta (pídesela a hPanel o con `pwd` por SSH parado en
+     ella).
+  4. Reinicia la app Node.js.
+  5. Verifica: sube un comprobante nuevo desde el panel y confirma por SSH/Administrador de
+     archivos que aparece en la carpeta nueva; luego dispara un deploy (push a `main`) y
+     confirma que ese archivo sigue estando y ya no aparece el ⚠️ de "comprobante perdido".
