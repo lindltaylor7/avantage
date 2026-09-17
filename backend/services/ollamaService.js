@@ -85,6 +85,82 @@ function hasExplicitClockMention(text) {
   return EXPLICIT_CLOCK_RE.test(String(text || ''));
 }
 
+/** Minúsculas y sin tildes, para comparar texto del contacto contra etiquetas. */
+function flatten(text) {
+  return String(text || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+/**
+ * La hora escrita en un texto, en formato "HH:MM" de 24 h, o null.
+ *
+ * Reconoce "18:30", "6pm", "a las 6" y "6:30 p.m.". Sin meridiano, una hora
+ * entre la 1 y las 7 se toma como de la tarde: las 6 a.m. no son un horario
+ * de atención plausible. La usan tanto el respaldo sin IA como el cotejo de
+ * un horario descrito con palabras contra las opciones ofrecidas, para que
+ * ambos entiendan exactamente lo mismo por "las 7".
+ */
+function parseClockFromText(text) {
+  const normalized = flatten(text);
+  let hour = null;
+  let minutes = 0;
+  let meridiem = '';
+
+  // El orden importa: en "a las 10:30" el "a las" aparece antes, así que
+  // primero se busca el formato con minutos.
+  let match = normalized.match(/(\d{1,2}):(\d{2})\s*(a\.?\s?m|p\.?\s?m)?/);
+  if (match) {
+    hour = Number(match[1]);
+    minutes = Number(match[2]);
+    meridiem = match[3] || '';
+  } else if ((match = normalized.match(/(\d{1,2})\s*(a\.?\s?m|p\.?\s?m)/))) {
+    hour = Number(match[1]);
+    meridiem = match[2];
+  } else if ((match = normalized.match(/a\s+las\s+(\d{1,2})\b/))) {
+    hour = Number(match[1]);
+  }
+
+  if (hour === null) return null;
+  meridiem = meridiem.replace(/[.\s]/g, '');
+  if (meridiem.startsWith('p') && hour < 12) hour += 12;
+  if (meridiem.startsWith('a') && hour === 12) hour = 0;
+  if (!meridiem && hour >= 1 && hour <= 7) hour += 12;
+  if (hour < 0 || hour > 23 || minutes < 0 || minutes > 59) return null;
+
+  return `${String(hour).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+}
+
+const WEEKDAY_RE = /\b(lun(?:es)?|mar(?:tes)?|mie(?:rcoles)?|jue(?:ves)?|vie(?:rnes)?|sab(?:ado)?|dom(?:ingo)?)\b/;
+
+/**
+ * Empareja una respuesta en palabras ("el jueves a las 7", "la de las 6:30")
+ * con una de las opciones que se le ofrecieron, cuyas etiquetas tienen la
+ * forma "Jue, 17 set, 7:00 p.m.". Devuelve el índice, o null si no coincide
+ * exactamente una.
+ *
+ * Describir el horario es la forma natural de contestar, pero el respaldo sin
+ * IA solo entendía el número de la opción: un "el jueves a las 7" caía en "no
+ * te entendí" con esa misma opción en pantalla. Solo se acepta cuando la
+ * coincidencia es única — con dos candidatos es mejor volver a preguntar que
+ * agendar el día equivocado.
+ */
+function matchLabelByWords(text, optionLabels) {
+  const wanted = parseClockFromText(text);
+  if (!wanted) return null;
+
+  const dayHint = (flatten(text).match(WEEKDAY_RE) || [])[1]?.slice(0, 3) || null;
+
+  const matches = [];
+  (optionLabels || []).forEach((label, index) => {
+    if (parseClockFromText(label) !== wanted) return;
+    // El día solo descarta cuando el contacto nombró uno: "la de las 6:30"
+    // no nombra día y debe poder coincidir igual.
+    if (dayHint && !flatten(label).startsWith(dayHint)) return;
+    matches.push(index);
+  });
+
+  return matches.length === 1 ? matches[0] : null;
+}
+
 /**
  * ¿El contacto nombró un DÍA de verdad ("hoy", "mañana", "el jueves", "el 28",
  * "8 de setiembre"), o el mensaje es solo una hora ("para las 11?", "a las
@@ -948,6 +1024,8 @@ ${numbered}
 
 Y respondió esto: """${text}"""
 
+Si ese texto trae varios renglones, son burbujas seguidas de WhatsApp: pueden ser una sola intención partida en pedazos, o una respuesta a otra cosa seguida de la elección del horario. Quédate con el renglón que SÍ elige un horario, aunque los otros hablen de otra cosa.
+
 ¿A cuál horario de la lista se refiere? Puede responder con el número, con la hora, con una frase tipo "sí, el de las 5:30", "la primera opción", etc. Si su respuesta no elige ninguna opción de la lista, responde index:null.
 
 Además, si NO eligió ninguna opción pero sí expresó una preferencia de horario distinta a las ofrecidas (ej. "no tienes más de noche?", "para las 8pm", "algo más tarde", "en la mañana mejor"), extrae esa hora aproximada en formato 24h "HH:MM" en "preferredTime" (usa una hora representativa: "en la mañana" ~ "09:00", "en la tarde" ~ "15:00", "de noche"/"más tarde" ~ "20:00"). Si no expresó ninguna preferencia de horario, deja preferredTime en null.
@@ -966,11 +1044,26 @@ Responde ÚNICAMENTE en JSON válido: {"index": <número de 1 a ${optionLabels.l
   }
 
   /**
-   * Respaldo sin IA: solo reconoce un número explícito (1, 2, 3...).
+   * Respaldo sin IA. Reconoce dos formas:
+   *
+   *   - el número de la opción ("3"),
+   *   - el horario descrito con palabras ("el jueves a las 7", "la de las
+   *     6:30"), cotejado contra las etiquetas que se le ofrecieron.
+   *
+   * Lo segundo hace falta porque describir el horario es la forma natural de
+   * contestar: con solo el número, un "el jueves a las 7" caía en "no te
+   * entendí" teniendo esa opción en pantalla.
    */
   fallbackParseSchedulingChoice(text, optionLabels) {
     const trimmed = (text || '').trim();
     const asNumber = parseInt(trimmed, 10);
+    if (Number.isInteger(asNumber) && asNumber >= 1 && asNumber <= optionLabels.length && /^\s*\d+\s*$/.test(trimmed)) {
+      return { index: asNumber - 1, preferredTime: null, source: 'fallback' };
+    }
+
+    const matched = matchLabelByWords(trimmed, optionLabels);
+    if (matched !== null) return { index: matched, preferredTime: null, source: 'fallback' };
+
     const index = Number.isInteger(asNumber) && asNumber >= 1 && asNumber <= optionLabels.length ? asNumber - 1 : null;
     return { index, preferredTime: null, source: 'fallback' };
   }

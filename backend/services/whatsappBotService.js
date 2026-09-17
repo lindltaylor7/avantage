@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { db } from '../db/connection.js';
 import { WhatsappBotSettingsService } from './whatsappBotSettingsService.js';
-import { buildKnowledgeBlock } from './whatsappBotPromptDefaults.js';
+import { buildKnowledgeBlock, meetingDurationLabel } from './whatsappBotPromptDefaults.js';
 import { MIN_BOOKING_LEAD_MINUTES } from './googleCalendarService.js';
 import { normalizeUniversity } from './universityNormalizer.js';
 import { criticalSignal } from './leadSignals.js';
@@ -224,10 +224,38 @@ function looksLikePhone(value) {
 /**
  * ¿El wa_id ES un número de teléfono real (no un BSUID tipo "PE.15518885...")?
  * Los BSUID de Instagram/Facebook traen 15 dígitos pero también un prefijo de
- * letras y un punto, así que se exige que el wa_id sea SOLO dígitos.
+ * letras y un punto, así que se exige que el wa_id sea solo dígitos, con el
+ * "+" inicial que algunos proveedores (YCloud) mandan en formato E.164. Sin
+ * admitir ese "+" el bot daba por desconocido el número desde el que escribe
+ * el contacto y llegaba a confirmar una llamada sin ningún teléfono.
  */
 function waIdIsPhone(waId) {
-  return /^\d{8,15}$/.test(String(waId || ''));
+  return /^\+?\d{8,15}$/.test(String(waId || ''));
+}
+
+/**
+ * El número en formato internacional, para que el asesor pueda marcarlo tal
+ * cual. Un celular peruano de 9 dígitos ("974412758") se completa con el 51:
+ * el contacto lo escribe así aunque se le pida con código de país.
+ */
+function formatPhoneForAdvisor(value) {
+  const digits = digitsOnly(value);
+  // E.164 admite 15 dígitos como máximo: más que eso no es un teléfono (un
+  // BSUID de Instagram, por ejemplo) y no se debe mostrar como si lo fuera.
+  if (digits.length < 8 || digits.length > 15) return null;
+  const withCountry = digits.length === 9 && digits.startsWith('9') ? `51${digits}` : digits;
+  return `+${withCountry}`;
+}
+
+/**
+ * "a este número", "al mismo", "por aquí": el contacto está diciendo que lo
+ * llamen al número desde el que escribe. Antes esto no era un teléfono válido
+ * y el paso se daba por no contestado.
+ */
+const THIS_NUMBER_RE = /\b(?:a|al)?\s*(?:est\w{0,2}|ese|el)\s*(?:mismo\s*)?(?:numero|celular|cel|telefono|whats(?:app)?)\b|\b[ae]l\s*mismo\b|\bpor\s*(?:aqui|aca)\b|\bdesde\s*(?:donde|el\s*que)\s*escribo\b/i;
+
+function wantsThisNumber(text) {
+  return THIS_NUMBER_RE.test(normalize(String(text || '').trim()));
 }
 
 // Direcciones de correo dentro de un texto libre. Se excluyen explícitamente
@@ -397,15 +425,6 @@ function formatMeetingDateTimeLabel(isoStr) {
 // Placeholder que usa findOrCreateFromWhatsApp() cuando WhatsApp no compartió
 // un nombre de perfil real — no debe tratarse como el nombre del contacto.
 const GENERIC_CONTACT_NAME = 'Contacto de WhatsApp';
-
-/** "30 min" / "1 hora", para decirle al contacto cuánto dura la reunión. */
-function formatDurationLabel(startTime, endTime) {
-  const minutes = Math.round((new Date(endTime).getTime() - new Date(startTime).getTime()) / 60000);
-  if (!Number.isFinite(minutes) || minutes <= 0) return '';
-  if (minutes % 60 !== 0) return `${minutes} min`;
-  const hours = minutes / 60;
-  return hours === 1 ? '1 hora' : `${hours} horas`;
-}
 
 /**
  * Cierra una frase con punto sin duplicar el que ya trae "p.m." al final: las
@@ -1265,7 +1284,7 @@ export class WhatsappBotService {
         return;
       }
 
-      await this.send(waId, whatsappBotCopy.priceAnchor(isFirstTurn ? contactName : null));
+      await this.send(waId, whatsappBotCopy.priceAnchor(isFirstTurn ? contactName : null, meetingDurationLabel(settings)));
       return;
     }
 
@@ -2334,6 +2353,17 @@ export class WhatsappBotService {
       return;
     }
 
+    // "a este número": lo llaman al mismo del que escribe. Se toma el wa_id
+    // en vez de insistir con una pregunta que el contacto ya dio por resuelta.
+    if (!looksLikePhone(text) && wantsThisNumber(text) && waIdIsPhone(waId)) {
+      this._clearStepMisses(scheduling);
+      scheduling.phone = digitsOnly(waId);
+      await this.updateSession(waId, { answers: JSON.stringify(answers) });
+      if (await this._confirmPendingSlotIfAny(waId, answers, scheduling)) return;
+      await this.promptForDate(waId);
+      return;
+    }
+
     if (!looksLikePhone(text)) {
       // Antes de tratarlo como un número inválido: puede estar cambiando el
       // día o la hora, no dándonos un teléfono.
@@ -2346,7 +2376,23 @@ export class WhatsappBotService {
     this._clearStepMisses(scheduling);
     scheduling.phone = digitsOnly(text);
     await this.updateSession(waId, { answers: JSON.stringify(answers) });
+    // Si el número era lo único que faltaba para cerrar un horario ya elegido,
+    // se confirma ese mismo en vez de devolverlo a elegir día otra vez.
+    if (await this._confirmPendingSlotIfAny(waId, answers, scheduling)) return;
     await this.promptForDate(waId);
+  }
+
+  /**
+   * Cierra el agendamiento con el horario que había quedado reservado a la
+   * espera de un dato (hoy, el teléfono). Devuelve true si confirmó.
+   */
+  async _confirmPendingSlotIfAny(waId, answers, scheduling) {
+    const pendingSlot = scheduling.pendingSlot;
+    if (!pendingSlot) return false;
+    delete scheduling.pendingSlot;
+    await this.updateSession(waId, { answers: JSON.stringify(answers) });
+    await this.confirmSlot(waId, pendingSlot);
+    return true;
   }
 
   /** Captura el correo para enviar el link de Google Meet. */
@@ -2698,7 +2744,24 @@ export class WhatsappBotService {
     if (!scheduling) { await this.updateSession(waId, { status: 'completed' }); return; }
 
     const isPhone = scheduling.mode === 'phone';
-    const contactPhone = scheduling.phone || (waIdIsPhone(waId) ? digitsOnly(waId) : null);
+    const contactPhone = formatPhoneForAdvisor(scheduling.phone || (waIdIsPhone(waId) ? waId : null));
+
+    // Una llamada telefónica sin número no es una reunión agendada: el asesor
+    // se queda con una hora bloqueada y nadie a quien marcar. Pasa solo con
+    // contactos sin teléfono real (Instagram/Facebook, wa_id tipo "PE.2249…"),
+    // así que en vez de confirmar a medias se guarda el horario y se le pide
+    // el número una vez más.
+    if (isPhone && !contactPhone) {
+      scheduling.pendingSlot = slot;
+      await this.updateSession(waId, { status: 'scheduling_phone', answers: JSON.stringify(answers) });
+      await this.send(
+        waId,
+        `Tengo tu horario reservado para *${slot.label}* 🙌 Solo me falta el número al que te llamamos ` +
+        '(con código de país, ej: 51987654321).'
+      );
+      return;
+    }
+
     const modalidadLabel = isPhone ? 'Llamada telefónica' : 'Videollamada por Google Meet';
     const discountText = scheduling.discount ? ` | Descuento aplicado: ${scheduling.discount}%` : '';
 
@@ -2766,7 +2829,11 @@ export class WhatsappBotService {
       // de la reunión: lleva la hora con su zona, cuánto dura, dónde más le
       // llegó el link y cómo avisar si no puede. Sin eso vuelve a preguntar
       // por WhatsApp lo que ya se le dijo, o simplemente no aparece.
-      const durationLabel = formatDurationLabel(slot.startTime, slot.endTime);
+      // La duración que se le promete al contacto sale del panel, igual que la
+      // del ancla de precio y la del bloque de datos del LLM. Antes se derivaba
+      // del largo del hueco del calendario, que es la reserva interna del asesor
+      // (30 min) y no lo que se le había dicho al lead que iba a durar.
+      const durationLabel = meetingDurationLabel(await this.settingsService.get());
       const invitedEmail = isPhone ? null : extractEmail(scheduling.email);
 
       await this.send(

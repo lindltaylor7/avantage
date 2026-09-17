@@ -13,11 +13,15 @@
  * el peso en agendar la reunión gratuita con el asesor, que es quien lo
  * detalla.
  */
-export function priceAnchor(contactName) {
+export function priceAnchor(contactName, durationLabel) {
   const hello = contactName ? `¡Hola, ${contactName}! ` : '';
+  // La duración llega desde el panel (`meetingDurationLabel`), no escrita a
+  // mano acá: este texto decía "20 min" mientras el panel decía otra cosa, y
+  // el lead recibía dos duraciones distintas en la misma conversación.
+  const duration = durationLabel ? `dura ${durationLabel} ` : '';
   return (
     `${hello}El costo depende de tu carrera, tu nivel académico y el alcance de tu tesis, así que prefiero que te lo detalle el asesor con el número exacto para tu caso 🙌\n\n` +
-    'Para eso es justo la reunión: es *totalmente gratis*, dura 20 min y no te compromete a nada — ahí te resuelve el precio y todas tus dudas. ¿Coordinamos?'
+    `Para eso es justo la reunión: es *totalmente gratis*, ${duration}y no te compromete a nada — ahí te resuelve el precio y todas tus dudas. ¿Coordinamos?`
   );
 }
 

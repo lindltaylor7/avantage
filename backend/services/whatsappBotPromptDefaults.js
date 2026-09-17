@@ -94,6 +94,36 @@ export function parseFaqFacts(value) {
 }
 
 /**
+ * Cuántos minutos dura la reunión con el asesor, según el panel.
+ *
+ * ÚNICA fuente de la duración para todo lo que se le dice al contacto: el
+ * bloque de datos del LLM, el ancla de precio y la confirmación del
+ * agendamiento. Antes cada uno traía su propio número —el texto del ancla
+ * decía "20 min", el panel "10" y la confirmación calculaba el largo del
+ * bloque del calendario ("30 min")— y un mismo lead llegaba a escuchar dos
+ * duraciones distintas en la misma conversación.
+ *
+ * Recibe la fila de `whatsapp_bot_settings`.
+ */
+export function resolveMeetingMinutes(settings = {}) {
+  const parsed = Number(settings.meeting_duration_minutes);
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.round(parsed)
+    : BOT_PROMPT_DEFAULTS.meetingDurationMinutes;
+}
+
+/** "20 min" / "1 hora" / "1 h 30 min", para decírselo al contacto. */
+export function meetingDurationLabel(settings = {}) {
+  const minutes = resolveMeetingMinutes(settings);
+  if (minutes % 60 !== 0) {
+    const hours = Math.floor(minutes / 60);
+    return hours > 0 ? `${hours} h ${minutes % 60} min` : `${minutes} min`;
+  }
+  const hours = minutes / 60;
+  return hours === 1 ? '1 hora' : `${hours} horas`;
+}
+
+/**
  * Arma el bloque de "datos reales del servicio" que se inyecta en los prompts
  * del LLM (turno conversacional, preguntas sueltas durante el agendamiento y
  * mensajes posteriores a la reunión). La duración va primero y se compone a
@@ -104,10 +134,7 @@ export function parseFaqFacts(value) {
  * `WhatsappBotSettingsService.get()`.
  */
 export function buildKnowledgeBlock(settings = {}) {
-  const parsed = Number(settings.meeting_duration_minutes);
-  const minutes = Number.isFinite(parsed) && parsed > 0
-    ? Math.round(parsed)
-    : BOT_PROMPT_DEFAULTS.meetingDurationMinutes;
+  const minutes = resolveMeetingMinutes(settings);
 
   // La duración va al FINAL a propósito: puesta primero, el modelo abría cada
   // explicación del servicio con la logística de la reunión ("La reunión dura
