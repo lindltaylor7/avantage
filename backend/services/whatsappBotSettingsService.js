@@ -98,6 +98,7 @@ export class WhatsappBotSettingsService {
     typingIndicatorEnabled,
     messageGapSeconds,
     salesNotificationPhone,
+    salesNotificationEmail,
     pricePregradoMin,
     pricePregradoMax,
     priceMaestriaMin,
@@ -133,6 +134,12 @@ export class WhatsappBotSettingsService {
       const raw = clampText(salesNotificationPhone, 30);
       const digits = raw.replace(/\D/g, '');
       sanitizedSalesPhone = digits ? `${raw.startsWith('+') ? '+' : ''}${digits}` : null;
+    }
+
+    let sanitizedSalesEmail;
+    if (salesNotificationEmail !== undefined) {
+      const raw = clampText(salesNotificationEmail, 255).toLowerCase();
+      sanitizedSalesEmail = raw || null;
     }
 
     // Cada monto se clampea individualmente a [0, MAX_PRICE]; si el par
@@ -178,6 +185,7 @@ export class WhatsappBotSettingsService {
       short_replies_enabled: shortRepliesEnabled === undefined ? current.short_replies_enabled : !!shortRepliesEnabled,
       typing_indicator_enabled: typingIndicatorEnabled === undefined ? current.typing_indicator_enabled : !!typingIndicatorEnabled,
       sales_notification_phone: sanitizedSalesPhone === undefined ? current.sales_notification_phone : sanitizedSalesPhone,
+      sales_notification_email: sanitizedSalesEmail === undefined ? current.sales_notification_email : sanitizedSalesEmail,
       message_gap_seconds: gap,
       price_pregrado_min: priceUpdates.pricePregradoMin ?? current.price_pregrado_min,
       price_pregrado_max: priceUpdates.pricePregradoMax ?? current.price_pregrado_max,

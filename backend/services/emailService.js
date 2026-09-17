@@ -275,6 +275,45 @@ export class EmailService {
   }
 
   /**
+   * Envía la agenda diaria de reuniones al vendedor por correo (reemplaza el
+   * envío por WhatsApp: a las 8 a.m. la ventana de 24 h del negocio con ese
+   * número suele estar cerrada, así que el mensaje nunca llegaba).
+   */
+  async sendDailyAgendaEmail(recipientEmail, { subject, bodyText }) {
+    await this.initPromise;
+
+    const fromAddress = process.env.SMTP_FROM || '"Avantage Group" <tesis@avantagegroup.pe>';
+    const htmlBody = bodyText
+      .split('\n')
+      .map((line) => (line ? line.replace(/</g, '&lt;').replace(/>/g, '&gt;') : '&nbsp;'))
+      .join('<br/>');
+
+    const mailOptions = {
+      from: fromAddress,
+      to: recipientEmail,
+      subject,
+      text: bodyText,
+      html: `<div style="font-family: 'Segoe UI', Tahoma, sans-serif; font-size: 14px; color: #0F172A; line-height: 1.6;">${htmlBody}</div>`
+    };
+
+    try {
+      if (!this.transporter) throw new Error('El servidor de correo no está disponible.');
+      const info = await this.transporter.sendMail(mailOptions);
+      const previewUrl = nodemailer.getTestMessageUrl(info) || null;
+      return {
+        success: true,
+        messageId: info.messageId,
+        recipient: recipientEmail,
+        previewUrl,
+        mode: previewUrl ? 'Ethereal Mail (Prueba activa)' : 'Servidor SMTP Directo'
+      };
+    } catch (error) {
+      console.error('Error al enviar la agenda diaria por correo:', error);
+      return { success: false, error: error.message, recipient: recipientEmail, mode: 'Error' };
+    }
+  }
+
+  /**
    * Envía el correo al destinatario
    */
   async sendReportEmail(recipientEmail, reportData) {

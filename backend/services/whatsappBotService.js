@@ -440,13 +440,22 @@ function formatClockLabel(hhmm) {
  * "YYYY-MM-DD" de un valor que puede venir como Date (lo que devuelve MySQL
  * para una columna DATE) o como cadena. Se usa para comparar el día del último
  * envío de la agenda con el de hoy.
+ *
+ * mysql2 arma ese Date con `new Date(year, month - 1, day)` (hora local del
+ * proceso, no UTC), así que para recuperar el mismo year/month/day hay que
+ * leerlo con los getters LOCALES (getFullYear/getMonth/getDate). Formatearlo
+ * antes con Intl usando timeZone: 'America/Lima' lo reinterpretaba pasando
+ * por UTC: si el proceso corre en una zona horaria distinta a Lima, el día
+ * se corría uno hacia atrás y la comparación con "hoy" nunca coincidía — la
+ * agenda se reintentaba sin parar en cada barrido de diez minutos.
  */
 function dayOnlyIso(value) {
   if (!value) return null;
   if (value instanceof Date) {
-    return new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit'
-    }).format(value);
+    const y = value.getFullYear();
+    const m = String(value.getMonth() + 1).padStart(2, '0');
+    const d = String(value.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
   }
   return String(value).slice(0, 10);
 }
@@ -3003,8 +3012,11 @@ export class WhatsappBotService {
 
   /**
    * Agenda del día para el vendedor: cada mañana, a partir de las 8, le manda
-   * al número de `sales_notification_phone` las reuniones y llamadas que tiene
-   * agendadas para hoy.
+   * al correo de `sales_notification_email` las reuniones y llamadas que
+   * tiene agendadas para hoy. Se manda por correo y no por WhatsApp porque a
+   * las 8 a.m. lo normal es que la ventana de 24 h del negocio con ese número
+   * ya esté cerrada, así que el envío nunca llegaba y el barrido de cada diez
+   * minutos lo reintentaba sin éxito.
    *
    * Lo llama el mismo barrido de cada diez minutos que los recordatorios, así
    * que este método decide por su cuenta si toca mandarla: ya pasaron las 8,
@@ -3013,9 +3025,7 @@ export class WhatsappBotService {
    * servidor no la repita.
    *
    * El aviso se registra SIEMPRE en las notificaciones del panel, aunque el
-   * envío por WhatsApp falle: a las 8 de la mañana lo normal es que la ventana
-   * de 24 h de WhatsApp con el vendedor esté cerrada (ver la nota del panel),
-   * y la agenda no se puede perder por eso.
+   * envío por correo falle.
    */
   async sendDailyAgendaToSalesperson({ force = false } = {}) {
     if (!this.scheduledMeetingService) return null;
@@ -3054,16 +3064,20 @@ export class WhatsappBotService {
       }
     }
 
-    const salesPhone = settings.sales_notification_phone;
-    if (!salesPhone) {
-      console.warn('⚠️ [WhatsApp Bot] Agenda diaria sin destinatario: falta el WhatsApp del vendedor en el panel del bot.');
-      return { sent: false, meetings: meetings.length, reason: 'sin_numero' };
+    const salesEmail = settings.sales_notification_email;
+    if (!salesEmail) {
+      console.warn('⚠️ [WhatsApp Bot] Agenda diaria sin destinatario: falta el correo del vendedor en el panel del bot.');
+      return { sent: false, meetings: meetings.length, reason: 'sin_correo' };
     }
 
     try {
-      await this.whatsappMessageService.sendTextMessage(salesPhone, body);
-      this.logActivity({ type: 'daily_agenda_sent', waId: salesPhone, meetings: meetings.length });
-      console.log(`📅 [WhatsApp Bot] Agenda del ${today} enviada al vendedor (${meetings.length} reuniones).`);
+      const result = await this.emailService.sendDailyAgendaEmail(salesEmail, {
+        subject: `📅 Agenda de hoy — ${meetings.length} ${meetings.length === 1 ? 'reunión' : 'reuniones'}`,
+        bodyText: body
+      });
+      if (!result?.success) throw new Error(result?.error || 'Error al enviar el correo.');
+      this.logActivity({ type: 'daily_agenda_sent', email: salesEmail, meetings: meetings.length });
+      console.log(`📅 [WhatsApp Bot] Agenda del ${today} enviada por correo al vendedor (${meetings.length} reuniones).`);
       return { sent: true, meetings: meetings.length };
     } catch (error) {
       console.error('❌ [WhatsApp Bot] No se pudo mandar la agenda diaria al vendedor:', error.message);

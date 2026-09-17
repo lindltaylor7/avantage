@@ -1778,7 +1778,7 @@ app.put('/api/whatsapp/bot-settings', requireAuth, requirePermission('leads.view
       faqKnowledge, meetingDurationMinutes,
       defaultAcademicLevel, defaultFieldOfStudy, defaultLocation,
       shortRepliesEnabled, typingIndicatorEnabled, messageGapSeconds,
-      salesNotificationPhone,
+      salesNotificationPhone, salesNotificationEmail,
       pricePregradoMin, pricePregradoMax, priceMaestriaMin, priceMaestriaMax,
       priceDoctoradoMin, priceDoctoradoMax
     } = req.body || {};
@@ -1787,7 +1787,7 @@ app.put('/api/whatsapp/bot-settings', requireAuth, requirePermission('leads.view
       faqKnowledge, meetingDurationMinutes,
       defaultAcademicLevel, defaultFieldOfStudy, defaultLocation,
       shortRepliesEnabled, typingIndicatorEnabled, messageGapSeconds,
-      salesNotificationPhone,
+      salesNotificationPhone, salesNotificationEmail,
       pricePregradoMin, pricePregradoMax, priceMaestriaMin, priceMaestriaMax,
       priceDoctoradoMin, priceDoctoradoMax
     });

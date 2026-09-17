@@ -220,11 +220,21 @@
 
         <div class="agenda-block">
           <h4 class="agenda-title">📅 Agenda diaria</h4>
+          <div class="form-group">
+            <label class="form-label">Correo del vendedor/asesor para la agenda diaria</label>
+            <input
+              v-model="form.salesNotificationEmail"
+              type="email"
+              class="form-input"
+              placeholder="Ej: vendedor@avantagegroup.pe"
+            />
+          </div>
           <p class="bot-field-hint agenda-hint">
-            Todos los días a las <strong>8:00 a.m.</strong> este mismo número recibe la lista de reuniones y
-            llamadas agendadas para hoy, con la hora, el nombre del lead y el link de Meet o el número al que
-            llamar. Si no hay ninguna, igual llega el aviso. Como con el resto, si la ventana de 24 horas de
-            WhatsApp está cerrada la agenda queda en las notificaciones del panel.
+            Todos los días a las <strong>8:00 a.m.</strong> este correo recibe la lista de reuniones y llamadas
+            agendadas para hoy, con la hora, el nombre del lead y el link de Meet o el número al que llamar. Si no
+            hay ninguna, igual llega el aviso. Se manda por correo (y no por WhatsApp) porque a esa hora la ventana
+            de 24 horas del bot con el vendedor suele estar cerrada. El aviso también queda siempre en las
+            notificaciones del panel.
           </p>
           <div class="agenda-actions">
             <button type="button" class="btn-secondary agenda-btn" :disabled="sendingAgenda" @click="sendDailyAgenda">
@@ -288,7 +298,8 @@ const form = reactive({
   shortRepliesEnabled: true,
   typingIndicatorEnabled: true,
   messageGapSeconds: 5,
-  salesNotificationPhone: ''
+  salesNotificationPhone: '',
+  salesNotificationEmail: ''
 });
 
 function toForm(settings) {
@@ -305,7 +316,8 @@ function toForm(settings) {
     shortRepliesEnabled: settings.short_replies_enabled == null ? true : !!settings.short_replies_enabled,
     typingIndicatorEnabled: settings.typing_indicator_enabled == null ? true : !!settings.typing_indicator_enabled,
     messageGapSeconds: settings.message_gap_seconds == null ? 5 : Number(settings.message_gap_seconds),
-    salesNotificationPhone: settings.sales_notification_phone || ''
+    salesNotificationPhone: settings.sales_notification_phone || '',
+    salesNotificationEmail: settings.sales_notification_email || ''
   };
 }
 
@@ -356,13 +368,13 @@ async function sendDailyAgenda() {
     const { sent, meetings, reason } = data.result || {};
     const cuantas = `${meetings} ${meetings === 1 ? 'reunión' : 'reuniones'}`;
     if (sent) {
-      agendaResult.value = { ok: true, message: `Enviada (${cuantas} hoy).` };
-    } else if (reason === 'sin_numero') {
-      agendaResult.value = { ok: false, message: 'Falta el WhatsApp del vendedor arriba.' };
+      agendaResult.value = { ok: true, message: `Enviada por correo (${cuantas} hoy).` };
+    } else if (reason === 'sin_correo') {
+      agendaResult.value = { ok: false, message: 'Falta el correo del vendedor arriba.' };
     } else {
       agendaResult.value = {
         ok: false,
-        message: `No salió por WhatsApp (${reason || 'error de envío'}), pero quedó en las notificaciones del panel.`
+        message: `No salió por correo (${reason || 'error de envío'}), pero quedó en las notificaciones del panel.`
       };
     }
   } catch (error) {
