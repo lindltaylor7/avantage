@@ -120,6 +120,18 @@ export class FinanceLedgerService {
     return attachReceipts(rows, 'finance_income_receipts', 'income_id');
   }
 
+  /** Cuotas de UN lead/proyecto (portal de clientes: no la tabla completa de Finanzas). */
+  async listIncomeByLead(leadId) {
+    if (!leadId) return [];
+    const rows = await db('finance_income')
+      .where('finance_income.lead_id', leadId)
+      .select('finance_income.*')
+      .orderBy('finance_income.fecha', 'asc')
+      .orderBy('finance_income.id', 'asc');
+
+    return attachReceipts(rows, 'finance_income_receipts', 'income_id');
+  }
+
   async getIncomeById(id) {
     const row = await db('finance_income')
       .leftJoin('leads', 'leads.id', 'finance_income.lead_id')

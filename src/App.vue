@@ -5,7 +5,12 @@
       <router-view />
     </AdminLayout>
 
-    <!-- Login: pantalla completa, sin el header/footer público -->
+    <!-- Portal de clientes: layout propio (header + bottom nav mobile) -->
+    <ClientPortalLayout v-else-if="isPortalAppRoute">
+      <router-view />
+    </ClientPortalLayout>
+
+    <!-- Login / pantallas de auth (internas y del portal): pantalla completa, sin header/footer público -->
     <router-view v-else-if="isBareRoute" />
 
     <!-- Public Layout for the rest of the public site -->
@@ -63,6 +68,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { authState, clearSession, setSession } from './auth.js';
 import { apiFetch } from './apiClient.js';
 import AdminLayout from './components/AdminLayout.vue';
+import ClientPortalLayout from './components/ClientPortalLayout.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -71,7 +77,13 @@ const isAdminRoute = computed(() => {
   return route.path === '/dashboard' || route.path.startsWith('/admin');
 });
 
-const isBareRoute = computed(() => route.path === '/login');
+const PORTAL_AUTH_PATHS = ['/portal/login', '/portal/activar', '/portal/olvide-password', '/portal/restablecer'];
+
+const isPortalAppRoute = computed(() => {
+  return route.path.startsWith('/portal') && !PORTAL_AUTH_PATHS.includes(route.path);
+});
+
+const isBareRoute = computed(() => route.path === '/login' || PORTAL_AUTH_PATHS.includes(route.path));
 
 function handleLogout() {
   clearSession();

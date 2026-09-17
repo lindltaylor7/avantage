@@ -49,6 +49,35 @@ async function attachPaymentGate(rows) {
  * cuando un lead alcanza el estado final del funnel de ventas ("ganado").
  */
 export class ProjectService {
+  constructor({ clientAccountService, emailService } = {}) {
+    this.clientAccountService = clientAccountService;
+    this.emailService = emailService;
+  }
+
+  /**
+   * Da de alta (si no existía) la cuenta del portal para el correo del
+   * cliente y le manda la invitación por correo. Nunca debe tumbar la
+   * creación del proyecto: cualquier falla acá solo se loguea, igual que el
+   * resto de los efectos secundarios de notificación del sistema.
+   */
+  async #inviteClientToPortal(email, name) {
+    if (!this.clientAccountService || !this.emailService || !email) return;
+    try {
+      const { account, isNew } = await this.clientAccountService.ensureAccountForEmail(email, name);
+      if (!isNew) return;
+
+      const activationUrl = `${(process.env.APP_BASE_URL || '').replace(/\/$/, '')}/portal/activar?token=${account.activation_token}`;
+      const result = await this.emailService.sendClientPortalInviteEmail(account.email, { name, activationUrl });
+      if (result?.success) {
+        console.log(`📧 [Portal] Invitación enviada a ${account.email}${result.previewUrl ? ` (preview: ${result.previewUrl})` : ''}`);
+      } else {
+        console.warn(`⚠️ [Portal] No se pudo enviar la invitación a ${account.email}:`, result?.error);
+      }
+    } catch (error) {
+      console.error(`❌ [Portal] Error al invitar al cliente ${email}:`, error.message);
+    }
+  }
+
   async createProjectFromLead(lead) {
     const existing = await db('projects').where({ lead_id: lead.id }).first();
     if (existing) return existing;
@@ -62,6 +91,7 @@ export class ProjectService {
       field_of_study: lead.field_of_study,
       status: 'Creado'
     });
+    await this.#inviteClientToPortal(lead.email, lead.full_name);
     return this.getProjectById(id);
   }
 
@@ -79,7 +109,24 @@ export class ProjectService {
       deadline: deadline || null,
       status: 'Creado'
     });
+    await this.#inviteClientToPortal(clientEmail, null);
     return this.getProjectById(id);
+  }
+
+  /** Proyectos del cliente autenticado en el portal, por su correo. */
+  async getProjectsByClientEmail(email) {
+    const rows = await db('projects')
+      .select(
+        'projects.*',
+        db.raw('COUNT(tasks.id) as total_tasks'),
+        db.raw("SUM(CASE WHEN tasks.status = 'completado' THEN 1 ELSE 0 END) as completed_tasks")
+      )
+      .leftJoin('tasks', 'tasks.project_id', 'projects.id')
+      .where('projects.client_email', email)
+      .groupBy('projects.id')
+      .orderBy('projects.created_at', 'desc');
+
+    return attachPaymentGate(rows.map(this.withProgress));
   }
 
   async getAllProjects() {

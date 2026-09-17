@@ -36,7 +36,8 @@ import { ScheduledMeetingService } from './services/scheduledMeetingService.js';
 import { NotificationService } from './services/notificationService.js';
 import { FinanceService } from './services/financeService.js';
 import { FinanceLedgerService } from './services/financeLedgerService.js';
-import { signToken, requireAuth, requirePermission, signGoogleOAuthState, verifyGoogleOAuthState } from './middleware/auth.js';
+import { ClientAccountService } from './services/clientAccountService.js';
+import { signToken, requireAuth, requirePermission, signGoogleOAuthState, verifyGoogleOAuthState, signClientToken, requireClientAuth } from './middleware/auth.js';
 
 import { uploadProjectUpdateAttachment, uploadDir, uploadFinanceReceipt, uploadFinanceFile, financeReceiptDir, whatsappMediaDir, campaignAdImageDir } from './middleware/upload.js';
 import { db } from './db/connection.js';
@@ -98,7 +99,8 @@ const ollamaService = new OllamaService();
 const emailService = new EmailService();
 const leadService = new LeadService();
 const funnelColumnService = new FunnelColumnService();
-const projectService = new ProjectService();
+const clientAccountService = new ClientAccountService();
+const projectService = new ProjectService({ clientAccountService, emailService });
 const taskService = new TaskService();
 const quoteService = new QuoteService();
 const campaignService = new CampaignService();
@@ -187,6 +189,209 @@ app.get('/api/auth/me', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('❌ Error al obtener el usuario actual:', error);
     res.status(500).json({ error: 'Error al obtener el usuario actual.', details: error.message });
+  }
+});
+
+// =====================================================================
+// PORTAL DE CLIENTES (/api/portal/*)
+// =====================================================================
+// Login separado del panel interno: namespace de JWT propio (signClientToken
+// / requireClientAuth, `type: 'client'` en middleware/auth.js), así que un
+// token de staff nunca sirve acá y viceversa. La identidad es el correo
+// (projects.client_email); la cuenta nace sola al crearse el proyecto
+// (ver projectService#inviteClientToPortal) y solo se activa con el token
+// que llega por correo — nadie se auto-registra.
+
+app.post('/api/portal/activar', async (req, res) => {
+  try {
+    const { token, password } = req.body || {};
+    const account = await clientAccountService.activate(token, password);
+    const clientToken = signClientToken(account);
+    res.json({ token: clientToken, client: { id: account.id, email: account.email, name: account.name } });
+  } catch (error) {
+    res.status(400).json({ error: error.message || 'No se pudo activar la cuenta.' });
+  }
+});
+
+app.post('/api/portal/login', async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Correo y contraseña son requeridos.' });
+    }
+
+    let account;
+    try {
+      account = await clientAccountService.authenticate(email, password);
+    } catch (error) {
+      return res.status(401).json({ error: error.message });
+    }
+    if (!account) return res.status(401).json({ error: 'Credenciales inválidas.' });
+
+    const clientToken = signClientToken(account);
+    res.json({ token: clientToken, client: { id: account.id, email: account.email, name: account.name } });
+  } catch (error) {
+    console.error('❌ Error en el login del portal de clientes:', error);
+    res.status(500).json({ error: 'Error al iniciar sesión.', details: error.message });
+  }
+});
+
+/**
+ * Responde igual exista o no la cuenta, para no filtrar qué correos están
+ * registrados en el portal.
+ */
+app.post('/api/portal/olvide-password', async (req, res) => {
+  try {
+    const { email } = req.body || {};
+    if (email) {
+      const result = await clientAccountService.requestPasswordReset(email);
+      if (result) {
+        const resetUrl = `${(process.env.APP_BASE_URL || '').replace(/\/$/, '')}/portal/restablecer?token=${result.resetToken}`;
+        await emailService.sendClientPortalResetEmail(result.account.email, { name: result.account.name, resetUrl });
+      }
+    }
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error al pedir el restablecimiento del portal de clientes:', error);
+    res.json({ success: true });
+  }
+});
+
+app.post('/api/portal/restablecer', async (req, res) => {
+  try {
+    const { token, password } = req.body || {};
+    await clientAccountService.resetPassword(token, password);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(400).json({ error: error.message || 'No se pudo restablecer la contraseña.' });
+  }
+});
+
+app.get('/api/portal/me', requireClientAuth, (req, res) => {
+  res.json({ client: { id: req.client.id, email: req.client.email, name: req.client.name } });
+});
+
+app.get('/api/portal/projects', requireClientAuth, async (req, res) => {
+  try {
+    const projects = await projectService.getProjectsByClientEmail(req.client.email);
+    res.json({ projects });
+  } catch (error) {
+    console.error('❌ Error al obtener los proyectos del cliente:', error);
+    res.status(500).json({ error: 'Error al obtener tus proyectos.', details: error.message });
+  }
+});
+
+/**
+ * Carga el proyecto pedido y confirma que sea del cliente autenticado. Si no
+ * existe o no le pertenece, ya deja la respuesta lista (404/403) y devuelve
+ * null — el caller solo debe cortar sin volver a responder.
+ */
+async function loadOwnedProject(req, res) {
+  const project = await projectService.getProjectById(req.params.id);
+  if (!project) {
+    res.status(404).json({ error: 'Proyecto no encontrado.' });
+    return null;
+  }
+  if (project.client_email !== req.client.email) {
+    res.status(403).json({ error: 'No tienes acceso a este proyecto.' });
+    return null;
+  }
+  return project;
+}
+
+app.get('/api/portal/projects/:id', requireClientAuth, async (req, res) => {
+  try {
+    const project = await loadOwnedProject(req, res);
+    if (!project) return;
+
+    const [tasks, updates, payments] = await Promise.all([
+      taskService.getTasksByProject(project.id),
+      projectUpdateService.getUpdatesByProject(project.id),
+      financeLedgerService.listIncomeByLead(project.lead_id)
+    ]);
+
+    res.json({ project, tasks, updates, payments });
+  } catch (error) {
+    console.error('❌ Error al obtener el proyecto del cliente:', error);
+    res.status(500).json({ error: 'Error al obtener el proyecto.', details: error.message });
+  }
+});
+
+app.get('/api/portal/projects/:id/updates/:updateId/attachment', requireClientAuth, async (req, res) => {
+  try {
+    const project = await loadOwnedProject(req, res);
+    if (!project) return;
+
+    const update = await projectUpdateService.getUpdateById(req.params.updateId);
+    if (!update || update.project_id !== project.id || !update.attachment_filename) {
+      return res.status(404).json({ error: 'Adjunto no encontrado.' });
+    }
+    const filePath = path.join(uploadDir, update.attachment_filename);
+    res.download(filePath, update.attachment_original_name || update.attachment_filename);
+  } catch (error) {
+    console.error('❌ Error al obtener el adjunto:', error);
+    res.status(500).json({ error: 'Error al obtener el adjunto.', details: error.message });
+  }
+});
+
+/**
+ * El cliente solo adjunta comprobante a una cuota que el equipo ya registró
+ * (misma tabla `finance_income` y el mismo ciclo pendiente → pagado →
+ * verificado de Finanzas) — nunca declara un monto nuevo por su cuenta.
+ */
+app.post('/api/portal/projects/:id/payments/:incomeId/receipts', requireClientAuth, uploadFinanceReceipt, async (req, res) => {
+  const vouchers = req.receipts || [];
+  try {
+    const project = await loadOwnedProject(req, res);
+    if (!project) {
+      vouchers.forEach((f) => financeLedgerService.discardUploadedFile(f));
+      return;
+    }
+
+    const income = await financeLedgerService.getIncomeById(req.params.incomeId);
+    if (!income || income.lead_id !== project.lead_id) {
+      vouchers.forEach((f) => financeLedgerService.discardUploadedFile(f));
+      return res.status(404).json({ error: 'Cuota no encontrada.' });
+    }
+
+    const receipts = await financeLedgerService.addIncomeReceipts(income.id, vouchers);
+
+    try {
+      await notificationService.create({
+        type: 'client_payment_uploaded',
+        title: `${project.topic}: comprobante subido por el cliente`,
+        body: `${project.client_email} subió el comprobante de la cuota ${income.cuota} (S/ ${Number(income.monto).toFixed(2)}).`,
+        link: '/admin/finance'
+      });
+    } catch (notifyError) {
+      console.error('❌ Error al registrar la notificación del comprobante del cliente:', notifyError);
+    }
+
+    res.status(201).json({ receipts });
+  } catch (error) {
+    vouchers.forEach((f) => financeLedgerService.discardUploadedFile(f));
+    console.error('❌ Error al subir el comprobante del cliente:', error);
+    res.status(400).json({ error: error.message || 'Error al subir el comprobante.' });
+  }
+});
+
+app.get('/api/portal/projects/:id/payments/:incomeId/receipts/:receiptId/file', requireClientAuth, async (req, res) => {
+  try {
+    const project = await loadOwnedProject(req, res);
+    if (!project) return;
+
+    const receipt = await financeLedgerService.getReceiptById(req.params.receiptId);
+    if (!receipt || String(receipt.income_id) !== String(req.params.incomeId)) {
+      return res.status(404).json({ error: 'Comprobante no encontrado.' });
+    }
+    const income = await financeLedgerService.getIncomeById(receipt.income_id);
+    if (!income || income.lead_id !== project.lead_id) {
+      return res.status(404).json({ error: 'Comprobante no encontrado.' });
+    }
+    sendFinanceFile(res, receipt.filename);
+  } catch (error) {
+    console.error('❌ Error al obtener el comprobante:', error);
+    res.status(500).json({ error: 'Error al obtener el comprobante.', details: error.message });
   }
 });
 

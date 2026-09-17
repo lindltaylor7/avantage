@@ -42,6 +42,43 @@ export function requirePermission(key) {
   };
 }
 
+const CLIENT_JWT_EXPIRES_IN = '30d';
+
+/**
+ * Token del portal de clientes: namespace de auth separado del panel interno
+ * (`type: 'client'`) para que un JWT de staff nunca sirva en `/api/portal/*`
+ * ni viceversa, aunque compartan el mismo secreto. Sesión larga (30 días)
+ * porque es un cliente entrando desde su celular, no un operador.
+ */
+export function signClientToken(account) {
+  return jwt.sign(
+    { type: 'client', id: account.id, email: account.email, name: account.name },
+    JWT_SECRET,
+    { expiresIn: CLIENT_JWT_EXPIRES_IN }
+  );
+}
+
+/** Exige una sesión válida del portal de clientes y adjunta el cliente a req.client. */
+export function requireClientAuth(req, res, next) {
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+  if (!token) {
+    return res.status(401).json({ error: 'No autenticado.' });
+  }
+
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    if (payload.type !== 'client') {
+      return res.status(401).json({ error: 'Sesión inválida.' });
+    }
+    req.client = payload;
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: 'Sesión inválida o expirada.' });
+  }
+}
+
 /**
  * Token corto (10 min) que viaja como `state` en el flujo OAuth de Google:
  * identifica a qué usuario pertenece la conexión cuando Google redirige de

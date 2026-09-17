@@ -314,6 +314,85 @@ export class EmailService {
   }
 
   /**
+   * Invitación al portal de clientes: se manda apenas nace la cuenta (al
+   * crearse su proyecto), con el link para que el cliente ponga su propia
+   * contraseña. Sin este correo la cuenta queda inservible para siempre —
+   * nace sin `password_hash`.
+   */
+  async sendClientPortalInviteEmail(recipientEmail, { name, activationUrl }) {
+    await this.initPromise;
+
+    const fromAddress = process.env.SMTP_FROM || '"Avantage Group" <tesis@avantagegroup.pe>';
+    const greeting = name ? `Hola ${name},` : 'Hola,';
+    const bodyText = `${greeting}\n\nYa puedes seguir el avance de tu proyecto y subir tus comprobantes de pago desde tu portal de cliente.\n\nActiva tu acceso aquí (vence en 7 días):\n${activationUrl}\n\nAvantage Group`;
+
+    const mailOptions = {
+      from: fromAddress,
+      to: recipientEmail,
+      subject: '🔑 Activa tu portal de cliente — Avantage Group',
+      text: bodyText,
+      html: `
+        <div style="font-family: 'Segoe UI', Tahoma, sans-serif; font-size: 15px; color: #0F172A; line-height: 1.6; max-width: 480px;">
+          <p>${greeting}</p>
+          <p>Ya puedes seguir el avance de tu proyecto y subir tus comprobantes de pago desde tu portal de cliente.</p>
+          <p style="text-align: center; margin: 28px 0;">
+            <a href="${activationUrl}" style="display: inline-block; background: #105EFF; color: #FFFFFF; text-decoration: none; padding: 14px 28px; border-radius: 10px; font-weight: 700;">Activar mi portal</a>
+          </p>
+          <p style="font-size: 13px; color: #64748B;">Este link vence en 7 días. Si no funciona el botón, copia y pega esta URL en tu navegador:<br/>${activationUrl}</p>
+          <p>Avantage Group</p>
+        </div>
+      `
+    };
+
+    try {
+      if (!this.transporter) throw new Error('El servidor de correo no está disponible.');
+      const info = await this.transporter.sendMail(mailOptions);
+      const previewUrl = nodemailer.getTestMessageUrl(info) || null;
+      return { success: true, messageId: info.messageId, recipient: recipientEmail, previewUrl };
+    } catch (error) {
+      console.error('Error al enviar la invitación al portal de clientes:', error);
+      return { success: false, error: error.message, recipient: recipientEmail };
+    }
+  }
+
+  /** Correo con el link para restablecer la contraseña del portal de clientes. */
+  async sendClientPortalResetEmail(recipientEmail, { name, resetUrl }) {
+    await this.initPromise;
+
+    const fromAddress = process.env.SMTP_FROM || '"Avantage Group" <tesis@avantagegroup.pe>';
+    const greeting = name ? `Hola ${name},` : 'Hola,';
+    const bodyText = `${greeting}\n\nPediste restablecer tu contraseña del portal de clientes.\n\nElige una nueva aquí (vence en 1 hora):\n${resetUrl}\n\nSi no fuiste tú, ignora este correo.\n\nAvantage Group`;
+
+    const mailOptions = {
+      from: fromAddress,
+      to: recipientEmail,
+      subject: '🔒 Restablece tu contraseña — Avantage Group',
+      text: bodyText,
+      html: `
+        <div style="font-family: 'Segoe UI', Tahoma, sans-serif; font-size: 15px; color: #0F172A; line-height: 1.6; max-width: 480px;">
+          <p>${greeting}</p>
+          <p>Pediste restablecer tu contraseña del portal de clientes.</p>
+          <p style="text-align: center; margin: 28px 0;">
+            <a href="${resetUrl}" style="display: inline-block; background: #105EFF; color: #FFFFFF; text-decoration: none; padding: 14px 28px; border-radius: 10px; font-weight: 700;">Elegir nueva contraseña</a>
+          </p>
+          <p style="font-size: 13px; color: #64748B;">Este link vence en 1 hora. Si no fuiste tú, ignora este correo.</p>
+          <p>Avantage Group</p>
+        </div>
+      `
+    };
+
+    try {
+      if (!this.transporter) throw new Error('El servidor de correo no está disponible.');
+      const info = await this.transporter.sendMail(mailOptions);
+      const previewUrl = nodemailer.getTestMessageUrl(info) || null;
+      return { success: true, messageId: info.messageId, recipient: recipientEmail, previewUrl };
+    } catch (error) {
+      console.error('Error al enviar el restablecimiento del portal de clientes:', error);
+      return { success: false, error: error.message, recipient: recipientEmail };
+    }
+  }
+
+  /**
    * Envía el correo al destinatario
    */
   async sendReportEmail(recipientEmail, reportData) {

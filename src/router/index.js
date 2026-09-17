@@ -16,7 +16,15 @@ import SetterFunnelView from '../views/SetterFunnelView.vue';
 import InstagramInteractionsView from '../views/InstagramInteractionsView.vue';
 import CampaignsView from '../views/CampaignsView.vue';
 import FinanceView from '../views/FinanceView.vue';
+import PortalLoginView from '../views/portal/PortalLoginView.vue';
+import PortalActivateView from '../views/portal/PortalActivateView.vue';
+import PortalForgotPasswordView from '../views/portal/PortalForgotPasswordView.vue';
+import PortalResetPasswordView from '../views/portal/PortalResetPasswordView.vue';
+import PortalProjectsView from '../views/portal/PortalProjectsView.vue';
+import PortalProjectDetailView from '../views/portal/PortalProjectDetailView.vue';
+import PortalProfileView from '../views/portal/PortalProfileView.vue';
 import { isAuthenticated, hasPermission } from '../auth.js';
+import { isClientAuthenticated } from '../clientAuth.js';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -40,11 +48,24 @@ const router = createRouter({
     { path: '/admin/finance', name: 'finance', component: FinanceView, meta: { requiresAuth: true, permission: 'finance.view' } },
     { path: '/admin/whatsapp', name: 'whatsapp', component: WhatsAppView, meta: { requiresAuth: true, permission: 'leads.view' } },
     { path: '/admin/availability', name: 'availability', component: AvailabilityView, meta: { requiresAuth: true } },
-    { path: '/admin/bot-script', name: 'bot-script', component: BotScriptView, meta: { requiresAuth: true, permission: 'leads.view' } }
+    { path: '/admin/bot-script', name: 'bot-script', component: BotScriptView, meta: { requiresAuth: true, permission: 'leads.view' } },
+
+    // Portal de clientes: login independiente del panel interno (ver clientAuth.js).
+    { path: '/portal/login', name: 'portal-login', component: PortalLoginView },
+    { path: '/portal/activar', name: 'portal-activate', component: PortalActivateView },
+    { path: '/portal/olvide-password', name: 'portal-forgot', component: PortalForgotPasswordView },
+    { path: '/portal/restablecer', name: 'portal-reset', component: PortalResetPasswordView },
+    { path: '/portal', name: 'portal-home', component: PortalProjectsView, meta: { requiresClientAuth: true } },
+    { path: '/portal/perfil', name: 'portal-profile', component: PortalProfileView, meta: { requiresClientAuth: true } },
+    { path: '/portal/proyectos/:id', name: 'portal-project', component: PortalProjectDetailView, props: true, meta: { requiresClientAuth: true } }
   ]
 });
 
 router.beforeEach((to) => {
+  if (to.meta.requiresClientAuth && !isClientAuthenticated()) {
+    return { name: 'portal-login', query: { redirect: to.fullPath } };
+  }
+
   if (!to.meta.requiresAuth) return true;
 
   if (!isAuthenticated()) {
