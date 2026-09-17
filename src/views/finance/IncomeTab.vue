@@ -2,8 +2,9 @@
   <section class="ledger-tab">
     <p class="ledger-hint">
       Cada bloque es un <strong>cierre</strong>: el precio total del trato, cuánto se lleva
-      cubierto y, debajo, sus cuotas. El código se genera automáticamente (AAAAMMDD +
-      correlativo del día) y el ITF con la fórmula
+      cubierto y, debajo, sus cuotas. El código es del cliente —todas sus cuotas comparten
+      el mismo— y se genera automáticamente (AAAAMMDD + correlativo del día); el ITF, con la
+      fórmula
       <code>|monto|&lt;1000 ? 0 : INT(|monto|/1000)×0.05</code>. Una cuota recorre
       <strong>pendiente → pagado</strong> (al adjuntar el comprobante)
       <strong>→ verificado</strong>; solo lo verificado suma en las cifras de Finanzas y,
@@ -234,7 +235,6 @@
           <table class="data-table ledger-table">
             <thead>
               <tr>
-                <th>Código</th>
                 <th>
                   <button
                     type="button"
@@ -268,7 +268,7 @@
             </thead>
             <tbody v-for="group in paged" :key="group.key" class="deal-group">
               <tr class="deal-head-row">
-                <td class="deal-head-cell" :colspan="9">
+                <td class="deal-head-cell" :colspan="8">
                   <DealPlanHeader :group="group" @saved="onPlanSaved" />
                 </td>
                 <td class="ledger-col-actions"></td>
@@ -279,7 +279,6 @@
                 class="deal-payment-row"
                 :class="row.estado === 'pagado' ? 'ledger-row-in' : 'ledger-row-pending'"
               >
-                <td class="ledger-code">{{ row.code }}</td>
                 <td class="ledger-date">{{ formatDate(row.fecha) }}</td>
                 <td>
                   <span class="ledger-eyebrow">{{ row.emitir }}</span>
@@ -511,8 +510,13 @@ async function saveTotalAmount() {
   }
 }
 
-/** Clave del grupo que recoge los ingresos que no están atados a ningún lead. */
-const SIN_LEAD = "sin-lead";
+/**
+ * Clave del registro: el lead del cierre o, si el ingreso no está asociado a
+ * ninguno, el propio ingreso — es un movimiento suelto, no parte de un plan.
+ */
+function groupKeyOf(row) {
+  return row.lead_id ?? `sin-lead-${row.id}`;
+}
 
 /**
  * Plan de cobro de cada cierre. Se calcula sobre TODOS los ingresos del lead,
@@ -523,9 +527,10 @@ const plansByLead = computed(() => {
   const totalByLead = new Map(leads.value.map((lead) => [lead.id, lead.total_amount]));
   const byKey = {};
   for (const row of rows.value) {
-    const key = row.lead_id ?? SIN_LEAD;
-    const plan = byKey[key] || (byKey[key] = {
+    const plan = byKey[groupKeyOf(row)] || (byKey[groupKeyOf(row)] = {
+      leadId: row.lead_id ?? null,
       registered: 0, verificado: 0, porVerificar: 0, pendiente: 0, itf: 0,
+      code: null, firstId: null,
     });
     const monto = Number(row.monto) || 0;
     plan.registered += monto;
@@ -533,10 +538,15 @@ const plansByLead = computed(() => {
     if (row.estado === "verificado") plan.verificado += monto;
     else if (row.estado === "pagado") plan.porVerificar += monto;
     else plan.pendiente += monto;
+    // El código del cierre es el de su cuota más antigua (las demás lo heredan).
+    if (plan.firstId == null || row.id < plan.firstId) {
+      plan.firstId = row.id;
+      plan.code = row.code;
+    }
   }
-  for (const [key, plan] of Object.entries(byKey)) {
+  for (const plan of Object.values(byKey)) {
     plan.registered = Math.round(plan.registered * 100) / 100;
-    const total = key === SIN_LEAD ? null : totalByLead.get(Number(key));
+    const total = plan.leadId != null ? totalByLead.get(plan.leadId) : null;
     plan.total = total != null ? Number(total) : null;
     plan.saldo = plan.total != null ? Math.round((plan.total - plan.registered) * 100) / 100 : null;
   }
@@ -551,7 +561,7 @@ const plansByLead = computed(() => {
 function groupByLead(payments) {
   const byKey = new Map();
   for (const row of payments) {
-    const key = row.lead_id ?? SIN_LEAD;
+    const key = groupKeyOf(row);
     let group = byKey.get(key);
     if (!group) {
       group = {
@@ -559,6 +569,7 @@ function groupByLead(payments) {
         leadId: row.lead_id ?? null,
         leadName: row.lead_id ? (row.lead_name || `Lead #${row.lead_id}`) : "— Sin asociar —",
         leadDni: row.lead_dni || null,
+        code: row.code,
         payments: [],
         registered: 0, verificado: 0, porVerificar: 0, pendiente: 0, itf: 0,
         total: null, saldo: null,

@@ -1,6 +1,9 @@
 <template>
   <div class="deal-plan">
     <div class="deal-id">
+      <span class="deal-code" title="Código del cliente: lo comparten todas sus cuotas">
+        {{ group.code }}
+      </span>
       <span class="deal-name">{{ group.leadName }}</span>
       <span class="deal-meta">
         <span v-if="group.leadDni">DNI {{ group.leadDni }}</span>
@@ -176,7 +179,9 @@ function toggleAdd() {
 }
 
 function startEditTotal() {
-  totalDraft.value = props.group.total ?? "";
+  // Sin precio total todavía, lo ya registrado es la mejor propuesta: casi
+  // siempre el cierre se pactó por esa cifra y solo falta dejarla escrita.
+  totalDraft.value = props.group.total ?? props.group.registered ?? "";
   editingTotal.value = true;
 }
 
@@ -230,6 +235,13 @@ async function addPayment() {
 }
 
 .deal-id { display: flex; flex-direction: column; gap: 0.1rem; min-width: 150px; }
+
+.deal-code {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
 
 .deal-name {
   font-size: 0.92rem;

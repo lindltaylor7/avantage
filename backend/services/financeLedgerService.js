@@ -36,11 +36,16 @@ function mesEnLetras(fecha) {
   return MESES[idx] || '';
 }
 
-/** Código autogenerado: YYYYMMDD-N, con N incremental entre los registros del mismo día. */
+/**
+ * Código autogenerado: YYYYMMDD-N, con N incremental entre los registros del
+ * mismo día. Se cuentan códigos distintos, no filas: en INGRESOS varias cuotas
+ * del mismo cliente comparten código (ver `#codeForIncome`) y contar filas
+ * dejaría huecos en el correlativo del día.
+ */
 async function nextCode(table, fecha) {
   const day = dayOnly(fecha);
   const prefix = day.replace(/-/g, '');
-  const [{ count }] = await db(table).where('fecha', day).count({ count: '*' });
+  const [{ count }] = await db(table).where('fecha', day).countDistinct({ count: 'code' });
   return `${prefix}-${Number(count) + 1}`;
 }
 
@@ -273,12 +278,31 @@ export class FinanceLedgerService {
     unlinkQuiet(file?.filename);
   }
 
+  /**
+   * El código de un ingreso identifica al cliente, no al asiento: todas las
+   * cuotas de un mismo lead comparten el código de la primera, porque en la
+   * práctica el equipo lo usa para referirse a la persona ("el 20260917-1").
+   * Solo se genera uno nuevo cuando el lead todavía no tiene ingresos o cuando
+   * el ingreso no está asociado a ninguno.
+   */
+  async #codeForIncome(leadId, fecha) {
+    if (leadId) {
+      const existing = await db('finance_income')
+        .where({ lead_id: leadId })
+        .whereNotNull('code')
+        .orderBy('id', 'asc')
+        .first('code');
+      if (existing?.code) return existing.code;
+    }
+    return nextCode('finance_income', fecha);
+  }
+
   async createIncome({ createdBy, isInitialPayment, ...fields }) {
     const values = this.#normalizeIncome(fields);
     await this.#assertWithinLeadTotal(values.lead_id, values.monto);
     const [id] = await db('finance_income').insert({
       ...values,
-      code: await nextCode('finance_income', values.fecha),
+      code: await this.#codeForIncome(values.lead_id, values.fecha),
       is_initial_payment: Boolean(isInitialPayment),
       created_by: createdBy || null
     });
@@ -287,13 +311,17 @@ export class FinanceLedgerService {
 
   /**
    * Edita un ingreso ya registrado. El código no se regenera aunque cambie la
-   * fecha: es el identificador con el que ya se referencia el asiento.
+   * fecha: es el identificador con el que ya se referencia el asiento. Sí
+   * cambia si el ingreso pasa a otro lead, porque el código es de la persona.
    */
   async updateIncome(id, fields) {
     const existing = await db('finance_income').where({ id }).first();
     if (!existing) return null;
     const values = this.#normalizeIncome(fields);
     await this.#assertWithinLeadTotal(values.lead_id, values.monto, id);
+    if (values.lead_id && values.lead_id !== existing.lead_id) {
+      values.code = await this.#codeForIncome(values.lead_id, values.fecha);
+    }
     // Verificar es un acto de finanzas, no un campo más del formulario: editar
     // el ingreso no puede darle ni quitarle el visto bueno.
     if (existing.estado === 'verificado' || values.estado === 'verificado') {
