@@ -782,6 +782,14 @@
             >
               💰 Generar Cotización
             </button>
+            <router-link
+              v-if="hasPermission('contracts.manage')"
+              :to="{ path: '/admin/contracts', query: { leadId: selectedLead.id } }"
+              class="btn-action-secondary"
+              style="text-decoration: none;"
+            >
+              📄 Generar contrato
+            </router-link>
           </div>
 
           <!-- Formulario de Cotización Integrado -->
@@ -914,6 +922,7 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { apiFetch } from '../apiClient.js';
+import { hasPermission } from '../auth.js';
 import WinDealModal from '../components/WinDealModal.vue';
 
 // Columnas predeterminadas del sistema (usadas solo para "Restablecer columnas")

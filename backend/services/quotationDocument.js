@@ -55,7 +55,7 @@ const C = {
   brick: '#b23a2c'
 };
 
-function esc(value) {
+export function esc(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -110,7 +110,7 @@ function icon(name, cls = 'q-ic') {
 }
 
 /* ── Monograma "AG": "A" facetada en dos planos + curva "G" entrelazada ── */
-function agMarkPaths({ mono = false } = {}) {
+export function agMarkPaths({ mono = false } = {}) {
   const planeA = C.olive;
   const planeB = mono ? C.olive : C.oliveDeep;
   const arc = mono ? C.olive : C.oliveDeep;

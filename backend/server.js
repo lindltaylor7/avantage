@@ -11,6 +11,9 @@ import { FunnelColumnService } from './services/funnelColumnService.js';
 import { ProjectService } from './services/projectService.js';
 import { TaskService } from './services/taskService.js';
 import { QuoteService } from './services/quoteService.js';
+import { ContractService } from './services/contractService.js';
+import { listContractTemplates } from './services/contractTemplates.js';
+import { buildContractDocument } from './services/contractDocument.js';
 import { buildQuotationDocument } from './services/quotationDocument.js';
 import { CampaignService } from './services/campaignService.js';
 import { MetaAdsService } from './services/metaAdsService.js';
@@ -103,6 +106,7 @@ const clientAccountService = new ClientAccountService();
 const projectService = new ProjectService({ clientAccountService, emailService });
 const taskService = new TaskService();
 const quoteService = new QuoteService();
+const contractService = new ContractService();
 const campaignService = new CampaignService();
 const metaAdsService = new MetaAdsService();
 const userService = new UserService();
@@ -2314,6 +2318,85 @@ app.get('/api/quotes/:id/document', requireAuth, requirePermission('leads.view')
   } catch (error) {
     console.error('❌ Error al generar el documento de la cotización:', error);
     res.status(500).json({ error: 'Error al generar el documento de la cotización.', details: error.message });
+  }
+});
+
+/* ===================================================================== */
+/* Contratos                                                              */
+/* ===================================================================== */
+
+function sendContractError(res, error, fallback) {
+  console.error(`❌ ${fallback}`, error);
+  res.status(error.status || 500).json({ error: error.status ? error.message : fallback, details: error.message });
+}
+
+app.get('/api/contract-templates', requireAuth, requirePermission('contracts.manage'), (req, res) => {
+  res.json(listContractTemplates());
+});
+
+app.get('/api/contracts/client-leads', requireAuth, requirePermission('contracts.manage'), async (req, res) => {
+  try {
+    res.json(await contractService.listClientLeads());
+  } catch (error) {
+    sendContractError(res, error, 'Error al listar los clientes.');
+  }
+});
+
+app.get('/api/contracts', requireAuth, requirePermission('contracts.manage'), async (req, res) => {
+  try {
+    res.json(await contractService.list({ leadId: req.query.leadId || null }));
+  } catch (error) {
+    sendContractError(res, error, 'Error al listar los contratos.');
+  }
+});
+
+app.post('/api/contracts', requireAuth, requirePermission('contracts.manage'), async (req, res) => {
+  try {
+    const { templateKey, leadId } = req.body || {};
+    res.status(201).json(await contractService.create({ templateKey, leadId: leadId || null, createdBy: req.user.id }));
+  } catch (error) {
+    sendContractError(res, error, 'Error al crear el contrato.');
+  }
+});
+
+app.get('/api/contracts/:id', requireAuth, requirePermission('contracts.manage'), async (req, res) => {
+  try {
+    const contract = await contractService.getById(req.params.id);
+    if (!contract) return res.status(404).json({ error: 'Contrato no encontrado.' });
+    res.json(contract);
+  } catch (error) {
+    sendContractError(res, error, 'Error al obtener el contrato.');
+  }
+});
+
+app.put('/api/contracts/:id', requireAuth, requirePermission('contracts.manage'), async (req, res) => {
+  try {
+    const contract = await contractService.update(req.params.id, req.body || {});
+    if (!contract) return res.status(404).json({ error: 'Contrato no encontrado.' });
+    res.json(contract);
+  } catch (error) {
+    sendContractError(res, error, 'Error al guardar el contrato.');
+  }
+});
+
+app.delete('/api/contracts/:id', requireAuth, requirePermission('contracts.manage'), async (req, res) => {
+  try {
+    if (!await contractService.remove(req.params.id)) return res.status(404).json({ error: 'Contrato no encontrado.' });
+    res.json({ success: true });
+  } catch (error) {
+    sendContractError(res, error, 'Error al eliminar el contrato.');
+  }
+});
+
+/** Documento HTML A4 del contrato, listo para imprimir o "Guardar como PDF". */
+app.get('/api/contracts/:id/document', requireAuth, requirePermission('contracts.manage'), async (req, res) => {
+  try {
+    const contract = await contractService.getById(req.params.id);
+    if (!contract) return res.status(404).json({ error: 'Contrato no encontrado.' });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(buildContractDocument(contract));
+  } catch (error) {
+    sendContractError(res, error, 'Error al generar el documento del contrato.');
   }
 });
 
