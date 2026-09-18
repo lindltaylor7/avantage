@@ -12,7 +12,7 @@ import { ProjectService } from './services/projectService.js';
 import { TaskService } from './services/taskService.js';
 import { QuoteService } from './services/quoteService.js';
 import { ContractService } from './services/contractService.js';
-import { listContractTemplates } from './services/contractTemplates.js';
+import { ContractTemplateService } from './services/contractTemplateService.js';
 import { buildContractDocument } from './services/contractDocument.js';
 import { buildQuotationDocument } from './services/quotationDocument.js';
 import { CampaignService } from './services/campaignService.js';
@@ -107,6 +107,7 @@ const projectService = new ProjectService({ clientAccountService, emailService }
 const taskService = new TaskService();
 const quoteService = new QuoteService();
 const contractService = new ContractService();
+const contractTemplateService = new ContractTemplateService();
 const campaignService = new CampaignService();
 const metaAdsService = new MetaAdsService();
 const userService = new UserService();
@@ -2338,8 +2339,39 @@ function sendContractError(res, error, fallback) {
   res.status(error.status || 500).json({ error: error.status ? error.message : fallback, details: error.message });
 }
 
-app.get('/api/contract-templates', requireAuth, requirePermission('contracts.manage'), (req, res) => {
-  res.json(listContractTemplates());
+app.get('/api/contract-templates', requireAuth, requirePermission('contracts.manage'), async (req, res) => {
+  try {
+    res.json(await contractTemplateService.list());
+  } catch (error) {
+    sendContractError(res, error, 'Error al listar los tipos de contrato.');
+  }
+});
+
+app.post('/api/contract-templates', requireAuth, requirePermission('contracts.manage'), async (req, res) => {
+  try {
+    res.status(201).json(await contractTemplateService.create(req.body || {}));
+  } catch (error) {
+    sendContractError(res, error, 'Error al crear el tipo de contrato.');
+  }
+});
+
+app.put('/api/contract-templates/:id', requireAuth, requirePermission('contracts.manage'), async (req, res) => {
+  try {
+    const template = await contractTemplateService.update(req.params.id, req.body || {});
+    if (!template) return res.status(404).json({ error: 'Tipo de contrato no encontrado.' });
+    res.json(template);
+  } catch (error) {
+    sendContractError(res, error, 'Error al guardar el tipo de contrato.');
+  }
+});
+
+app.delete('/api/contract-templates/:id', requireAuth, requirePermission('contracts.manage'), async (req, res) => {
+  try {
+    if (!await contractTemplateService.remove(req.params.id)) return res.status(404).json({ error: 'Tipo de contrato no encontrado.' });
+    res.json({ success: true });
+  } catch (error) {
+    sendContractError(res, error, 'Error al eliminar el tipo de contrato.');
+  }
 });
 
 app.get('/api/contracts/client-leads', requireAuth, requirePermission('contracts.manage'), async (req, res) => {
@@ -2360,8 +2392,8 @@ app.get('/api/contracts', requireAuth, requirePermission('contracts.manage'), as
 
 app.post('/api/contracts', requireAuth, requirePermission('contracts.manage'), async (req, res) => {
   try {
-    const { templateKey, leadId } = req.body || {};
-    res.status(201).json(await contractService.create({ templateKey, leadId: leadId || null, createdBy: req.user.id }));
+    const { templateId, leadId } = req.body || {};
+    res.status(201).json(await contractService.create({ templateId, leadId: leadId || null, createdBy: req.user.id }));
   } catch (error) {
     sendContractError(res, error, 'Error al crear el contrato.');
   }

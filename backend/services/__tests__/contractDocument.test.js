@@ -42,7 +42,8 @@ test('buildContractDocument incluye las cláusulas numeradas y marca el borrador
   const html = buildContractDocument({
     id: 7,
     created_at: '2026-09-18T10:00:00Z',
-    template_key: 'cliente',
+    intro: 'Conste que {{cliente}} contrata.',
+    closing: 'Firmado el {{fecha}}.',
     title: 'CONTRATO DE LOCACIÓN DE SERVICIOS',
     status: 'borrador',
     client_name: 'Carlos Flores',
@@ -55,6 +56,7 @@ test('buildContractDocument incluye las cláusulas numeradas y marca el borrador
   assert.match(html, /PRIMERA:<\/span> OBJETO/);
   assert.match(html, /SEGUNDA:<\/span> PLAZO/);
   assert.match(html, /Servicio para <strong>Carlos Flores<\/strong>/);
+  assert.match(html, /Conste que <strong>Carlos Flores<\/strong> contrata\./);
   assert.match(html, /BORRADOR/);
   assert.match(html, /18 de se(p)?tiembre de 2026/);
 });

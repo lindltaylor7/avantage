@@ -1,12 +1,11 @@
 /**
- * Plantillas de contrato. Cada una define el título y las cláusulas con las
- * que arranca un contrato nuevo; después, en el contrato, las cláusulas se
- * agregan, quitan y editan libremente sin tocar la plantilla.
+ * Tipos de contrato iniciales. Solo los usa la migración
+ * 20261008000000_create_contract_templates_tables.js para cargarlos en la
+ * base de datos; desde ahí se editan y se crean otros en Contratos → "Tipos
+ * de contrato". Cambiar este archivo NO modifica los tipos ya cargados.
  *
- * Para sumar otro tipo de contrato basta con agregar una entrada aquí.
- *
- * Marcadores disponibles en `intro` y en el cuerpo de las cláusulas (se
- * reemplazan al generar el documento, ver contractDocument.js):
+ * Marcadores disponibles en `intro`, `closing` y en las cláusulas (se
+ * reemplazan al generar el documento, ver backend/services/contractDocument.js):
  *   {{empresa}} {{ruc}} {{domicilio_empresa}} {{representante}}
  *   {{cliente}} {{dni}} {{domicilio}} {{correo}} {{telefono}}
  *   {{servicio}} {{monto}} {{ciudad}} {{fecha}}
@@ -95,12 +94,3 @@ export const CONTRACT_TEMPLATES = {
       'en señal de conformidad en la ciudad de {{ciudad}}, el {{fecha}}.'
   }
 };
-
-export function listContractTemplates() {
-  return Object.entries(CONTRACT_TEMPLATES).map(([key, t]) => ({
-    key,
-    label: t.label,
-    title: t.title,
-    clauses: t.clauses
-  }));
-}

@@ -1,5 +1,4 @@
 import { db } from '../db/connection.js';
-import { CONTRACT_TEMPLATES } from './contractTemplates.js';
 
 export const CONTRACT_STATUSES = ['borrador', 'firmado', 'anulado'];
 
@@ -18,7 +17,9 @@ const EDITABLE_FIELDS = {
   currency: 'currency',
   city: 'city',
   contractDate: 'contract_date',
-  representativeName: 'representative_name'
+  representativeName: 'representative_name',
+  intro: 'intro',
+  closing: 'closing'
 };
 
 function todayIso() {
@@ -35,7 +36,8 @@ function withIsoDate(contract) {
   return contract;
 }
 
-function cleanClauses(clauses) {
+/** Normaliza una lista de cláusulas: sin vacías, con `position` 1..n en el orden recibido. */
+export function cleanClauses(clauses) {
   return (clauses || [])
     .map((c) => ({ title: String(c.title || '').trim(), body: String(c.body || '').trim() }))
     .filter((c) => c.title || c.body)
@@ -72,23 +74,27 @@ export class ContractService {
   }
 
   /**
-   * Crea un contrato desde una plantilla. Los datos de la parte cliente se
-   * copian del lead (si se indica) y quedan editables en el contrato.
+   * Crea un contrato desde un tipo de contrato: copia su título, apertura,
+   * cierre y cláusulas, y los datos de la parte cliente desde el lead. Todo
+   * queda editable en el contrato sin afectar al tipo ni al lead.
    */
-  async create({ templateKey = 'cliente', leadId = null, createdBy = null }) {
-    const template = CONTRACT_TEMPLATES[templateKey];
-    if (!template) throw Object.assign(new Error('Plantilla de contrato no encontrada.'), { status: 400 });
+  async create({ templateId, leadId = null, createdBy = null }) {
+    const template = templateId ? await db('contract_templates').where({ id: templateId }).first() : null;
+    if (!template) throw Object.assign(new Error('Tipo de contrato no encontrado.'), { status: 400 });
 
     const lead = leadId ? await db('leads').where({ id: leadId }).first() : null;
     if (leadId && !lead) throw Object.assign(new Error('Lead no encontrado.'), { status: 404 });
 
     const location = [lead?.address, lead?.province, lead?.department].filter(Boolean).join(', ');
+    const templateClauses = await db('contract_template_clauses').where({ template_id: template.id }).orderBy('position');
 
-    return db.transaction(async (trx) => {
-      const [id] = await trx('contracts').insert({
+    const id = await db.transaction(async (trx) => {
+      const [contractId] = await trx('contracts').insert({
         lead_id: lead?.id || null,
-        template_key: templateKey,
+        template_id: template.id,
         title: template.title,
+        intro: template.intro,
+        closing: template.closing,
         client_name: lead?.full_name || null,
         client_dni: lead?.dni || null,
         client_address: location || null,
@@ -100,10 +106,11 @@ export class ContractService {
         contract_date: todayIso(),
         created_by: createdBy
       });
-      const clauses = cleanClauses(template.clauses).map((c) => ({ ...c, contract_id: id }));
+      const clauses = cleanClauses(templateClauses).map((c) => ({ ...c, contract_id: contractId }));
       if (clauses.length) await trx('contract_clauses').insert(clauses);
-      return id;
-    }).then((id) => this.getById(id));
+      return contractId;
+    });
+    return this.getById(id);
   }
 
   /**

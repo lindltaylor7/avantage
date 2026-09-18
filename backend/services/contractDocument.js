@@ -9,7 +9,6 @@
  * texto fluya página a página con el mismo margen en cada una.
  */
 import { COMPANY, agMarkPaths, esc } from './quotationDocument.js';
-import { CONTRACT_TEMPLATES } from './contractTemplates.js';
 
 const BLANK = '____________________';
 
@@ -123,7 +122,6 @@ function paragraphs(text, values) {
 const WATERMARKS = { borrador: 'BORRADOR', anulado: 'ANULADO' };
 
 export function buildContractDocument(contract) {
-  const template = CONTRACT_TEMPLATES[contract.template_key] || {};
   const values = contractPlaceholders(contract);
   const number = formatContractNumber(contract);
   const watermark = WATERMARKS[contract.status];
@@ -206,10 +204,10 @@ export function buildContractDocument(contract) {
       <div class="c-number">Contrato<b>${esc(number)}</b></div>
     </header>
 
-    <h1>${esc(contract.title || template.title || 'CONTRATO')}</h1>
-    ${template.intro ? `<div class="c-intro">${paragraphs(template.intro, values)}</div>` : ''}
+    <h1>${esc(contract.title || 'CONTRATO')}</h1>
+    ${contract.intro ? `<div class="c-intro">${paragraphs(contract.intro, values)}</div>` : ''}
     ${clauses}
-    ${template.closing ? `<div class="c-closing">${paragraphs(template.closing, values)}</div>` : ''}
+    ${contract.closing ? `<div class="c-closing">${paragraphs(contract.closing, values)}</div>` : ''}
 
     <div class="c-signatures">
       <div class="c-sign"><i></i><b>EL LOCADOR</b>${esc(COMPANY.legalName)}<br>RUC ${esc(COMPANY.ruc)}<br>${esc(contract.representative_name || 'Representante legal')}</div>
