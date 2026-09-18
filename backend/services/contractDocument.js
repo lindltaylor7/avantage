@@ -18,6 +18,11 @@ import { readFileSync } from 'fs';
  * (abierta desde un blob, sin acceso a rutas del servidor) y en el PDF. Si
  * el archivo no está, el contrato sale sin firma en vez de fallar.
  */
+// Firmante que aparece en la imagen de firma y sello: se usa como
+// representante de EL LOCADOR cuando el contrato no indica otro, para que la
+// apertura ("debidamente representada por...") coincida con la firma.
+const LESSOR_SIGNER = 'Fabian Ninamango Julio Eduardo, Gerente General';
+
 const LESSOR_SIGNATURE = (() => {
   try {
     const png = readFileSync(new URL('../assets/firma-sello-locador.png', import.meta.url));
@@ -106,7 +111,7 @@ export function contractPlaceholders(contract) {
     empresa: COMPANY.legalName,
     ruc: COMPANY.ruc,
     domicilio_empresa: `${COMPANY.address}, ${COMPANY.addressCity}`,
-    representante: contract.representative_name,
+    representante: contract.representative_name || (LESSOR_SIGNATURE ? LESSOR_SIGNER : null),
     cliente: contract.client_name,
     dni: contract.client_dni,
     domicilio: contract.client_address,
@@ -144,6 +149,11 @@ export function buildContractDocument(contract) {
   const number = formatContractNumber(contract);
   const watermark = WATERMARKS[contract.status];
   const showSignature = LESSOR_SIGNATURE && contract.status !== 'anulado';
+  // La imagen ya trae la razón social, el nombre y el cargo del firmante:
+  // bajo la línea solo va el RUC. Sin imagen, el bloque va completo.
+  const lessorCaption = showSignature
+    ? `RUC ${esc(COMPANY.ruc)}`
+    : `${esc(COMPANY.legalName)}<br>RUC ${esc(COMPANY.ruc)}<br>${esc(contract.representative_name || 'Representante legal')}`;
 
   const clauses = (contract.clauses || []).map((clause, i) => `
     <section class="c-clause">
@@ -184,13 +194,15 @@ export function buildContractDocument(contract) {
   .c-clause h3 { font-family: 'Montserrat', sans-serif; font-size: 9.5pt; font-weight: 700; margin-bottom: 5px; text-transform: uppercase; break-after: avoid; }
   .c-clause h3 span { color: #68761f; }
   .c-closing { margin-top: 16px; }
+  /* El cierre y las firmas van juntos: las firmas nunca quedan solas en una hoja. */
+  .c-signoff { break-inside: avoid; }
 
   .c-signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 28mm; margin-top: 10mm; break-inside: avoid; }
   .c-sign { text-align: center; font-size: 9.5pt; }
   /* Mismo alto en ambas columnas para que las líneas de firma queden alineadas. */
   .c-sign-area { height: 30mm; display: flex; align-items: flex-end; justify-content: center; }
   /* multiply: si la imagen trae fondo blanco, se funde con el papel y la marca de agua. */
-  .c-sign-area img { max-width: 100%; max-height: 30mm; margin-bottom: -3mm; mix-blend-mode: multiply;
+  .c-sign-area img { max-width: 100%; max-height: 30mm; margin-bottom: 1.5mm; mix-blend-mode: multiply;
     -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .c-sign i { display: block; border-top: 1px solid #1f1f1c; margin-bottom: 6px; }
   .c-sign b { display: block; font-family: 'Montserrat', sans-serif; font-size: 9pt; }
@@ -231,11 +243,12 @@ export function buildContractDocument(contract) {
     <h1>${esc(contract.title || 'CONTRATO')}</h1>
     ${contract.intro ? `<div class="c-intro">${paragraphs(contract.intro, values)}</div>` : ''}
     ${clauses}
-    ${contract.closing ? `<div class="c-closing">${paragraphs(contract.closing, values)}</div>` : ''}
-
-    <div class="c-signatures">
-      <div class="c-sign"><div class="c-sign-area">${showSignature ? `<img src="${LESSOR_SIGNATURE}" alt="Firma y sello de EL LOCADOR">` : ''}</div><i></i><b>EL LOCADOR</b>${esc(COMPANY.legalName)}<br>RUC ${esc(COMPANY.ruc)}<br>${esc(contract.representative_name || 'Representante legal')}</div>
-      <div class="c-sign"><div class="c-sign-area"></div><i></i><b>EL CLIENTE</b>${esc(contract.client_name || BLANK)}<br>DNI ${esc(contract.client_dni || BLANK)}</div>
+    <div class="c-signoff">
+      ${contract.closing ? `<div class="c-closing">${paragraphs(contract.closing, values)}</div>` : ''}
+      <div class="c-signatures">
+        <div class="c-sign"><div class="c-sign-area">${showSignature ? `<img src="${LESSOR_SIGNATURE}" alt="Firma y sello de EL LOCADOR">` : ''}</div><i></i><b>EL LOCADOR</b>${lessorCaption}</div>
+        <div class="c-sign"><div class="c-sign-area"></div><i></i><b>EL CLIENTE</b>${esc(contract.client_name || BLANK)}<br>DNI ${esc(contract.client_dni || BLANK)}</div>
+      </div>
     </div>
   </div>
 </article>

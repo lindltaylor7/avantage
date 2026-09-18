@@ -85,7 +85,7 @@
           <div class="form-group ct-wide"><label class="form-label">Domicilio</label><input v-model="editing.client_address" class="form-input" /></div>
           <div class="form-group"><label class="form-label">Correo</label><input v-model="editing.client_email" type="email" class="form-input" /></div>
           <div class="form-group"><label class="form-label">Teléfono</label><input v-model="editing.client_phone" class="form-input" /></div>
-          <div class="form-group"><label class="form-label">Representante de la empresa</label><input v-model="editing.representative_name" class="form-input" /></div>
+          <div class="form-group"><label class="form-label">Representante de la empresa</label><input v-model="editing.representative_name" class="form-input" placeholder="Por defecto: Fabian Ninamango Julio Eduardo, Gerente General" /></div>
           <div class="form-group"><label class="form-label">Ciudad</label><input v-model="editing.city" class="form-input" /></div>
           <div class="form-group"><label class="form-label">Fecha del contrato</label><input v-model="editing.contract_date" type="date" class="form-input" /></div>
           <div class="form-group">
