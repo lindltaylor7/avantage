@@ -66,10 +66,11 @@ const BOOKING_ADVISOR_USER_ID = Number(process.env.GOOGLE_BOOKING_ADVISOR_USER_I
 
 // Horizonte máximo de agendamiento: solo se ofrecen (y aceptan) horarios de
 // hoy hasta N días más adelante. days = N + 1 en los constructores de bloques,
-// que cuentan el día 0 = hoy. Era 1 (hoy y mañana): en conversaciones reales
-// de otro bot, la agenda corta rechazaba el día que el lead pedía ("este
-// jueves", "el sábado") y el agendamiento caía. Con 6 cubre la semana.
-const MAX_BOOKING_DAYS_AHEAD = Number(process.env.WHATSAPP_BOOKING_MAX_DAYS_AHEAD) || 6;
+// que cuentan el día 0 = hoy. Por defecto 1 (hoy y mañana): es la agenda
+// corta con la que trabaja el asesor. Ampliarla es decisión del equipo:
+// basta con WHATSAPP_BOOKING_MAX_DAYS_AHEAD (p. ej. 6 = toda la semana), y
+// los horarios ofrecidos siempre salen de su horario semanal y su calendario.
+const MAX_BOOKING_DAYS_AHEAD = Number(process.env.WHATSAPP_BOOKING_MAX_DAYS_AHEAD) || 1;
 const BOOKING_WINDOW_DAYS = MAX_BOOKING_DAYS_AHEAD + 1;
 
 // Tope de bloques al consultar TODA la ventana de agenda. Los bloques vienen
