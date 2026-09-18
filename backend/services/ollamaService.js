@@ -192,6 +192,57 @@ function hasExplicitDayMention(text) {
   return EXPLICIT_DAY_RE.test(String(text || ''));
 }
 
+const WEEKDAY_NAMES = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+const FLAT_WEEKDAY_NAMES = WEEKDAY_NAMES.map(flatten);
+const EXPLICIT_CLOCK_GLOBAL_RE = new RegExp(EXPLICIT_CLOCK_RE.source, 'gi');
+
+function addDaysIso(iso, days) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d) + days * 86400000).toISOString().slice(0, 10);
+}
+
+function weekdayOfIso(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
+/**
+ * Resuelve en código un día nombrado por su nombre ("el sábado", "sábado a
+ * las 11") al más próximo desde hoy (hoy mismo si coincide).
+ *
+ * Caso real: el bot ofreció "el sábado 19 de 9:30 a.m. a 12:30 p.m.", el lead
+ * pidió "Sábado a las 9:30am" y el modelo lo convirtió en otra fecha — al
+ * prompt solo le llega la fecha ISO de hoy y tiene que calcular el día de la
+ * semana por su cuenta, cosa en la que se equivoca. Resultado: "Ese día no
+ * hay agenda" dos veces seguidas y traspaso a un asesor de un lead que estaba
+ * agendando. Devuelve null (y decide el modelo) si el texto nombra más de un
+ * día, habla de otra semana, o trae un día del mes que no coincide.
+ */
+function resolveWeekdayDate(text, todayIso) {
+  const flat = flatten(text);
+  const names = [...new Set(flat.match(new RegExp(`\\b(?:${FLAT_WEEKDAY_NAMES.join('|')})\\b`, 'g')) || [])];
+  if (names.length !== 1) return null;
+  if (/\b(?:proxima|siguiente|otra)\s+semana\b|\bsubsiguiente\b/.test(flat)) return null;
+
+  const diff = (FLAT_WEEKDAY_NAMES.indexOf(names[0]) - weekdayOfIso(todayIso) + 7) % 7;
+  const date = addDaysIso(todayIso, diff);
+
+  // "sábado 26": si además nombra un día del mes, tiene que coincidir. Las
+  // horas ("a las 11", "9:30am") se quitan antes para no confundirlas.
+  const dayOfMonth = flat.replace(EXPLICIT_CLOCK_GLOBAL_RE, ' ').match(/\b(\d{1,2})\b/);
+  if (dayOfMonth && Number(dayOfMonth[1]) !== Number(date.slice(8, 10))) return null;
+
+  return date;
+}
+
+/** "viernes 2026-09-18, sábado 2026-09-19, ..." para anclar al modelo en el calendario real. */
+function upcomingCalendar(todayIso, days) {
+  return Array.from({ length: days + 1 }, (_, i) => {
+    const iso = addDaysIso(todayIso, i);
+    return `${WEEKDAY_NAMES[weekdayOfIso(iso)]} ${iso}`;
+  }).join(', ');
+}
+
 const OPENS_WITH_GREETING_RE = /^\s*[¡!]*\s*(hola|buenas|buenos d[ií]as|buenas tardes|buenas noches|buen d[ií]a|qu[eé] tal)\b/i;
 
 /**
@@ -879,7 +930,8 @@ Responde ÚNICAMENTE en JSON válido: {"name": "<nombre o el texto tal cual>", "
       return this.fallbackParseSchedulingDate(text, todayIso);
     }
 
-    const prompt = `Hoy es ${todayIso} (formato YYYY-MM-DD, zona horaria de Lima, Perú).
+    const prompt = `Hoy es ${WEEKDAY_NAMES[weekdayOfIso(todayIso)]} ${todayIso} (formato YYYY-MM-DD, zona horaria de Lima, Perú).
+Calendario de los próximos días: ${upcomingCalendar(todayIso, 7)}.
 
 Alguien acaba de responder esto cuando le preguntaron qué día prefiere para una llamada:
 """${text}"""
@@ -902,7 +954,10 @@ Responde ÚNICAMENTE en JSON válido: {"date": "YYYY-MM-DD" o null, "preferredTi
       // completaba con "hoy" en vez de responder null. Se descarta esa fecha
       // si el texto original no menciona un día de verdad.
       const rawDate = !declined && typeof parsed.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.date) ? parsed.date : null;
-      const date = rawDate && hasExplicitDayMention(text) ? rawDate : null;
+      // Un día nombrado por su nombre se resuelve en código: el modelo se
+      // equivoca calculando el día de la semana (ver resolveWeekdayDate).
+      const weekdayDate = declined ? null : resolveWeekdayDate(text, todayIso);
+      const date = weekdayDate || (rawDate && hasExplicitDayMention(text) ? rawDate : null);
       const preferredTime = typeof parsed.preferredTime === 'string' && /^\d{2}:\d{2}$/.test(parsed.preferredTime) ? parsed.preferredTime : null;
       const normalizedTime = normalizeBusinessHour(preferredTime, text);
       // La precisión se decide sobre el texto original, no sobre lo que
@@ -997,6 +1052,11 @@ Responde ÚNICAMENTE en JSON válido: {"date": "YYYY-MM-DD" o null, "preferredTi
     // el contrato de la función sea el mismo que el del camino con LLM.
     const timePrecision = preferredTime ? (hasExplicitClockMention(text) ? 'exact' : 'vague') : null;
 
+    // Antes que "hoy"/"mañana": en "el sábado en la mañana" el día es el sábado.
+    const weekdayDate = resolveWeekdayDate(text, todayIso);
+    if (weekdayDate) {
+      return { date: weekdayDate, preferredTime, timePrecision, declined: false, source: 'fallback' };
+    }
     if (/\bhoy\b/.test(normalized)) {
       return { date: todayIso, preferredTime, timePrecision, declined: false, source: 'fallback' };
     }

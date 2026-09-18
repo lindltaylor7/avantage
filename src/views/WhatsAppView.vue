@@ -697,6 +697,7 @@ const SCHEDULING_STATUSES = new Set(['scheduling_date', 'scheduling_time']);
 const botStatusIcon = computed(() => {
   if (!botSession.value) return '';
   if (botSession.value.status === 'completed') return '✅';
+  if (botSession.value.status === 'frozen') return '🧊';
   if (SCHEDULING_STATUSES.has(botSession.value.status)) return '📅';
   return botSession.value.bot_enabled ? '🤖' : '⏸️';
 });
@@ -704,6 +705,7 @@ const botStatusIcon = computed(() => {
 const botStatusLabel = computed(() => {
   if (!botSession.value) return '';
   if (botSession.value.status === 'completed') return 'Avan completado';
+  if (botSession.value.status === 'frozen') return 'Congelado por inactividad';
   if (!botSession.value.bot_enabled) return 'Bot pausado';
   if (botSession.value.status === 'scheduling_date') return 'Avan: preguntando qué día prefiere';
   if (botSession.value.status === 'scheduling_time') return 'Avan: eligiendo horario de llamada';
@@ -713,6 +715,7 @@ const botStatusLabel = computed(() => {
 const botStatusHint = computed(() => {
   if (!botSession.value) return '';
   if (botSession.value.status === 'completed') return 'El contacto ya completó la conversación con Avan y se registró como lead.';
+  if (botSession.value.status === 'frozen') return 'El contacto no respondió al recordatorio. Si vuelve a escribir, Avan retoma la conversación donde quedó.';
   if (SCHEDULING_STATUSES.has(botSession.value.status)) return 'Avan ya evaluó el tema y está coordinando el horario de la llamada con el contacto.';
   return 'Avan está conversando automáticamente con este contacto.';
 });

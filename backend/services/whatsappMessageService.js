@@ -837,7 +837,7 @@ export class WhatsappMessageService {
       timeZone: 'America/Lima', day: '2-digit', month: '2-digit', year: 'numeric'
     });
     const timeFmt = new Intl.DateTimeFormat('es-PE', {
-      timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hour12: false
+      timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
     });
     const [ly, lm, ld] = dateStr.split('-');
     const dayLabel = `${ld}/${lm}/${ly}`;

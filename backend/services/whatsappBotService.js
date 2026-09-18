@@ -172,6 +172,21 @@ function collapseDuplicatePreposition(text) {
 const INACTIVITY_NUDGE_MS = 60 * 60 * 1000;
 const INACTIVITY_FREEZE_MS = 60 * 60 * 1000;
 
+// El "¿Estás ahí?" solo sale en este rango (hora de Lima, [desde, hasta)).
+// Caso real: leads que escribieron pasada la medianoche recibían el
+// recordatorio a las 2–5 a.m. — invasivo, y a la hora siguiente quedaban
+// congelados sin haber tenido chance real de responder. Fuera del rango el
+// recordatorio se aplaza hasta la mañana; el plazo para congelar corre desde
+// que se manda de verdad (nudge_sent_at), así que también se aplaza.
+const NUDGE_QUIET_END_HOUR = 8;
+const NUDGE_QUIET_START_HOUR = 21;
+
+// Estado de una sesión congelada por inactividad. Antes se marcaba como
+// "completed" y el bot ya no le respondía a quien volvía a escribir más
+// tarde (caso real: "Buen día, de dónde son?" quedó sin respuesta). Se
+// distingue de "completed" para poder reactivarla en el siguiente mensaje.
+const FROZEN_STATUS = 'frozen';
+
 // Recordatorio previo a la reunión: se manda cuando faltan menos de estas dos
 // horas. `MIN_AGE` deja fuera las reuniones recién agendadas: con solo 1 hora
 // de anticipación mínima entre los bloques ofrecidos y ahora, es normal
@@ -974,6 +989,12 @@ export class WhatsappBotService {
       return;
     }
 
+    if (await this._isFrozenSession(waId, session)) {
+      const status = await this.reactivateFrozenSession(waId, session);
+      this.bufferMessage(waId, text, this.debounceForStatus(status));
+      return;
+    }
+
     if (session.status === 'completed') {
       // Si ya tiene una reunión real agendada, un mensaje nuevo puede ser
       // algo que sí necesita atención (reagendar, queja, pregunta por el
@@ -1005,6 +1026,51 @@ export class WhatsappBotService {
     // buffer re-lee el estado real y enruta al handler que corresponda.
     await this.clearNudge(waId);
     this.bufferMessage(waId, text, this.debounceForStatus(session.status));
+  }
+
+  /**
+   * ¿La sesión quedó congelada por inactividad? Además del estado "frozen",
+   * reconoce las congeladas antes de que existiera ese estado: quedaron como
+   * "completed" sin reunión y con el lead en la etapa "congelado".
+   */
+  async _isFrozenSession(waId, session) {
+    if (session.status === FROZEN_STATUS) return true;
+    if (session.status !== 'completed' || !session.nudge_sent_at) return false;
+    const meeting = this.scheduledMeetingService ? await this.scheduledMeetingService.getLatestForContact(waId) : null;
+    if (meeting) return false;
+    const lead = await this.leadService.findByPhone(waId);
+    return lead?.status === 'congelado';
+  }
+
+  /**
+   * El contacto congelado volvió a escribir: se retoma la conversación en el
+   * paso donde quedó y el lead vuelve a "En Calificación". Si estaba
+   * agendando, se descartan los días que se le ofrecieron (pudieron pasar
+   * horas y ya no ser válidos) para que se recalculen con la agenda actual.
+   * Devuelve el estado con el que queda la sesión.
+   */
+  async reactivateFrozenSession(waId, session) {
+    const answers = typeof session.answers === 'string' ? JSON.parse(session.answers) : (session.answers || {});
+    const previous = answers.__frozenFrom;
+    delete answers.__frozenFrom;
+
+    let status = 'active';
+    if (SCHEDULING_STATUSES.includes(previous) && answers.__scheduling) {
+      // Los horarios que vio al elegir hora pudieron ya pasar: se vuelve a
+      // elegir el día, que recalcula los bloques libres.
+      status = previous === 'scheduling_time' ? 'scheduling_date' : previous;
+      delete answers.__scheduling.availableDays;
+      delete answers.__scheduling.availableWindows;
+    } else {
+      delete answers.__scheduling;
+    }
+
+    await db('whatsapp_bot_sessions').where({ wa_id: waId }).update({
+      status, nudge_sent_at: null, answers: JSON.stringify(answers), updated_at: db.fn.now()
+    });
+    await this.moveFunnelStage(waId, 'calificando');
+    this.logActivity({ type: 'frozen_reactivated', waId, status });
+    return status;
   }
 
   /**
@@ -3124,7 +3190,11 @@ export class WhatsappBotService {
       )
       : new Set();
 
+    const limaHour = Number(LIMA_TIME_FORMATTER.format(new Date(now)).slice(0, 2));
+    const isQuietHours = limaHour < NUDGE_QUIET_END_HOUR || limaHour >= NUDGE_QUIET_START_HOUR;
+
     for (const session of awaitingReply) {
+      if (isQuietHours) break;
       if (withUpcomingMeeting.has(session.wa_id)) continue;
 
       const silentMs = now - new Date(session.updated_at).getTime();
@@ -3157,7 +3227,10 @@ export class WhatsappBotService {
       if (silentSinceNudgeMs < INACTIVITY_FREEZE_MS) continue;
 
       try {
-        await db('whatsapp_bot_sessions').where({ id: session.id }).update({ status: 'completed' });
+        // Se guarda el paso en el que quedó para retomarlo si vuelve a escribir.
+        const answers = typeof session.answers === 'string' ? JSON.parse(session.answers) : (session.answers || {});
+        answers.__frozenFrom = session.status;
+        await db('whatsapp_bot_sessions').where({ id: session.id }).update({ status: FROZEN_STATUS, answers: JSON.stringify(answers) });
         await this.moveFunnelStage(session.wa_id, 'congelado');
         this.logActivity({ type: 'inactivity_frozen', waId: session.wa_id });
       } catch (error) {

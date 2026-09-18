@@ -46,3 +46,49 @@ test('fallbackParseSchedulingDate sigue combinando "mañana" (día) con "hoy" y 
   assert.equal(ollama.fallbackParseSchedulingDate('mañana a las 10', TODAY).date, tomorrow);
   assert.equal(ollama.fallbackParseSchedulingDate('hoy a las 6pm', TODAY).date, TODAY);
 });
+
+// Caso real (18/09/2026, viernes): el bot ofreció "el sábado 19 de 9:30 a.m.
+// a 12:30 p.m.", el lead pidió "Sábado a las 9:30am" y el modelo devolvió otra
+// fecha — "Ese día no hay agenda" dos veces y traspaso a un asesor. El día
+// nombrado por su nombre ahora se resuelve en código, no con el modelo.
+const FRIDAY = '2026-09-18';
+
+function withStubbedLLM(response) {
+  const service = new OllamaService();
+  service.hasLLM = () => true;
+  service._generateJSON = async () => response;
+  return service;
+}
+
+test('parseSchedulingDate corrige el sábado que el modelo calculó mal', async () => {
+  const service = withStubbedLLM({ date: '2026-09-26', preferredTime: '09:30', declined: false });
+  const result = await service.parseSchedulingDate('Sábado a las 9:30am porfavor', FRIDAY, 7);
+  assert.equal(result.date, '2026-09-19');
+  assert.equal(result.preferredTime, '09:30');
+});
+
+test('parseSchedulingDate resuelve "Sábado a las 11?" sin tomar el 11 como día del mes', async () => {
+  const service = withStubbedLLM({ date: '2026-09-20', preferredTime: '11:00', declined: false });
+  assert.equal((await service.parseSchedulingDate('Sábado a las 11?', FRIDAY, 7)).date, '2026-09-19');
+});
+
+test('parseSchedulingDate respeta un día del mes que no coincide con el nombre', async () => {
+  const service = withStubbedLLM({ date: '2026-09-26', preferredTime: null, declined: false });
+  assert.equal((await service.parseSchedulingDate('el sábado 26', FRIDAY, 14)).date, '2026-09-26');
+});
+
+test('parseSchedulingDate deja al modelo "el sábado de la próxima semana"', async () => {
+  const service = withStubbedLLM({ date: '2026-09-26', preferredTime: null, declined: false });
+  assert.equal((await service.parseSchedulingDate('el sábado de la próxima semana', FRIDAY, 14)).date, '2026-09-26');
+});
+
+test('parseSchedulingDate: el mismo día de la semana que hoy es hoy', async () => {
+  const service = withStubbedLLM({ date: '2026-09-25', preferredTime: null, declined: false });
+  assert.equal((await service.parseSchedulingDate('el viernes', FRIDAY, 7)).date, FRIDAY);
+});
+
+test('fallbackParseSchedulingDate reconoce el nombre del día antes que "mañana" como momento', () => {
+  const result = ollama.fallbackParseSchedulingDate('el sábado en la mañana', FRIDAY);
+  assert.equal(result.date, '2026-09-19');
+  assert.equal(result.preferredTime, '09:00');
+});
