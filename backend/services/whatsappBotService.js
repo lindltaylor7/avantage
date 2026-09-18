@@ -396,6 +396,9 @@ export function isAdFormMessage(text) {
 }
 
 /** Interpreta la elección de modalidad de llamada: 'phone' | 'meet' | null. */
+// El lead pide llamada telefónica en vez de Google Meet (texto ya normalizado).
+const PHONE_MODE_RE = /\b(llamad[ao]s?|llamenme|llamame|me llamen|me pueden llamar|por telefono|telefonica(mente)?|por celular)\b/;
+
 function parseCallMode(text) {
   const n = normalize(text || '');
   const isRefusal = ['no', 'ninguna', 'ninguno'].includes(n.trim());
@@ -1871,8 +1874,12 @@ export class WhatsappBotService {
 
       const session = await this.getSession(waId);
       const answers = typeof session.answers === 'string' ? JSON.parse(session.answers) : (session.answers || {});
-      answers.__scheduling = { topic, email: email || null, mode: null, phone: answers.phone || null, discount: 0, when: when || answers.__when || null };
-      await this.updateSession(waId, { status: 'scheduling_mode', answers: JSON.stringify(answers) });
+      // Google Meet es la modalidad por defecto (con su descuento): preguntar
+      // "¿telefónica o Meet?" era un paso más antes de ver horarios, y cada
+      // paso extra pierde leads. Si prefiere llamada, lo pide al elegir
+      // horario (ver _switchToPhoneIfAsked).
+      answers.__scheduling = { topic, email: email || null, mode: 'meet', phone: answers.phone || null, discount: MEET_DISCOUNT_PCT, when: when || answers.__when || null };
+      await this.updateSession(waId, { answers: JSON.stringify(answers) });
 
       // Devolverle lo que entendimos antes de saltar a agendar: es el único
       // momento en que puede corregirnos si interpretamos mal su carrera o su
@@ -1886,12 +1893,14 @@ export class WhatsappBotService {
       // con un placeholder, para no perderlo insistiendo), decírselo así se
       // lee como que nadie escuchó "no tengo tema" — de ahí salía el reclamo
       // repetido en plena elección de modalidad.
-      const hasTopic = !!answers.problem;
-      const closing = hasTopic
-        ? 'Coordinemos una reunión con nuestro asesor para revisar tu tema 🙌 ¿Cómo prefieres la reunión?'
-        : 'Coordinemos una reunión con nuestro asesor para ayudarte a definir tu tema 🙌 ¿Cómo prefieres la reunión?';
-
-      await this.send(waId, `${opener}${closing}\n\n1. Telefónica\n2. Por Google Meet (con ${MEET_DISCOUNT_PCT}% de descuento sobre el precio final)`);
+      const hasTopic = !!answers.problem && !/sin tema definido/i.test(answers.problem);
+      const purpose = hasTopic ? 'revisar tu tema' : 'ayudarte a definir tu tema';
+      await this.send(
+        waId,
+        `${opener}Coordinemos una reunión por Google Meet con nuestro asesor para ${purpose} 🙌 ` +
+        `Por Google Meet tienes ${MEET_DISCOUNT_PCT}% de descuento sobre el precio final; si prefieres una llamada telefónica, solo dímelo.`
+      );
+      await this.promptForDate(waId);
     } catch (error) {
       // Si la conexión de Google Calendar del asesor caducó, avisar al equipo
       // en el panel para que la reconecte — si no, todos los leads que
@@ -1979,7 +1988,10 @@ export class WhatsappBotService {
 
     // Casos que la máquina de estados ya resuelve bien por sí sola: no se
     // gasta una llamada al LLM en ellos.
-    if (!scheduling || this._isSchedulingRefusal(trimmed) || isObviousStepAnswer(session.status, trimmed)) {
+    // Pedir llamada en vez de Google Meet mientras elige horario tampoco es
+    // una duda suelta: lo resuelve el paso de horario (_switchToPhoneIfAsked).
+    const asksPhoneCall = session.status === 'scheduling_time' && PHONE_MODE_RE.test(normalize(trimmed));
+    if (!scheduling || this._isSchedulingRefusal(trimmed) || isObviousStepAnswer(session.status, trimmed) || asksPhoneCall) {
       return this.dispatchByStatus(waId, text);
     }
 
@@ -2915,6 +2927,8 @@ ${numberedList(fullSlotLabels(offer))}
       return;
     }
 
+    if (await this._switchToPhoneIfAsked(waId, answers, scheduling, trimmed)) return;
+
     // Al LLM se le pasan las etiquetas completas (con fecha) para que pueda
     // interpretar "el de mañana"; al contacto se le muestran ya recortadas.
     const labels = scheduling.slots.map((s) => s.label);
@@ -2962,6 +2976,33 @@ ${numberedList(fullSlotLabels(offer))}
     }
 
     return this.bookSlot(waId, slot);
+  }
+
+  /**
+   * La reunión es por Google Meet por defecto; si al elegir horario el lead
+   * pide una llamada telefónica, se cambia la modalidad (sin el descuento de
+   * Meet). Si en el mismo mensaje también eligió horario ("que me llamen, el
+   * 2"), se sigue procesando esa elección; si no, se le vuelven a mostrar los
+   * horarios. El número se pide solo si hace falta, al confirmar (confirmSlot).
+   * Devuelve true si ya respondió.
+   */
+  async _switchToPhoneIfAsked(waId, answers, scheduling, text) {
+    if (scheduling.mode === 'phone' || !PHONE_MODE_RE.test(normalize(text))) return false;
+
+    scheduling.mode = 'phone';
+    scheduling.discount = 0;
+    if (!scheduling.phone && waIdIsPhone(waId)) scheduling.phone = digitsOnly(waId);
+    this.logActivity({ type: 'switched_to_phone', waId, text });
+    await this.updateSession(waId, { answers: JSON.stringify(answers) });
+
+    // También eligió horario en el mismo mensaje: que siga el flujo normal.
+    if (/\d/.test(normalize(text).replace(PHONE_MODE_RE, ' '))) return false;
+
+    await this.send(
+      waId,
+      `Listo, será por llamada telefónica 📞 ¿Qué horario prefieres?\n\n${numberedList(fullSlotLabels(scheduling.slots))}\n\nResponde con el número, o dime otro día u hora.`
+    );
+    return true;
   }
 
   /**

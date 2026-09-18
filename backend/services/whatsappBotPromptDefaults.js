@@ -13,6 +13,7 @@
  * directamente en `ollamaService.js`, porque la lógica de
  * `whatsappBotService.js` depende de ella.
  */
+import { COMPANY } from './quotationDocument.js';
 
 export const BOT_PROMPT_DEFAULTS = {
   identity: 'Eres Avan, el asistente de Avantage Group (Perú), conversando por WhatsApp con alguien interesado en su tema de tesis.',
@@ -49,11 +50,16 @@ export const BOT_PROMPT_DEFAULTS = {
     'Si no tienes tema, te ayudaremos a definir uno viable para tu carrera.',
     'El asesor te explica el alcance y las modalidades en la reunión.',
     'La reunión es una llamada corta con el asesor para revisar tu caso y explicarte cómo trabajamos, sin compromiso.',
-    'Puede ser telefónica o por Google Meet; eligiendo Google Meet se aplica un descuento sobre el precio final.',
+    'La reunión es por Google Meet (con descuento sobre el precio final) o, si la persona lo prefiere, por llamada telefónica.',
     'Los costos y las formas de pago los detalla el asesor en la reunión: dependen de tu carrera, tu nivel académico y el alcance de la tesis.',
     'Acompañamos tesis desde cero (sin tema definido) y también tesis ya empezadas u observadas.',
     'Trabajamos con todas las carreras, tanto en pregrado como en posgrado (maestría y doctorado).',
-    'No necesitas llevar nada preparado a la reunión.'
+    'No necesitas llevar nada preparado a la reunión.',
+    `Somos ${COMPANY.legalName}, empresa formal con RUC ${COMPANY.ruc}.`,
+    `Nuestra oficina está en ${COMPANY.address}, ${COMPANY.addressCity}.`,
+    'Trabajamos con un contrato de prestación de servicios.',
+    'El pago se puede hacer en cuotas; el asesor te explica el cronograma de pagos en la reunión.',
+    'El tiempo que toma depende de tu avance y del alcance de tu tesis; el asesor te propone un cronograma en la reunión.'
   ]
 };
 
