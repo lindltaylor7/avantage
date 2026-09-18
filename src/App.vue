@@ -63,10 +63,9 @@
 </template>
 
 <script setup>
-import { computed, onMounted } from 'vue';
+import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { authState, clearSession, setSession } from './auth.js';
-import { apiFetch } from './apiClient.js';
+import { authState, clearSession } from './auth.js';
 import AdminLayout from './components/AdminLayout.vue';
 import ClientPortalLayout from './components/ClientPortalLayout.vue';
 
@@ -90,26 +89,8 @@ function handleLogout() {
   router.push('/login');
 }
 
-// Los permisos quedan grabados en el usuario guardado al iniciar sesión, así
-// que si un admin cambia los permisos de un rol (o se agrega un módulo
-// nuevo, como Finanzas), quien ya tenía la sesión abierta no lo ve hasta
-// volver a loguearse. Para no depender de eso, se refrescan en silencio al
-// abrir la app — si el token ya no es válido, apiFetch se encarga de cerrar
-// la sesión sola.
-async function refreshPermissions() {
-  if (!authState.token) return;
-  try {
-    const response = await apiFetch('/api/auth/me');
-    if (response.ok) {
-      const data = await response.json();
-      setSession(authState.token, data.user);
-    }
-  } catch (error) {
-    console.warn('No se pudo refrescar el usuario/permisos:', error);
-  }
-}
-
-onMounted(refreshPermissions);
+// Los permisos (y el token) se refrescan en el guard del router: ver
+// refreshSessionOnce() en apiClient.js.
 </script>
 
 <style scoped>

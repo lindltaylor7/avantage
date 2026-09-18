@@ -26,6 +26,7 @@ import PortalProjectDetailView from '../views/portal/PortalProjectDetailView.vue
 import PortalProfileView from '../views/portal/PortalProfileView.vue';
 import { isAuthenticated, hasPermission } from '../auth.js';
 import { isClientAuthenticated } from '../clientAuth.js';
+import { refreshSessionOnce } from '../apiClient.js';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -63,7 +64,7 @@ const router = createRouter({
   ]
 });
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   if (to.meta.requiresClientAuth && !isClientAuthenticated()) {
     return { name: 'portal-login', query: { redirect: to.fullPath } };
   }
@@ -73,6 +74,11 @@ router.beforeEach((to) => {
   if (!isAuthenticated()) {
     return { name: 'login', query: { redirect: to.fullPath } };
   }
+
+  // Permisos al día (y token reemitido si cambiaron) antes de evaluar el
+  // permiso de la ruta y de que la vista llame a la API.
+  await refreshSessionOnce();
+  if (!isAuthenticated()) return { name: 'login', query: { redirect: to.fullPath } };
 
   if (to.meta.permission && !hasPermission(to.meta.permission)) {
     return { name: 'dashboard' };

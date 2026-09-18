@@ -189,7 +189,15 @@ app.get('/api/auth/me', requireAuth, async (req, res) => {
     if (!user) {
       return res.status(401).json({ error: 'Usuario no encontrado.' });
     }
-    res.json({ user });
+    // Los permisos viajan dentro del JWT (requirePermission no consulta la
+    // DB). Si cambiaron desde el login —un permiso nuevo por migración o uno
+    // asignado desde Roles—, se emite un token nuevo: si no, el panel mostraba
+    // la sección (con los permisos frescos de aquí) y la API respondía 403
+    // con los del token viejo. Solo se reemite cuando cambian, para no
+    // alargar la sesión en cada carga.
+    const tokenPermissions = [...(req.user.permissions || [])].sort().join(',');
+    const currentPermissions = [...(user.permissions || [])].sort().join(',');
+    res.json(tokenPermissions === currentPermissions ? { user } : { user, token: signToken(user) });
   } catch (error) {
     console.error('❌ Error al obtener el usuario actual:', error);
     res.status(500).json({ error: 'Error al obtener el usuario actual.', details: error.message });
