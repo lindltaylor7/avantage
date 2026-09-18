@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractLeadFormFields, detectRedundantAsk, daysMatchingPreferredTime } from '../whatsappBotService.js';
+import { extractLeadFormFields, detectRedundantAsk, daysMatchingPreferredTime, spreadSlotsAcrossDays } from '../whatsappBotService.js';
 
 // Mensaje real (anonimizado) de un lead de Meta Ads con formulario propio:
 // llega como líneas "¿Pregunta?: Respuesta" que el LLM de conversación a
@@ -113,4 +113,26 @@ test('daysMatchingPreferredTime acepta lo cercano cuando la hora la dedujo el pa
   ];
   assert.deepEqual(daysMatchingPreferredTime(slots, '15:00', 'vague'), ['2026-09-16']);
   assert.deepEqual(daysMatchingPreferredTime(slots, '15:00', 'exact'), []);
+});
+
+// Primer ofrecimiento de horarios: concretos y repartidos entre días, en vez
+// de "¿qué día prefieres?" con franjas vagas ("varios horarios entre...").
+function offerSlot(date, hhmm) {
+  return { date, startTime: `${date}T${hhmm}:00-05:00`, label: `${date} ${hhmm}` };
+}
+
+test('spreadSlotsAcrossDays reparte mañana y tarde entre los días más próximos', () => {
+  const slots = [
+    offerSlot('2026-09-18', '10:00'), offerSlot('2026-09-18', '10:30'), offerSlot('2026-09-18', '15:00'),
+    offerSlot('2026-09-19', '09:30'), offerSlot('2026-09-19', '12:00'),
+    offerSlot('2026-09-21', '09:00'), offerSlot('2026-09-21', '16:00')
+  ];
+  const picked = spreadSlotsAcrossDays(slots, 5, 2).map((s) => s.label);
+  assert.deepEqual(picked, ['2026-09-18 10:00', '2026-09-18 15:00', '2026-09-19 09:30', '2026-09-19 12:00', '2026-09-21 09:00']);
+});
+
+test('spreadSlotsAcrossDays no repite un día con un solo horario ni pasa del total', () => {
+  const slots = [offerSlot('2026-09-18', '10:00'), offerSlot('2026-09-19', '11:00'), offerSlot('2026-09-19', '18:00')];
+  assert.equal(spreadSlotsAcrossDays(slots, 5, 2).length, 3);
+  assert.equal(spreadSlotsAcrossDays(slots, 2, 2).length, 2);
 });

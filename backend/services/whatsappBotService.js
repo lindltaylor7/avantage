@@ -65,10 +65,23 @@ function typingTimeFor(text) {
 const BOOKING_ADVISOR_USER_ID = Number(process.env.GOOGLE_BOOKING_ADVISOR_USER_ID) || 1;
 
 // Horizonte máximo de agendamiento: solo se ofrecen (y aceptan) horarios de
-// hoy hasta N días más adelante (N = 1 → hoy y mañana). days = N + 1 en los constructores de bloques,
-// que cuentan el día 0 = hoy.
-const MAX_BOOKING_DAYS_AHEAD = Number(process.env.WHATSAPP_BOOKING_MAX_DAYS_AHEAD) || 1;
+// hoy hasta N días más adelante. days = N + 1 en los constructores de bloques,
+// que cuentan el día 0 = hoy. Era 1 (hoy y mañana): en conversaciones reales
+// de otro bot, la agenda corta rechazaba el día que el lead pedía ("este
+// jueves", "el sábado") y el agendamiento caía. Con 6 cubre la semana.
+const MAX_BOOKING_DAYS_AHEAD = Number(process.env.WHATSAPP_BOOKING_MAX_DAYS_AHEAD) || 6;
 const BOOKING_WINDOW_DAYS = MAX_BOOKING_DAYS_AHEAD + 1;
+
+// Tope de bloques al consultar TODA la ventana de agenda. Los bloques vienen
+// en orden cronológico y el tope corta los últimos: con uno bajo (era 100) y
+// una semana de agenda, los últimos días desaparecían de los días disponibles
+// y el bot decía "ese día no hay agenda" teniendo espacio.
+const UPCOMING_SLOTS_LIMIT = 1000;
+
+// Horarios concretos que se proponen en el primer ofrecimiento cuando hay
+// varios días con agenda, repartidos entre los días más próximos.
+const FIRST_OFFER_SLOTS = 5;
+const FIRST_OFFER_MAX_PER_DAY = 2;
 
 // Cantidad de horarios que se le ofrecen al contacto a la vez.
 const SLOTS_TO_OFFER = 3;
@@ -597,6 +610,33 @@ function orderSlotsForDisplay(slots) {
   return [...(slots || [])].sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
 }
 
+/**
+ * Elige hasta `total` horarios repartidos entre los días más próximos (como
+ * mucho `perDay` por día, separados para no ofrecer 10:00 y 10:30 del mismo
+ * día como si fueran dos opciones distintas), en orden de reloj.
+ */
+export function spreadSlotsAcrossDays(slots, total, perDay) {
+  const byDay = new Map();
+  for (const slot of orderSlotsForDisplay(slots)) {
+    if (!byDay.has(slot.date)) byDay.set(slot.date, []);
+    byDay.get(slot.date).push(slot);
+  }
+  const picked = [];
+  for (const daySlots of byDay.values()) {
+    if (picked.length >= total) break;
+    const first = daySlots[0];
+    const chosen = [first];
+    // El segundo del día: el primero que esté al menos 3 horas después
+    // (mañana vs. tarde); si no hay, el último del día.
+    if (perDay > 1 && daySlots.length > 1) {
+      const later = daySlots.find((s) => new Date(s.startTime) - new Date(first.startTime) >= 3 * 60 * 60 * 1000);
+      chosen.push(later || daySlots[daySlots.length - 1]);
+    }
+    picked.push(...chosen.slice(0, Math.min(perDay, total - picked.length)));
+  }
+  return orderSlotsForDisplay(picked);
+}
+
 function numberedList(items) {
   return items.map((item, i) => `${i + 1}. ${item}`).join('\n');
 }
@@ -674,7 +714,7 @@ const PRICE_QUESTION_RE = /(precio|costo|coste|tarifa|cotiza|presupuesto|inversi
 // usan para detectar que está preguntando por algo que la persona YA
 // respondió (o que ya vino en el formulario de un anuncio, ver
 // extractLeadFormFields).
-const ASKS_PROBLEM_RE = /tema\s+en\s+mente|qu[eé]\s+tema|alg[uú]n\s+tema|tu\s+tema\s+de\s+tesis/i;
+const ASKS_PROBLEM_RE = /tema\s+en\s+mente|qu[eé]\s+tema|alg[uú]n\s+tema|tu\s+tema\s+de\s+tesis|tienes\s+(?:un|alg[uú]n)\s+tema/i;
 const ASKS_FIELD_RE = /(?:de|en)\s+qu[eé]\s+carrera|qu[eé]\s+carrera\s+(?:estudias|est[aá]s|cursas|llevas|sigues)|cu[aá]l\s+es\s+tu\s+carrera/i;
 const ASKS_UNIVERSITY_RE = /(?:de|en)\s+qu[eé]\s+universidad|qu[eé]\s+universidad\s+(?:estudias|est[aá]s|cursas)|cu[aá]l\s+es\s+tu\s+universidad|d[oó]nde\s+estudias/i;
 
@@ -686,13 +726,9 @@ const ASKS_UNIVERSITY_RE = /(?:de|en)\s+qu[eé]\s+universidad|qu[eé]\s+universi
  * ("sobre arquitectura de la continental"), el modelo a veces lo extrae
  * correctamente pero igual hace la pregunta que tenía pendiente. También pasa
  * con leads de un formulario de Meta Ads cuya respuesta de avance ya implica
- * "sin tema" (extractLeadFormFields) pero el mensaje de apertura, que SIEMPRE
- * pregunta por el tema por diseño, ya salió: el turno siguiente no debe
- * repetir la misma pregunta. La del tema NO aplica en el primer turno: ese
- * mensaje de apertura pregunta por el tema siempre, por diseño (es el que
- * decide si el contacto responde), aunque el formulario ya haya insinuado
- * que no tiene uno — reemplazarlo perdería el saludo obligatorio de
- * apertura. Devuelve 'problem' | 'field' | 'university' | null.
+ * "sin tema" (extractLeadFormFields). La del tema no se revisa en el primer
+ * turno: ese mensaje es el saludo de apertura, y reemplazarlo lo perdería.
+ * Devuelve 'problem' | 'field' | 'university' | null.
  */
 export function detectRedundantAsk(reply, answers, isFirstTurn = false) {
   const text = String(reply || '');
@@ -1480,14 +1516,15 @@ export class WhatsappBotService {
     // falta (o se pasa a agendar, si ya no falta ninguno).
     const redundantAsk = detectRedundantAsk(result.reply, answers, isFirstTurn);
     if (redundantAsk) {
-      // Carrera y universidad se piden juntas: son un solo turno.
-      const nextQuestion = !answers.problem
-        ? 'Cuéntame, ¿qué tema o problema te gustaría desarrollar en tu tesis?'
-        : (!answers.field && !answers.university
-          ? '¡Perfecto! ¿De qué carrera es tu tesis y en qué universidad estudias?'
-          : (!answers.field
-            ? '¡Perfecto! ¿Y de qué carrera es tu tesis?'
-            : (!answers.university ? '¡Perfecto! ¿Y en qué universidad estudias?' : null)));
+      // Mismo orden que el prompt: carrera y universidad (juntas, un solo
+      // turno) y después el tema, preguntado de forma fácil.
+      const nextQuestion = !answers.field && !answers.university
+        ? '¡Perfecto! ¿De qué carrera eres y en qué universidad estudias?'
+        : (!answers.field
+          ? '¡Perfecto! ¿Y de qué carrera es tu tesis?'
+          : (!answers.university
+            ? '¡Perfecto! ¿Y en qué universidad estudias?'
+            : (!answers.problem ? '¡Perfecto! ¿Ya tienes un tema o una idea para tu tesis, o empiezas desde cero?' : null)));
 
       this.logActivity({
         type: 'redundant_question_fixed',
@@ -2302,11 +2339,13 @@ export class WhatsappBotService {
 
   /**
    * Pasa al paso de agendamiento consultando la disponibilidad REAL del
-   * asesor. Si solo hay un día con espacio, NO pregunta el día: pasa directo
-   * a ofrecer los horarios de ese día. Si hay varios, pregunta cuál prefiere.
+   * asesor. Si solo hay un día con espacio, ofrece los horarios de ese día.
+   * Si hay varios, ofrece horarios concretos repartidos entre los próximos
+   * días (sin preguntar primero el día): el lead elige con un número o pide
+   * otro día/hora.
    */
   async promptForDate(waId) {
-    const upcoming = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID, { limit: 100, days: BOOKING_WINDOW_DAYS });
+    const upcoming = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID, { limit: UPCOMING_SLOTS_LIMIT, days: BOOKING_WINDOW_DAYS });
     const days = [...new Set(upcoming.map((s) => s.date))].sort();
 
     const { answers, scheduling } = this._readScheduling(await this.getSession(waId));
@@ -2440,15 +2479,24 @@ export class WhatsappBotService {
       return;
     }
 
-    // Varios días → se pregunta cuál prefiere, diciéndole desde ya en qué
-    // franja de horas se mueve cada día.
-    const windowsPhrase = this._availableWindowsPhrase(upcoming);
-    if (scheduling) scheduling.availableWindows = windowsPhrase;
-    await this.updateSession(waId, { status: 'scheduling_date', answers: JSON.stringify(answers) });
+    // Varios días → horarios CONCRETOS, repartidos entre los días más
+    // próximos, en vez de preguntar el día y describir franjas ("varios
+    // horarios libres entre las 10 y las 7"): con horas exactas a la vista se
+    // elige con un número. Si ninguna le sirve, puede pedir otro día u hora y
+    // el paso de elección de horario lo resuelve (_answerDayRequestWhileChoosing).
+    const offer = spreadSlotsAcrossDays(upcoming, FIRST_OFFER_SLOTS, FIRST_OFFER_MAX_PER_DAY);
+    if (scheduling) scheduling.slots = offer;
+    const lastDay = days[days.length - 1];
+    await this.updateSession(waId, { status: 'scheduling_time', answers: JSON.stringify(answers) });
     await this.send(
       waId,
       (droppedDayNotice ? `${droppedDayNotice} ` : '📅 ') +
-      `Tenemos agenda ${endSentence(windowsPhrase)} ¿Qué día prefieres para la llamada con el asesor?`
+      `Estos son los próximos horarios libres para tu reunión con el asesor:
+
+${numberedList(fullSlotLabels(offer))}
+
+` +
+      `Responde con el número que prefieras. Si ninguno te acomoda, dime qué día y hora te vienen mejor (tenemos agenda hasta ${dayLabelWithArticle(lastDay)}).`
     );
   }
 
@@ -2684,47 +2732,6 @@ export class WhatsappBotService {
     await this.promptForDate(waId);
   }
 
-  /**
-   * Frase con los días disponibles Y su rango de horas ("hoy de 3:00 p.m. a
-   * 5:30 p.m. y el domingo 6 de 9:00 a.m. a 6:30 p.m."). Nombrar solo los días
-   * hacía que el contacto propusiera horas que no existen ("¿hoy a las 7?") y
-   * gastara dos o tres mensajes en descubrir hasta qué hora hay agenda.
-   */
-  _availableWindowsPhrase(slots) {
-    const ordered = [...(slots || [])].sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
-    const byDay = new Map();
-    for (const slot of ordered) {
-      if (!byDay.has(slot.date)) byDay.set(slot.date, []);
-      byDay.get(slot.date).push(slot);
-    }
-
-    const hourOf = (slot) => slot.timeLabel || formatClockLabel(limaTimeOf(slot.startTime));
-
-    // Un hueco de más de 35 min entre dos horarios libres seguidos del mismo
-    // día significa que hay un tramo ocupado en el medio (ej. una hora ya
-    // agendada en otra prueba). Decir "de 2 a 6:30 p.m." ahí prometía un
-    // bloque continuo que no existe: el contacto pedía una hora intermedia
-    // razonable y el bot le decía que no había, contradiciendo lo que acababa
-    // de afirmar. Con huecos se avisa "varios horarios entre" en vez de "de...a".
-    const hasGap = (daySlots) => daySlots.some((slot, i) => {
-      if (i === 0) return false;
-      return new Date(slot.startTime) - new Date(daySlots[i - 1].startTime) > 35 * 60 * 1000;
-    });
-
-    const parts = [...byDay.entries()].map(([date, daySlots]) => {
-      const first = daySlots[0];
-      const last = daySlots[daySlots.length - 1];
-      if (daySlots.length === 1) return `${dayLabelWithArticle(date)} a las ${hourOf(first)}`;
-      return hasGap(daySlots)
-        ? `${dayLabelWithArticle(date)} con varios horarios libres entre las ${hourOf(first)} y las ${hourOf(last)}`
-        : `${dayLabelWithArticle(date)} de ${hourOf(first)} a ${hourOf(last)}`;
-    });
-
-    if (parts.length === 0) return '';
-    if (parts.length === 1) return parts[0];
-    return `${parts.slice(0, -1).join(', ')} y ${parts[parts.length - 1]}`;
-  }
-
   /** Frase legible con los días que sí tienen espacio (ej. "hoy y el viernes 28"). */
   _availableDaysPhrase(days) {
     const labels = (days || []).map(formatShortDayLabel);
@@ -2760,7 +2767,7 @@ export class WhatsappBotService {
     // se guardan para no volver a consultar en cada intento.
     let availableDays = scheduling.availableDays;
     if (!availableDays || availableDays.length === 0) {
-      const upcoming = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID, { limit: 100, days: BOOKING_WINDOW_DAYS });
+      const upcoming = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID, { limit: UPCOMING_SLOTS_LIMIT, days: BOOKING_WINDOW_DAYS });
       availableDays = [...new Set(upcoming.map((s) => s.date))].sort();
       scheduling.availableDays = availableDays;
     }
@@ -2797,7 +2804,7 @@ export class WhatsappBotService {
     // los días; la confirmación nombra la fecha completa, así que si se
     // refería a otro día lo ve ahí mismo y lo corrige.
     if (!date && preferredTime) {
-      const freeSlots = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID, { limit: 100, days: BOOKING_WINDOW_DAYS });
+      const freeSlots = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID, { limit: UPCOMING_SLOTS_LIMIT, days: BOOKING_WINDOW_DAYS });
       availableDays = [...new Set(freeSlots.map((s) => s.date))].sort();
       scheduling.availableDays = availableDays;
 
@@ -2833,9 +2840,9 @@ export class WhatsappBotService {
     const daySlots = await this.googleCalendarService.getFreeSlotsForDate(BOOKING_ADVISOR_USER_ID, date, { limit: SLOTS_TO_OFFER, nearTime: preferredTime });
     if (daySlots.length === 0) {
       // Se ocupó la última franja de ese día entre que se propuso y ahora.
-      const fresh = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID, { limit: 100, days: BOOKING_WINDOW_DAYS });
+      const fresh = await this.googleCalendarService.getUpcomingFreeSlots(BOOKING_ADVISOR_USER_ID, { limit: UPCOMING_SLOTS_LIMIT, days: BOOKING_WINDOW_DAYS });
       scheduling.availableDays = [...new Set(fresh.map((s) => s.date))].sort();
-      scheduling.availableWindows = this._availableWindowsPhrase(fresh);
+      delete scheduling.availableWindows;
       if (scheduling.availableDays.length === 0) {
         delete answers.__scheduling;
         await this.updateSession(waId, { answers: JSON.stringify(answers) });

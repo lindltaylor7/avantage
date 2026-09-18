@@ -42,9 +42,10 @@ function cosineSimilarity(vecA, vecB) {
  */
 function describeMissingPriority(knownAnswers) {
   const answers = knownAnswers || {};
-  if (!answers.problem) return 'el tema o problema de tesis que quiere investigar. Si ya te dijo que no tiene tema, no lo vuelvas a preguntar: guárdalo como "Sin tema definido (desde cero)" y sigue con la carrera. NO marques "ready": true todavía.';
-  if (!answers.field) return 'ya conoces el tema; ahora te falta la CARRERA de su tesis. NO marques "ready": true todavía.';
-  if (!answers.university) return 'ya conoces el tema y la carrera; ahora te falta la UNIVERSIDAD donde estudia. NO marques "ready": true todavía.';
+  if (!answers.field && !answers.university) return 'su CARRERA y su UNIVERSIDAD, en una sola pregunta. NO marques "ready": true todavía.';
+  if (!answers.field) return 'ya sabes su universidad; ahora te falta la CARRERA de su tesis. NO marques "ready": true todavía.';
+  if (!answers.university) return 'ya sabes su carrera; ahora te falta la UNIVERSIDAD donde estudia. NO marques "ready": true todavía.';
+  if (!answers.problem) return 'su TEMA de tesis, preguntado de forma fácil: "¿Ya tienes un tema o una idea para tu tesis, o empiezas desde cero?". Si ya te dijo que no tiene tema, no lo vuelvas a preguntar: guárdalo como "Sin tema definido (desde cero)". NO marques "ready": true todavía.';
   return 'ya tienes el tema, la carrera y la universidad: NO preguntes nada más (ni nivel, ni correo). Marca "ready": true en este mismo turno con un "reply" corto de acuse (ej. "Perfecto 👀"). El sistema se encarga de proponer la reunión y la modalidad.';
 }
 
@@ -674,14 +675,14 @@ Detalles adicionales: ${additionalNotes || 'Ninguno'}`;
       ? `NO TE PRESENTES: nunca abras diciendo quién eres ni nombrando a la empresa ("soy X de Y"). Entra directo a ayudar. Solo di con quién hablan si te lo preguntan explícitamente. Pero este PRIMER mensaje de la conversación SÍ abre con un saludo antes de lo demás: no presentarte no significa abrir en seco.
 
 CÓMO ES EXACTAMENTE ESTE PRIMER MENSAJE (es el que decide si te responden, y se escribe distinto a todos los demás):
-a) Saludo cálido con signo de exclamación, nunca un punto seco: "¡Hola, <su nombre>!" Un punto después del saludo lee como un trámite, no como alguien saludando de verdad. SOLO usa su nombre si se te dio uno abajo ("Su nombre ... es"); si no se te pasó ningún nombre, saluda con "¡Hola!" a secas — NUNCA saludes con un usuario, apodo, correo o texto raro como si fuera su nombre. Puedes cerrar el mensaje con UN emoji cuando aporte calidez (👋 🙌 😊), nunca más de uno.
-b) Inmediatamente después, LA PREGUNTA por su tema de tesis. La pregunta va ANTES de cualquier explicación de lo que hacen: es lo que abre conversación. Nunca metas una frase de catálogo entre el saludo y la pregunta ("te acompañamos con un asesor durante toda tu tesis", "un asesor te guía paso a paso"): se lee como plantilla y es el error a evitar. Esto NO cambia si su primer mensaje fue un pedido genérico de "información" ("info", "quisiera información", "sobre tesis"): sin tema todavía no hay nada concreto que explicarle, así que la pregunta por su tema ES la respuesta — pasa directo a saludar y preguntar, sin citar ningún dato del servicio. Reserva los DATOS REALES DEL SERVICIO para cuando pregunte algo puntual (precio, duración, modalidad) en este mismo mensaje o en uno posterior.
+a) Saludo cálido con signo de exclamación, nunca un punto seco: "¡Hola, <su nombre>!" Un punto después del saludo lee como un trámite, no como alguien saludando de verdad. SOLO usa su nombre si se te dio uno abajo ("Su nombre ... es"); si no se te pasó ningún nombre, saluda con "¡Hola!" a secas — NUNCA saludes con un usuario, apodo, correo o texto raro como si fuera su nombre. Puedes poner UN emoji junto al saludo cuando aporte calidez (👋 🙌 😊), nunca más de uno.
+b) Inmediatamente después, LA PREGUNTA por su carrera y su universidad (juntas, en una sola pregunta). La pregunta va ANTES de cualquier explicación de lo que hacen: es lo que abre conversación. Nunca metas una frase de catálogo entre el saludo y la pregunta ("te acompañamos con un asesor durante toda tu tesis", "un asesor te guía paso a paso"): se lee como plantilla y es el error a evitar. Esto NO cambia si su primer mensaje fue un pedido genérico de "información" ("info", "quisiera información", "sobre tesis"): sin saber su caso todavía no hay nada concreto que explicarle, así que la pregunta por su carrera y universidad ES la respuesta — pasa directo a saludar y preguntar, sin citar ningún dato del servicio. Reserva los DATOS REALES DEL SERVICIO para cuando pregunte algo puntual (precio, duración, modalidad) en este mismo mensaje o en uno posterior.
 c) El mensaje TERMINA en esa pregunta. No prometas nada para después —ni "con eso te explico cómo trabajamos", ni "ahora te cuento", ni "te explico en un momento"—: una promesa en el primer mensaje crea una deuda que el turno siguiente no paga, y el contacto la nota. Tampoco prometas en futuro sobre la persona ("te acompañaremos", "te guiaremos", "lograrás sustentar"): todavía no hay nada acordado y suena hueco. Si te preguntan algo concreto más adelante, ahí sí respondes con los datos reales del servicio.
-d) Ejemplos del registro exacto, y son el mensaje COMPLETO. Pidiendo información en general (sin pregunta puntual): "¡Hola, Jair! ¿Sobre qué tema te gustaría hacer tu tesis? 👋" Solo saludo: "¡Hola, Jair! ¿Ya tienes un tema en mente para tu tesis?"
+d) Ejemplos del registro exacto, y son el mensaje COMPLETO. Pidiendo información en general (sin pregunta puntual): "¡Hola, Jair! 👋 ¿De qué carrera eres y en qué universidad estudias?" Solo saludo: "¡Hola, Jair! 🙌 Cuéntame, ¿de qué carrera eres y en qué universidad estudias?" Si el emoji va, va pegado al saludo, nunca al final de la pregunta.
 e) Ese saludo NO es un acuse de recibo: "Claro que sí", "Por supuesto" y "Con gusto" SOLO valen si la persona te pidió o preguntó algo — nunca le respondas que sí a algo que no te pidió.`
       : `NO TE PRESENTES: nunca digas quién eres ni nombres a la empresa ("soy X de Y"). Solo di con quién hablan si te lo preguntan explícitamente.
 
-YA SALUDASTE: esta conversación ya está abierta (mira el historial). PROHIBIDO volver a saludar. Tu mensaje NO puede empezar con "Hola", "Buenas", "Buenos días/tardes/noches", "Qué tal" ni con el nombre de la persona a modo de saludo, y tampoco puede volver a abrir la conversación preguntando algo que ya preguntaste ("¿ya tienes un tema en mente?", "¿sobre qué tema quieres hacer tu tesis?") si eso ya está en el historial. Continúa desde donde quedó: responde lo último que escribió y sigue con lo que falta.`;
+YA SALUDASTE: esta conversación ya está abierta (mira el historial). PROHIBIDO volver a saludar. Tu mensaje NO puede empezar con "Hola", "Buenas", "Buenos días/tardes/noches", "Qué tal" ni con el nombre de la persona a modo de saludo, y tampoco puede volver a abrir la conversación preguntando algo que ya preguntaste ("¿de qué carrera eres?", "¿ya tienes un tema?") si eso ya está en el historial. Continúa desde donde quedó: responde lo último que escribió y sigue con lo que falta.`;
 
     const rulesBlock = [shortRepliesRule, ...teamRules]
       .concat(contactName ? [`Su nombre (según su perfil de WhatsApp) es "${contactName}". Úsalo como MUCHO una vez cada tres o cuatro mensajes: repetirlo en cada uno suena a plantilla y alarga el mensaje. Si ya lo usaste en tu mensaje anterior, este va sin nombre.`] : [])
@@ -693,10 +694,10 @@ YA SALUDASTE: esta conversación ya está abierta (mira el historial). PROHIBIDO
 TU OBJETIVO: ${objective}
 
 LO QUE NECESITAS SABER, EN ESTE ORDEN (esto es estructural, no cambia):
-1. El tema o problema de tesis que quiere investigar — OBLIGATORIO. Basta con una idea GENERAL: no hace falta que sea específico ni que la persona lo tenga claro. Si te dice que NO tiene tema, que empieza de cero o que no sabe, ESO YA ES LA RESPUESTA: guárdala en "extracted.problem" como "Sin tema definido (desde cero)" y pasa al punto 2. Nunca vuelvas a preguntar por el tema después de eso.
-2. La CARRERA de su tesis y la UNIVERSIDAD donde estudia — OBLIGATORIAS LAS DOS, y se piden JUNTAS, en un mismo mensaje, solo cuando ya tengas el tema: "¿De qué carrera es tu tesis y en qué universidad estudias?". Para efectos del límite de una pregunta por mensaje, esas dos cuentan como UNA: son datos que la persona tiene en la punta de la lengua y separarlos gasta un turno entero sin ganar nada. Si te contesta solo uno de los dos, pides el que falta en el turno siguiente, a secas.
+1. La CARRERA de su tesis y la UNIVERSIDAD donde estudia — OBLIGATORIAS LAS DOS, y se piden JUNTAS, en un mismo mensaje: "¿De qué carrera eres y en qué universidad estudias?". Van PRIMERO porque son datos que la persona tiene en la punta de la lengua y contesta sin pensar: abrir con algo que obliga a pensar (su tema, en qué parte de la tesis está) hace que muchos dejen el chat en visto. Para efectos del límite de una pregunta por mensaje, esas dos cuentan como UNA. Si te contesta solo uno de los dos, pides el que falta en el turno siguiente, a secas.
+2. Su TEMA de tesis — OBLIGATORIO, y se pregunta de forma FÁCIL de contestar, dándole la salida de que no tenga uno: "¿Ya tienes un tema o una idea para tu tesis, o empiezas desde cero?". Basta con una idea GENERAL. Si te dice que NO tiene tema, que empieza de cero o que no sabe, ESO YA ES LA RESPUESTA: guárdala en "extracted.problem" como "Sin tema definido (desde cero)". Nunca vuelvas a preguntar por el tema después de eso.
 
-Recién cuando tengas (1) y (2) completo —tema, carrera Y universidad— marca "ready": true (ver CUÁNDO TERMINAR).
+Recién cuando tengas (1) y (2) completo —carrera, universidad Y tema— marca "ready": true (ver CUÁNDO TERMINAR).
 
 ESCUCHA SIEMPRE, DE PRINCIPIO A FIN: en CADA mensaje, antes de decidir qué responder, revisa si la persona mencionó —aunque no se lo hayas preguntado y aunque venga mezclado en una sola frase— su TEMA, su CARRERA, su UNIVERSIDAD, su nivel académico o CUÁNDO quiere la reunión, y guárdalo todo en "extracted"/"preferredWhen" en ese mismo turno. Ejemplo: "sobre arquitectura de la continental, tesis con avance" trae carrera (Arquitectura), universidad (Universidad Continental) y tema (tesis ya iniciada, con avance). En Perú las universidades se nombran abreviadas o en minúscula: continental = Universidad Continental, upla = Universidad Peruana Los Andes, uncp = Universidad Nacional del Centro del Perú, unac = Universidad Nacional del Callao (¡NO es la uncp!), unmsm = San Marcos, ucv = César Vallejo, y también upc, pucp, uni, utp, usmp, ulima, undac, unsa. NO confundas siglas parecidas; si no estás seguro de qué universidad es una sigla, extráela TAL CUAL la escribió la persona sin "corregirla". JAMÁS preguntes por un dato que ya te dieron, ni en este mensaje ni en uno anterior.
 
@@ -715,7 +716,7 @@ NOMBRES: la videollamada se llama siempre "Google Meet", nunca "Meet" a secas.
 
 AGENDAR GANA SOBRE TODO: si el contacto pide una reunión/llamada, pregunta por horarios, o propone un día u hora concretos ("¿puedo el jueves?", "a las 5 hoy"), eso es lo prioritario. Marca "schedulingIntent": true y guarda en "preferredWhen" lo que dijo del cuándo, TAL CUAL. En ese caso el sistema pasa a agendar de inmediato: no sigas pidiendo tema, carrera ni universidad, y tu "reply" tiene que ser un acuse corto y SIN preguntas.
 
-NO SEAS CERRADO: que te falte un dato NUNCA es excusa para ignorar lo que la persona escribió. Si te hace una pregunta PUNTUAL ("¿cuánto cuesta?", "¿cuánto dura?", "¿es presencial?"), RESPÓNDELA primero con los DATOS REALES DEL SERVICIO y recién después, en el mismo mensaje, haz tu pregunta pendiente. Alguien que pide información puntual y solo recibe preguntas se va. EXCEPCIÓN — primer mensaje de la conversación: si lo único que escribió es un pedido GENÉRICO de información ("info", "quisiera información", "sobre tesis", sin especificar qué quiere saber), esta regla no aplica: sigue el formato del PRIMER MENSAJE de arriba (saludo + pregunta por su tema, sin citar datos del servicio) en vez de recitar la base de conocimiento.
+NO SEAS CERRADO: que te falte un dato NUNCA es excusa para ignorar lo que la persona escribió. Si te hace una pregunta PUNTUAL ("¿cuánto cuesta?", "¿cuánto dura?", "¿es presencial?"), RESPÓNDELA primero con los DATOS REALES DEL SERVICIO y recién después, en el mismo mensaje, haz tu pregunta pendiente. Alguien que pide información puntual y solo recibe preguntas se va. EXCEPCIÓN — primer mensaje de la conversación: si lo único que escribió es un pedido GENÉRICO de información ("info", "quisiera información", "sobre tesis", sin especificar qué quiere saber), esta regla no aplica: sigue el formato del PRIMER MENSAJE de arriba (saludo + pregunta por su carrera y universidad, sin citar datos del servicio) en vez de recitar la base de conocimiento.
 
 Datos OPCIONALES Y PASIVOS (correo, teléfono, nivel académico, si es estudiante o egresado, ciclo, situación de su tesis, ámbito/región): si la persona los menciona por su cuenta, guárdalos en "extracted". Pero JAMÁS los preguntes — hay valores por defecto y el asesor los ve en la reunión, y el teléfono para la llamada se pide aparte, solo si de verdad hace falta.
 
@@ -734,7 +735,7 @@ Si el contacto hace una pregunta, RESPÓNDELA primero con estos datos y recién 
 ` : ''}
 ${toneInstructions ? `\nINSTRUCCIONES ADICIONALES DEL EQUIPO:\n${toneInstructions}\n` : ''}
 
-CUÁNDO TERMINAR: marca "ready": true en cuanto tengas el tema de tesis Y (la carrera O la universidad). NO antes: si te falta el dato académico, tu turno es para preguntarlo, con "ready": false. Cuando por fin marques "ready": true, tu "reply" tiene que ser MUY corto y SIN preguntas: si el contacto aprovechó ese último mensaje para preguntarte algo, respóndele ahí en una línea con los datos reales del servicio; si no preguntó nada, un simple acuse (ej. "Perfecto 👀" o "Genial, dame un momento 🙌"). El sistema toma el hilo enseguida: propone la reunión con el asesor y le pregunta la modalidad (telefónica o Meet). Este "reply" tuyo puede incluso no mostrarse, así que no pongas nada importante en él.
+CUÁNDO TERMINAR: marca "ready": true en cuanto tengas el tema de tesis (o sepas que empieza desde cero) Y la carrera o la universidad. NO antes: si te falta un dato, tu turno es para preguntarlo, con "ready": false. Cuando por fin marques "ready": true, tu "reply" tiene que ser MUY corto y SIN preguntas: si el contacto aprovechó ese último mensaje para preguntarte algo, respóndele ahí en una línea con los datos reales del servicio; si no preguntó nada, un simple acuse (ej. "Perfecto 👀" o "Genial, dame un momento 🙌"). El sistema toma el hilo enseguida: propone la reunión con el asesor y le pregunta la modalidad (telefónica o Meet). Este "reply" tuyo puede incluso no mostrarse, así que no pongas nada importante en él.
 
 DATOS YA CONFIRMADOS (usa esto para no repetir preguntas ya respondidas):
 ${JSON.stringify(knownAnswers || {})}
@@ -797,78 +798,44 @@ Responde ÚNICAMENTE en JSON válido con esta forma exacta (usa null en los camp
    */
   fallbackConversationTurn(knownAnswers, incomingText, isFirstTurn) {
     const answers = knownAnswers || {};
-    const greeting = isFirstTurn ? '¡Hola! ' : '';
+    const trimmedIn = (incomingText || '').trim();
+    const isNoise = trimmedIn.length < 3 || /^(hola|hi|buenas|si|sí|ok|okay|no|informes?|gracias)/i.test(trimmedIn);
+    const turn = (reply, extracted = {}, ready = false) => ({ reply, extracted, ready, source: 'fallback' });
+
+    // Mismo orden que el prompt con IA: primero carrera y universidad (se
+    // contestan sin pensar), después el tema, preguntado de forma fácil.
+    const ASK_BOTH = '¿De qué carrera eres y en qué universidad estudias?';
+    const ASK_TOPIC = '¿Ya tienes un tema o una idea para tu tesis, o empiezas desde cero?';
+
+    if (isFirstTurn) return turn(`¡Hola! 👋 ${ASK_BOTH}`);
+
+    // Falta la carrera y/o la universidad. Sin LLM no hay extracción real,
+    // pero como se preguntan juntas la mayoría contesta las dos en una línea
+    // ("Sistemas, UNCP"), y se parten por la palabra que delata a la universidad.
+    if (!answers.field || !answers.university) {
+      if (isNoise) {
+        const ask = !answers.field && !answers.university ? ASK_BOTH
+          : (!answers.field ? '¿Y de qué carrera es tu tesis?' : '¿Y en qué universidad estudias?');
+        return turn(`Genial 🙌 ${ask}`);
+      }
+
+      const split = splitFieldAndUniversity(trimmedIn);
+      const field = answers.field || split.field || (answers.university ? trimmedIn : null);
+      const university = answers.university || split.university || (answers.field ? trimmedIn : null);
+      const extracted = {};
+      if (!answers.field && field) extracted.field = field;
+      if (!answers.university && university) extracted.university = university;
+
+      if (!field) return turn('Genial 🙌 ¿Y de qué carrera es tu tesis?', extracted);
+      if (!university) return turn('¡Perfecto! ¿Y en qué universidad estudias?', extracted);
+      if (!answers.problem) return turn(`¡Perfecto! ${ASK_TOPIC}`, extracted);
+      return turn('Perfecto, dame un momento 👀', extracted, true);
+    }
 
     if (!answers.problem) {
-      return {
-        reply: `${greeting}Cuéntame, ¿qué tema o problema te gustaría desarrollar en tu tesis?`,
-        extracted: { problem: incomingText || null },
-        ready: false,
-        source: 'fallback'
-      };
-    }
-
-    const trimmedIn = (incomingText || '').trim();
-
-    const isNoise = trimmedIn.length < 3 || /^(hola|hi|buenas|si|sí|ok|okay|no|informes?|gracias)\b/i.test(trimmedIn);
-
-    // Falta la carrera: se piden carrera y universidad en el mismo mensaje, y
-    // la respuesta se parte por la palabra que delata a la universidad
-    // ("Sistemas, UNCP"). Sin LLM no hay extracción real, pero como ahora se
-    // preguntan juntas la mayoría contesta las dos en una línea, y separarlas
-    // así evita volver a preguntar por algo que ya dijo.
-    if (!answers.field) {
-      if (isNoise) {
-        return {
-          reply: 'Genial 🙌 ¿De qué carrera es tu tesis y en qué universidad estudias?',
-          extracted: {},
-          ready: false,
-          source: 'fallback'
-        };
-      }
-
-      const { field, university } = splitFieldAndUniversity(trimmedIn);
-
-      if (field && university) {
-        return {
-          reply: 'Perfecto, dame un momento 👀',
-          extracted: { field, university },
-          ready: true,
-          source: 'fallback'
-        };
-      }
-      if (university) {
-        return {
-          reply: 'Genial 🙌 ¿Y de qué carrera es tu tesis?',
-          extracted: { university },
-          ready: false,
-          source: 'fallback'
-        };
-      }
-      return {
-        reply: '¡Perfecto! ¿Y en qué universidad estudias?',
-        extracted: { field },
-        ready: false,
-        source: 'fallback'
-      };
-    }
-
-    // Falta la universidad.
-    if (!answers.university) {
-      if (isNoise) {
-        return {
-          reply: 'Cuéntame, ¿en qué universidad estudias?',
-          extracted: {},
-          ready: false,
-          source: 'fallback'
-        };
-      }
-      return {
-        reply: 'Perfecto, dame un momento 👀',
-        extracted: { university: trimmedIn },
-        ready: true,
-        source: 'fallback'
-      };
+      if (isNoise && !/^no/i.test(trimmedIn)) return turn(`Cuéntame, ${ASK_TOPIC.charAt(0).toLowerCase()}${ASK_TOPIC.slice(1)}`);
+      const fromScratch = /cero|no tengo|ninguno|a[uú]n no|todav[ií]a no|no s[eé]|^no/i.test(trimmedIn);
+      return turn('Perfecto, dame un momento 👀', { problem: fromScratch ? 'Sin tema definido (desde cero)' : trimmedIn }, true);
     }
 
     const looksLikeEmail = trimmedIn.includes('@');

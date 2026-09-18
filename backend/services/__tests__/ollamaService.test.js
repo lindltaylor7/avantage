@@ -92,3 +92,26 @@ test('fallbackParseSchedulingDate reconoce el nombre del día antes que "mañana
   assert.equal(result.date, '2026-09-19');
   assert.equal(result.preferredTime, '09:00');
 });
+
+// Orden de preguntas (también sin IA): carrera + universidad primero, que se
+// contestan sin pensar; el tema después, con la salida de "desde cero".
+test('fallbackConversationTurn abre preguntando carrera y universidad', () => {
+  const turn = ollama.fallbackConversationTurn({}, '¡Hola! Quiero más información', true);
+  assert.match(turn.reply, /carrera.*universidad/);
+  assert.deepEqual(turn.extracted, {});
+  assert.equal(turn.ready, false);
+});
+
+test('fallbackConversationTurn pide el tema después de carrera y universidad', () => {
+  const turn = ollama.fallbackConversationTurn({}, 'Ingeniería civil, Universidad Continental', false);
+  assert.equal(turn.extracted.field, 'Ingeniería civil');
+  assert.match(turn.extracted.university, /Continental/);
+  assert.match(turn.reply, /tema.*desde cero/);
+  assert.equal(turn.ready, false);
+});
+
+test('fallbackConversationTurn toma "desde cero" como respuesta al tema y cierra', () => {
+  const turn = ollama.fallbackConversationTurn({ field: 'Derecho', university: 'UNCP' }, 'empiezo desde cero', false);
+  assert.equal(turn.extracted.problem, 'Sin tema definido (desde cero)');
+  assert.equal(turn.ready, true);
+});
