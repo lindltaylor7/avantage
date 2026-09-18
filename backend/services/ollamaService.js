@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 import Anthropic from '@anthropic-ai/sdk';
 import { BOT_PROMPT_DEFAULTS } from './whatsappBotPromptDefaults.js';
+import { THESIS_SITUATIONS } from './leadQualification.js';
 dotenv.config();
 
 /**
@@ -716,7 +717,7 @@ AGENDAR GANA SOBRE TODO: si el contacto pide una reunión/llamada, pregunta por 
 
 NO SEAS CERRADO: que te falte un dato NUNCA es excusa para ignorar lo que la persona escribió. Si te hace una pregunta PUNTUAL ("¿cuánto cuesta?", "¿cuánto dura?", "¿es presencial?"), RESPÓNDELA primero con los DATOS REALES DEL SERVICIO y recién después, en el mismo mensaje, haz tu pregunta pendiente. Alguien que pide información puntual y solo recibe preguntas se va. EXCEPCIÓN — primer mensaje de la conversación: si lo único que escribió es un pedido GENÉRICO de información ("info", "quisiera información", "sobre tesis", sin especificar qué quiere saber), esta regla no aplica: sigue el formato del PRIMER MENSAJE de arriba (saludo + pregunta por su tema, sin citar datos del servicio) en vez de recitar la base de conocimiento.
 
-Datos OPCIONALES Y PASIVOS (correo, teléfono, nivel académico, ámbito/región): si la persona los menciona por su cuenta, guárdalos en "extracted". Pero JAMÁS los preguntes — hay valores por defecto y el asesor los ve en la reunión, y el teléfono para la llamada se pide aparte, solo si de verdad hace falta.
+Datos OPCIONALES Y PASIVOS (correo, teléfono, nivel académico, si es estudiante o egresado, ciclo, situación de su tesis, ámbito/región): si la persona los menciona por su cuenta, guárdalos en "extracted". Pero JAMÁS los preguntes — hay valores por defecto y el asesor los ve en la reunión, y el teléfono para la llamada se pide aparte, solo si de verdad hace falta.
 
 CÓMO SUENAS (esto es lo que decide si te siguen respondiendo o te dejan en visto):
 - EMPATÍA CONCRETA, NUNCA GENÉRICA: si la persona cuenta algo que le pesa —lleva años atascada, su asesor no le responde, le observaron la tesis, tiene una fecha encima, le da miedo que la estafen— reconoce ESO en una frase corta antes de seguir con lo tuyo. "Uf, dos años sin avanzar cansa" sirve; "te entiendo, la tesis es difícil" no sirve, porque no dice nada de SU caso y se nota que es de molde. Nunca le atribuyas un sentimiento que no expresó.
@@ -748,6 +749,9 @@ Responde ÚNICAMENTE en JSON válido con esta forma exacta (usa null en los camp
     "problem": "<tema o problema de tesis identificado. Si dijo que no tiene tema o que empieza desde cero, escribe exactamente 'Sin tema definido (desde cero)' — ese texto es interno, va SOLO en este campo y JAMÁS en tu "reply". Usa null SOLO si todavía no ha dicho nada sobre su tema>",
     "location": "<ámbito/región identificado, o null>",
     "level": "<uno de: 'Pregrado (Bachiller/Título)', 'Posgrado (Maestría)', 'Posgrado (Doctorado)', o null>",
+    "academicStatus": "<lo que es HOY, uno de: 'Estudiante', 'Egresado', 'Bachiller', 'Titulado', 'Magíster', o null>",
+    "cycle": <número de ciclo que cursa si es estudiante de pregrado ("sexto ciclo" = 6, "VIII" = 8), o null>,
+    "thesisSituation": "<situación de su tesis, uno EXACTO de: ${THESIS_SITUATIONS.map((o) => `'${o}'`).join(', ')}, o null>",
     "field": "<carrera/campo de estudio identificado, o null>",
     "university": "<universidad/institución donde estudia, o null>",
     "email": "<correo electrónico identificado, o null>",

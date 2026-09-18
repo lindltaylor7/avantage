@@ -7,6 +7,7 @@ import { normalizeUniversity } from './universityNormalizer.js';
 import { criticalSignal } from './leadSignals.js';
 import { coalesceTimeFragments } from './messageFragments.js';
 import * as whatsappBotCopy from '../copy/whatsappBotCopy.js';
+import { evaluateQualification, normalizeAcademicStatus, normalizeCycle, normalizeThesisSituation } from './leadQualification.js';
 
 // Motivo que ve el equipo en la notificación de transferencia, por señal
 // crítica detectada (ver `leadSignals.js`). Se redactan desde el punto de
@@ -758,6 +759,31 @@ function messageSimilarity(a, b) {
  * reporte por correo, registra/actualiza el lead en el funnel de ventas, y
  * ofrece agendar una llamada en el calendario real del asesor.
  */
+/**
+ * Suma a `answers` la ficha académica que extrajo el LLM, reducida al
+ * catálogo cerrado de leadQualification.js (lo que no calza se descarta).
+ * Devuelve true si cambió algún dato.
+ */
+function mergeAcademicProfile(answers, extracted) {
+  const before = JSON.stringify([answers.academicStatus, answers.cycle, answers.thesisSituation]);
+  const cycle = normalizeCycle(extracted.cycle);
+  const academicStatus = normalizeAcademicStatus(extracted.academicStatus) || (cycle ? 'Estudiante' : null);
+  const thesisSituation = normalizeThesisSituation(extracted.thesisSituation);
+  if (academicStatus) answers.academicStatus = academicStatus;
+  if (cycle) answers.cycle = cycle;
+  if (thesisSituation) answers.thesisSituation = thesisSituation;
+  return JSON.stringify([answers.academicStatus, answers.cycle, answers.thesisSituation]) !== before;
+}
+
+/** Campos del lead que salen de la ficha académica (solo los que se conocen). */
+function academicProfilePayload(answers) {
+  const payload = {};
+  if (answers.academicStatus) payload.academicStatus = answers.academicStatus;
+  if (answers.cycle) payload.academicCycle = answers.cycle;
+  if (answers.thesisSituation) payload.thesisSituation = answers.thesisSituation;
+  return payload;
+}
+
 export class WhatsappBotService {
   constructor({ ollamaService, emailService, leadService, whatsappMessageService, settingsService, googleCalendarService, scheduledMeetingService, notificationService }) {
     this.ollamaService = ollamaService;
@@ -1401,7 +1427,10 @@ export class WhatsappBotService {
     // no volver a preguntárselo cuando toque elegir día y hora.
     if (result.preferredWhen) answers.__when = result.preferredWhen;
 
+    const profileChanged = mergeAcademicProfile(answers, extracted);
+
     await this.updateSession(waId, { answers: JSON.stringify(answers) });
+    if (profileChanged) await this._syncLeadProfile(waId, answers);
 
     // El contacto siguió escribiendo mientras se preparaba esta respuesta: lo
     // ya extraído queda guardado (arriba), pero no se responde. El turno que
@@ -1409,6 +1438,17 @@ export class WhatsappBotService {
     if ((this.inboundCounter.get(waId) || 0) !== mark) {
       this.logActivity({ type: 'turn_superseded', waId, text: incomingText, reply: result.reply });
       return;
+    }
+
+    // Filtro de calificación: quien no califica (ciclo bajo, carrera de
+    // instituto no atendida) se cierra apenas se sabe, sin esperar a
+    // completar los datos. Si Avan acababa de preguntar el dato que faltaba
+    // para agendar, este mensaje es la respuesta: se retoma el agendamiento.
+    if (await this._qualificationGate(waId, answers, { askMissing: false })) return;
+    if (answers.__resumeFinalize) {
+      delete answers.__resumeFinalize;
+      await this.updateSession(waId, { answers: JSON.stringify(answers) });
+      return this.finalize(waId, answers);
     }
 
     // F1 — Ancla de precio: la primera vez que preguntan por el precio, la
@@ -1537,6 +1577,8 @@ export class WhatsappBotService {
    * debe impedir ofrecer la llamada, que es lo que realmente importa aquí.
    */
   async finalize(waId, answers) {
+    if (await this._qualificationGate(waId, answers, { askMissing: true })) return;
+
     const settings = await this.settingsService.get();
 
     // F4 — trim explícito: `problem`/`location` vienen de extracción del LLM
@@ -1575,6 +1617,7 @@ export class WhatsappBotService {
       source: 'WhatsApp Directo'
     };
     if (university) leadPayload.university = university;
+    Object.assign(leadPayload, academicProfilePayload(answers));
 
     try {
       const reportData = await this.ollamaService.evaluateThesisViability({
@@ -1611,6 +1654,54 @@ export class WhatsappBotService {
     }
 
     await this.offerScheduling(waId, { topic: synthesizedTopic, email, when: answers.__when || null });
+  }
+
+  /**
+   * Aplica el filtro de leadQualification.js. Si el lead no califica, se le
+   * cierra con un texto fijo, la sesión termina y pasa a "No Califica" en el
+   * Setter Funnel. Si falta el dato que decide (ciclo, o carrera en un
+   * instituto) y `askMissing`, se pregunta UNA sola vez: si no lo contesta,
+   * no se le bloquea el agendamiento por eso.
+   * Devuelve true si ya respondió (el turno no debe continuar).
+   */
+  async _qualificationGate(waId, answers, { askMissing }) {
+    const verdict = evaluateQualification(answers);
+
+    if (verdict.status === 'rejected') {
+      await this.send(waId, verdict.reason === 'low_cycle'
+        ? whatsappBotCopy.lowCycleRejection()
+        : whatsappBotCopy.instituteFieldRejection());
+      await this.updateSession(waId, { status: 'completed', answers: JSON.stringify(answers) });
+      await this._syncLeadProfile(waId, answers);
+      await this.moveFunnelStage(waId, 'descartado');
+      this.logActivity({ type: 'lead_disqualified', waId, reason: verdict.reason });
+      return true;
+    }
+
+    const asked = answers.__qualificationAsked || [];
+    if (verdict.status === 'missing' && askMissing && !asked.includes(verdict.ask)) {
+      answers.__qualificationAsked = [...asked, verdict.ask];
+      answers.__resumeFinalize = true;
+      await this.updateSession(waId, { answers: JSON.stringify(answers) });
+      await this.send(waId, verdict.ask === 'cycle' ? whatsappBotCopy.askCycle() : whatsappBotCopy.askInstituteField());
+      return true;
+    }
+
+    return false;
+  }
+
+  /** Guarda en el lead la ficha académica apenas se conoce (no solo al agendar). */
+  async _syncLeadProfile(waId, answers) {
+    try {
+      const lead = await this.leadService.findByPhone(waId);
+      if (!lead) return;
+      const payload = academicProfilePayload(answers);
+      if (answers.field) payload.fieldOfStudy = answers.field;
+      if (answers.university) payload.university = answers.university;
+      await this.leadService.updateLead(lead.id, payload);
+    } catch (error) {
+      console.error(`❌ [WhatsApp Bot] Error al guardar la ficha académica de ${waId}:`, error);
+    }
   }
 
   /**

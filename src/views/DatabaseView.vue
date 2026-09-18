@@ -531,6 +531,7 @@
               <div class="drawer-row"><span class="lbl">Carrera:</span> <span class="val">{{ detailLead.field_of_study || '—' }}</span></div>
               <div class="drawer-row"><span class="lbl">Situación:</span> <span class="val">{{ detailLead.thesis_situation || '—' }}</span></div>
               <div class="drawer-row"><span class="lbl">Nivel:</span> <span class="val">{{ detailLead.academic_level || '—' }}</span></div>
+              <div class="drawer-row"><span class="lbl">Grado actual:</span> <span class="val">{{ detailLead.academic_status || '—' }}{{ detailLead.academic_cycle ? ` · ${detailLead.academic_cycle}.º ciclo` : '' }}</span></div>
             </div>
 
             <div class="drawer-card">

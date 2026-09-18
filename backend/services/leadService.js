@@ -20,6 +20,8 @@ export class LeadService {
     birthDate,
     university,
     thesisSituation,
+    academicStatus,
+    academicCycle,
     department,
     province,
     address,
@@ -42,6 +44,8 @@ export class LeadService {
       birth_date: birthDate || null,
       university: university || null,
       thesis_situation: thesisSituation || null,
+      academic_status: academicStatus || null,
+      academic_cycle: academicCycle ?? null,
       department: department || null,
       province: province || null,
       address: address || null,
@@ -169,6 +173,8 @@ export class LeadService {
     if (data.thesisSituation !== undefined || data.thesis_situation !== undefined) {
       updatePayload.thesis_situation = data.thesisSituation || data.thesis_situation;
     }
+    if (data.academicStatus !== undefined) updatePayload.academic_status = data.academicStatus;
+    if (data.academicCycle !== undefined) updatePayload.academic_cycle = data.academicCycle;
     if (data.topic !== undefined) updatePayload.topic = data.topic;
     if (data.department !== undefined) updatePayload.department = data.department;
     if (data.province !== undefined) updatePayload.province = data.province;

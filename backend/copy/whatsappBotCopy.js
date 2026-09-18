@@ -70,3 +70,24 @@ export function criticalSignalAck(signal) {
       return 'Déjame pasarte con una persona del equipo para que te ayude mejor 🙌';
   }
 }
+
+/**
+ * Filtro de calificación (ver leadQualification.js): preguntas por el dato
+ * que decide si se puede agendar, y cierres amables para quien no califica.
+ * No se ofrece reunión en los cierres: el asesor no puede atender esos casos.
+ */
+export function askCycle() {
+  return '¿En qué ciclo estás actualmente? 📚';
+}
+
+export function askInstituteField() {
+  return '¿Cuál es tu carrera o especialidad en el instituto?';
+}
+
+export function lowCycleRejection() {
+  return 'Genial que ya estés pensando en tu tesis desde ahora 💪 Trabajamos con alumnos a partir de 8.º ciclo, que es cuando la mayoría de universidades habilita el proceso de tesis. Cuando llegues ahí, escríbeme y te ayudamos. ¡Éxitos!';
+}
+
+export function instituteFieldRejection() {
+  return 'Gracias por escribirnos 🙌 En institutos solo podemos evaluar casos de administración, negocios o educación, y por ahora tu especialidad no está dentro de las áreas que atendemos. ¡Te deseamos mucho éxito en tu proceso! 💪';
+}
