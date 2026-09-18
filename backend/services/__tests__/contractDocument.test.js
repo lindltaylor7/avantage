@@ -60,3 +60,10 @@ test('buildContractDocument incluye las cláusulas numeradas y marca el borrador
   assert.match(html, /BORRADOR/);
   assert.match(html, /18 de se(p)?tiembre de 2026/);
 });
+
+test('buildContractDocument incluye la firma del locador salvo en contratos anulados', () => {
+  const base = { id: 1, title: 'CONTRATO', clauses: [] };
+  assert.match(buildContractDocument({ ...base, status: 'borrador' }), /<img src="data:image\/png;base64,/);
+  assert.match(buildContractDocument({ ...base, status: 'firmado' }), /<img src="data:image\/png;base64,/);
+  assert.doesNotMatch(buildContractDocument({ ...base, status: 'anulado' }), /<img src="data:image/);
+});

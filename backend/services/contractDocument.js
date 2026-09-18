@@ -9,6 +9,24 @@
  * texto fluya página a página con el mismo margen en cada una.
  */
 import { COMPANY, agMarkPaths, esc } from './quotationDocument.js';
+import { readFileSync } from 'fs';
+
+/**
+ * Firma y sello de EL LOCADOR, impresos por defecto en todos los contratos
+ * (también en borradores, que ya llevan la marca de agua; no en anulados).
+ * Se incrusta como data URI para que salga igual en la pestaña de impresión
+ * (abierta desde un blob, sin acceso a rutas del servidor) y en el PDF. Si
+ * el archivo no está, el contrato sale sin firma en vez de fallar.
+ */
+const LESSOR_SIGNATURE = (() => {
+  try {
+    const png = readFileSync(new URL('../assets/firma-sello-locador.png', import.meta.url));
+    return `data:image/png;base64,${png.toString('base64')}`;
+  } catch {
+    console.warn('⚠️ [Contratos] No se encontró backend/assets/firma-sello-locador.png: los contratos saldrán sin firma del locador.');
+    return null;
+  }
+})();
 
 const BLANK = '____________________';
 
@@ -125,6 +143,7 @@ export function buildContractDocument(contract) {
   const values = contractPlaceholders(contract);
   const number = formatContractNumber(contract);
   const watermark = WATERMARKS[contract.status];
+  const showSignature = LESSOR_SIGNATURE && contract.status !== 'anulado';
 
   const clauses = (contract.clauses || []).map((clause, i) => `
     <section class="c-clause">
@@ -166,8 +185,13 @@ export function buildContractDocument(contract) {
   .c-clause h3 span { color: #68761f; }
   .c-closing { margin-top: 16px; }
 
-  .c-signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 28mm; margin-top: 30mm; break-inside: avoid; }
+  .c-signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 28mm; margin-top: 10mm; break-inside: avoid; }
   .c-sign { text-align: center; font-size: 9.5pt; }
+  /* Mismo alto en ambas columnas para que las líneas de firma queden alineadas. */
+  .c-sign-area { height: 30mm; display: flex; align-items: flex-end; justify-content: center; }
+  /* multiply: si la imagen trae fondo blanco, se funde con el papel y la marca de agua. */
+  .c-sign-area img { max-width: 100%; max-height: 30mm; margin-bottom: -3mm; mix-blend-mode: multiply;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .c-sign i { display: block; border-top: 1px solid #1f1f1c; margin-bottom: 6px; }
   .c-sign b { display: block; font-family: 'Montserrat', sans-serif; font-size: 9pt; }
 
@@ -210,8 +234,8 @@ export function buildContractDocument(contract) {
     ${contract.closing ? `<div class="c-closing">${paragraphs(contract.closing, values)}</div>` : ''}
 
     <div class="c-signatures">
-      <div class="c-sign"><i></i><b>EL LOCADOR</b>${esc(COMPANY.legalName)}<br>RUC ${esc(COMPANY.ruc)}<br>${esc(contract.representative_name || 'Representante legal')}</div>
-      <div class="c-sign"><i></i><b>EL CLIENTE</b>${esc(contract.client_name || BLANK)}<br>DNI ${esc(contract.client_dni || BLANK)}</div>
+      <div class="c-sign"><div class="c-sign-area">${showSignature ? `<img src="${LESSOR_SIGNATURE}" alt="Firma y sello de EL LOCADOR">` : ''}</div><i></i><b>EL LOCADOR</b>${esc(COMPANY.legalName)}<br>RUC ${esc(COMPANY.ruc)}<br>${esc(contract.representative_name || 'Representante legal')}</div>
+      <div class="c-sign"><div class="c-sign-area"></div><i></i><b>EL CLIENTE</b>${esc(contract.client_name || BLANK)}<br>DNI ${esc(contract.client_dni || BLANK)}</div>
     </div>
   </div>
 </article>
