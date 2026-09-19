@@ -7,8 +7,19 @@ const GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v21.0';
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
 
 const MIME_TO_EXTENSION = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
+const EXTENSION_TO_MIME = Object.fromEntries(Object.entries(MIME_TO_EXTENSION).map(([mime, ext]) => [ext, mime]));
+
 function extensionForMime(mimeType) {
   return MIME_TO_EXTENSION[String(mimeType || '').split(';')[0].trim().toLowerCase()] || 'jpg';
+}
+
+/** Imagen ya descargada de un anuncio, si la hay en disco. */
+function cachedAdCreativeImage(adId) {
+  for (const [ext, mimeType] of Object.entries(EXTENSION_TO_MIME)) {
+    const filename = `ad-${adId}.${ext}`;
+    if (fs.existsSync(path.join(campaignAdImageDir, filename))) return { filename, mimeType };
+  }
+  return null;
 }
 
 /**
@@ -19,14 +30,18 @@ function extensionForMime(mimeType) {
  * publicada en el muro), que la Graph API no deja leer como post normal
  * (`{post-id}?fields=full_picture` devuelve 404 para esos).
  */
-async function downloadAdCreativeImage(imageUrl) {
-  if (!imageUrl) return null;
+async function downloadAdCreativeImage(imageUrl, adId) {
+  if (!imageUrl || !adId) return null;
+  // El nombre es determinista por anuncio: así una resincronización reutiliza
+  // el archivo en vez de acumular una copia nueva en disco cada vez.
+  const cached = cachedAdCreativeImage(adId);
+  if (cached) return cached;
   try {
     const response = await fetch(imageUrl);
     if (!response.ok) return null;
     const mimeType = (response.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
     if (!mimeType.startsWith('image/')) return null;
-    const filename = `ad-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extensionForMime(mimeType)}`;
+    const filename = `ad-${adId}.${extensionForMime(mimeType)}`;
     await fs.promises.writeFile(path.join(campaignAdImageDir, filename), Buffer.from(await response.arrayBuffer()));
     return { filename, mimeType };
   } catch (error) {
@@ -179,6 +194,22 @@ function normalizeInsightRow(row) {
 }
 
 /**
+ * Un objeto que nunca llegó a entregarse no tiene fila de insights. Meta lo
+ * lista igual, con "—" en las métricas y 0 en el gasto: devolver ceros en todo
+ * confundiría "no gastó nada" con "no se midió".
+ */
+function emptyInsightRow() {
+  return {
+    objective: null, impressions: null, reach: null, frequency: null, spend: 0,
+    clicks: null, ctr: null, cpc: null, cpm: null,
+    linkClicks: null, linkCtr: null, costPerLinkClick: null,
+    landingPageViews: null, costPerLandingPageView: null, shopClicks: null,
+    messagingStarted: null, results: null, resultIndicator: null, costPerResult: null,
+    attributionSetting: null, dateStart: null, dateStop: null
+  };
+}
+
+/**
  * Campos de `/insights`. Meta rechaza la petición entera si un solo campo no
  * está disponible para la cuenta o la versión del Graph, así que cada nivel
  * lleva un juego reducido de respaldo con el que se reintenta.
@@ -187,6 +218,10 @@ const CAMPAIGN_INSIGHT_FIELDS = 'campaign_id,objective,impressions,reach,frequen
   + 'inline_link_clicks,inline_link_click_ctr,cost_per_inline_link_click,actions,cost_per_action_type,'
   + 'attribution_setting,date_start,date_stop';
 const CAMPAIGN_INSIGHT_FIELDS_FALLBACK = 'campaign_id,objective,impressions,reach,clicks,ctr,cpc,cpm,spend,actions,date_start,date_stop';
+const ADSET_INSIGHT_FIELDS = 'adset_id,adset_name,campaign_id,objective,impressions,reach,frequency,clicks,ctr,cpc,cpm,'
+  + 'spend,inline_link_clicks,inline_link_click_ctr,cost_per_inline_link_click,actions,cost_per_action_type,'
+  + 'attribution_setting,date_start,date_stop';
+const ADSET_INSIGHT_FIELDS_FALLBACK = 'adset_id,adset_name,campaign_id,impressions,reach,clicks,ctr,cpc,cpm,spend,actions,date_start,date_stop';
 const AD_INSIGHT_FIELDS = 'ad_id,ad_name,adset_id,adset_name,campaign_id,objective,impressions,reach,frequency,'
   + 'clicks,ctr,cpc,cpm,spend,inline_link_clicks,inline_link_click_ctr,cost_per_inline_link_click,actions,'
   + 'cost_per_action_type,quality_ranking,engagement_rate_ranking,conversion_rate_ranking,attribution_setting,'
@@ -325,7 +360,10 @@ export class MetaAdsService {
    */
   async sync({ datePreset = 'last_30d' } = {}) {
     const account = (await this.resolveAccount()).id;
-    const summary = { campaigns: 0, adsMapped: 0, insightsUpdated: 0, adInsights: 0, adAccount: account, datePreset, errors: [] };
+    const summary = {
+      campaigns: 0, adsets: 0, adsMapped: 0, insightsUpdated: 0, adsetInsights: 0, adInsights: 0,
+      adAccount: account, datePreset, errors: []
+    };
 
     // 1) Campañas
     const campaigns = await this.#graphGet(`${account}/campaigns`, {
@@ -335,7 +373,8 @@ export class MetaAdsService {
 
     const localIdByExternal = new Map();
     for (const c of campaigns) {
-      const budgetCents = Number(c.lifetime_budget || c.daily_budget || 0);
+      const daily = budgetFromCents(c.daily_budget);
+      const lifetime = budgetFromCents(c.lifetime_budget);
       const patch = {
         name: c.name || `Campaña ${c.id}`,
         source: 'meta',
@@ -345,10 +384,14 @@ export class MetaAdsService {
         meta_status: c.effective_status || c.status || null,
         start_date: toDateOnly(c.start_time),
         end_date: toDateOnly(c.stop_time),
+        // Sin presupuesto propio, la campaña lo lleva en cada conjunto (CBO
+        // desactivado); Meta lo muestra como "Con el presupuesto del conjunto".
+        budget_type: daily ? 'diario' : (lifetime ? 'total' : null),
         last_synced_at: db.fn.now(),
         updated_at: db.fn.now()
       };
-      if (budgetCents > 0) patch.budget_total = Math.round(budgetCents) / 100;
+      const budget = daily ?? lifetime;
+      if (budget) patch.budget_total = budget;
 
       const existing = await db('campaigns').where({ external_id: String(c.id) }).first();
       if (existing) {
@@ -361,14 +404,46 @@ export class MetaAdsService {
       summary.campaigns++;
     }
 
-    // 2) Anuncios -> mapeo automático. El `referral.source_id` que manda
+    // 2) Conjuntos de anuncios. Se listan todos —no sólo los que tienen
+    //    métricas— porque el panel replica la jerarquía del Administrador de
+    //    anuncios, donde un conjunto sin entrega también aparece en la tabla.
+    let adsets = [];
+    try {
+      adsets = await this.#graphGet(`${account}/adsets`, {
+        fields: 'id,name,campaign_id,effective_status,daily_budget,lifetime_budget,start_time,end_time,optimization_goal',
+        limit: '500'
+      });
+    } catch (err) {
+      summary.errors.push(`No se pudieron traer los conjuntos de anuncios: ${err.message}`);
+    }
+
+    const adsetMetaById = new Map();
+    for (const set of adsets) {
+      const daily = budgetFromCents(set.daily_budget);
+      const lifetime = budgetFromCents(set.lifetime_budget);
+      adsetMetaById.set(String(set.id), {
+        adsetId: String(set.id),
+        adsetName: set.name || `Conjunto ${set.id}`,
+        campaignExternalId: String(set.campaign_id),
+        delivery: set.effective_status || null,
+        budget: daily ?? lifetime,
+        budgetType: daily ? 'diario' : (lifetime ? 'total' : null),
+        startTime: set.start_time || null,
+        endTime: set.end_time || null,
+        optimizationGoal: set.optimization_goal || null
+      });
+      summary.adsets++;
+    }
+
+    // 3) Anuncios -> mapeo automático. El `referral.source_id` que manda
     //    WhatsApp puede ser el ID del anuncio, el ID de la publicación detrás
     //    del anuncio (effective_object_story_id) o el ID del media de Instagram,
     //    según el tipo de anuncio. Se mapean TODOS los candidatos a la campaña.
     let ads = [];
     try {
       ads = await this.#graphGet(`${account}/ads`, {
-        fields: 'id,name,campaign_id,adset_id,effective_status,creative{effective_object_story_id,effective_instagram_media_id,object_story_id,thumbnail_url}',
+        fields: 'id,name,campaign_id,adset_id,effective_status,created_time,'
+          + 'creative{effective_object_story_id,effective_instagram_media_id,object_story_id,thumbnail_url}',
         limit: '500'
       });
     } catch (err) {
@@ -376,21 +451,26 @@ export class MetaAdsService {
     }
 
     const mappedSourceIds = new Set();
-    // Una sola imagen por campaña — la del creativo del PRIMER anuncio con
-    // thumbnail/imagen que se encuentre — para reconocer la campaña de un
-    // vistazo en el panel.
+    // La campaña se reconoce de un vistazo por la imagen del creativo de su
+    // primer anuncio; cada anuncio guarda además la suya para la pestaña de
+    // Anuncios.
     const imageSetForCampaign = new Set();
-    // Nombre, entrega y conjunto de cada anuncio: `/insights?level=ad` no
-    // devuelve el `effective_status`, así que se guarda de aquí y se cruza
-    // después por `ad_id`.
     const adMetaById = new Map();
+
     for (const ad of ads) {
-      adMetaById.set(String(ad.id), {
-        name: ad.name || null,
-        effectiveStatus: ad.effective_status || null,
-        adsetId: ad.adset_id ? String(ad.adset_id) : null
-      });
       const localCampaignId = localIdByExternal.get(String(ad.campaign_id));
+
+      const image = await downloadAdCreativeImage(ad.creative?.thumbnail_url || null, String(ad.id));
+      adMetaById.set(String(ad.id), {
+        adId: String(ad.id),
+        adName: ad.name || `Anuncio ${ad.id}`,
+        campaignExternalId: String(ad.campaign_id),
+        adsetId: ad.adset_id ? String(ad.adset_id) : null,
+        delivery: ad.effective_status || null,
+        createdTime: ad.created_time || null,
+        imageFilename: image?.filename || null
+      });
+
       if (!localCampaignId) continue;
 
       const storyId = ad.creative?.effective_object_story_id || ad.creative?.object_story_id || null;
@@ -412,22 +492,18 @@ export class MetaAdsService {
           .merge({ campaign_id: localCampaignId, ad_label: ad.name || null });
       }
 
-      const creativeImageUrl = ad.creative?.thumbnail_url || null;
-      if (creativeImageUrl && !imageSetForCampaign.has(localCampaignId)) {
+      if (image && !imageSetForCampaign.has(localCampaignId)) {
         imageSetForCampaign.add(localCampaignId);
-        const downloaded = await downloadAdCreativeImage(creativeImageUrl);
-        if (downloaded) {
-          await db('campaigns').where({ id: localCampaignId }).update({
-            ad_image_filename: downloaded.filename,
-            ad_image_mime_type: downloaded.mimeType
-          });
-        }
+        await db('campaigns').where({ id: localCampaignId }).update({
+          ad_image_filename: image.filename,
+          ad_image_mime_type: image.mimeType
+        });
       }
 
       summary.adsMapped++;
     }
 
-    // 3) Métricas por campaña
+    // 4) Métricas por campaña
     try {
       const insights = await this.#insights(account, {
         level: 'campaign',
@@ -449,71 +525,86 @@ export class MetaAdsService {
       summary.errors.push(`No se pudieron traer las métricas: ${err.message}`);
     }
 
-    // 4) Métricas por anuncio. Las tres clasificaciones (calidad, tasa de
-    //    interacción y tasa de conversión) sólo existen a nivel de anuncio, y
-    //    el presupuesto es del conjunto de anuncios, no del anuncio: se trae
-    //    aparte y se adjunta a cada fila por `adset_id`.
-    try {
-      const adRows = await this.#insights(account, {
-        level: 'ad',
-        datePreset,
-        fields: AD_INSIGHT_FIELDS,
-        fallbackFields: AD_INSIGHT_FIELDS_FALLBACK
+    // 5) Métricas por conjunto y por anuncio. Las filas salen de la lista de
+    //    objetos (paso 2 y 3) y se les pega el insight que corresponda, no al
+    //    revés: así un conjunto o un anuncio sin entrega sigue apareciendo.
+    const adsetInsightsById = await this.#insightsById(account, {
+      level: 'adset',
+      datePreset,
+      idField: 'adset_id',
+      fields: ADSET_INSIGHT_FIELDS,
+      fallbackFields: ADSET_INSIGHT_FIELDS_FALLBACK,
+      summary,
+      what: 'los conjuntos de anuncios'
+    });
+
+    const adInsightsById = await this.#insightsById(account, {
+      level: 'ad',
+      datePreset,
+      idField: 'ad_id',
+      fields: AD_INSIGHT_FIELDS,
+      fallbackFields: AD_INSIGHT_FIELDS_FALLBACK,
+      summary,
+      what: 'los anuncios'
+    });
+
+    const adsetRowsByCampaign = new Map();
+    for (const meta of adsetMetaById.values()) {
+      const localCampaignId = localIdByExternal.get(meta.campaignExternalId);
+      if (!localCampaignId) continue;
+      const insight = adsetInsightsById.get(meta.adsetId);
+      if (!adsetRowsByCampaign.has(localCampaignId)) adsetRowsByCampaign.set(localCampaignId, []);
+      adsetRowsByCampaign.get(localCampaignId).push({
+        adsetId: meta.adsetId,
+        adsetName: insight?.adset_name || meta.adsetName,
+        delivery: meta.delivery,
+        budget: meta.budget,
+        budgetType: meta.budgetType,
+        startTime: meta.startTime,
+        endTime: meta.endTime,
+        optimizationGoal: meta.optimizationGoal,
+        hasInsights: !!insight,
+        ...(insight ? normalizeInsightRow(insight) : emptyInsightRow())
       });
+    }
 
-      const adsetById = new Map();
-      try {
-        const adsets = await this.#graphGet(`${account}/adsets`, {
-          fields: 'id,name,campaign_id,daily_budget,lifetime_budget,end_time',
-          limit: '500'
-        });
-        for (const set of adsets) {
-          const daily = budgetFromCents(set.daily_budget);
-          const lifetime = budgetFromCents(set.lifetime_budget);
-          adsetById.set(String(set.id), {
-            name: set.name || null,
-            budget: daily ?? lifetime,
-            budgetType: daily ? 'diario' : (lifetime ? 'total' : null),
-            endTime: set.end_time || null
-          });
-        }
-      } catch (err) {
-        summary.errors.push(`No se pudo traer el presupuesto de los conjuntos de anuncios: ${err.message}`);
-      }
+    const adRowsByCampaign = new Map();
+    for (const meta of adMetaById.values()) {
+      const localCampaignId = localIdByExternal.get(meta.campaignExternalId);
+      if (!localCampaignId) continue;
+      const insight = adInsightsById.get(meta.adId);
+      const adset = meta.adsetId ? adsetMetaById.get(meta.adsetId) : null;
+      if (!adRowsByCampaign.has(localCampaignId)) adRowsByCampaign.set(localCampaignId, []);
+      adRowsByCampaign.get(localCampaignId).push({
+        adId: meta.adId,
+        adName: insight?.ad_name || meta.adName,
+        adsetId: meta.adsetId,
+        adsetName: insight?.adset_name || adset?.adsetName || null,
+        delivery: meta.delivery,
+        imageFilename: meta.imageFilename,
+        adsetBudget: adset?.budget ?? null,
+        adsetBudgetType: adset?.budgetType || null,
+        endTime: adset?.endTime || null,
+        qualityRanking: insight?.quality_ranking || null,
+        engagementRanking: insight?.engagement_rate_ranking || null,
+        conversionRanking: insight?.conversion_rate_ranking || null,
+        hasInsights: !!insight,
+        ...(insight ? normalizeInsightRow(insight) : emptyInsightRow())
+      });
+    }
 
-      const rowsByCampaign = new Map();
-      for (const row of adRows) {
-        const localCampaignId = localIdByExternal.get(String(row.campaign_id));
-        if (!localCampaignId) continue;
-        const adMeta = adMetaById.get(String(row.ad_id)) || {};
-        const adset = adsetById.get(String(row.adset_id || adMeta.adsetId || '')) || {};
-        if (!rowsByCampaign.has(localCampaignId)) rowsByCampaign.set(localCampaignId, []);
-        rowsByCampaign.get(localCampaignId).push({
-          adId: String(row.ad_id),
-          adName: row.ad_name || adMeta.name || `Anuncio ${row.ad_id}`,
-          adsetName: row.adset_name || adset.name || null,
-          delivery: adMeta.effectiveStatus || null,
-          adsetBudget: adset.budget ?? null,
-          adsetBudgetType: adset.budgetType || null,
-          endTime: adset.endTime || null,
-          qualityRanking: row.quality_ranking || null,
-          engagementRanking: row.engagement_rate_ranking || null,
-          conversionRanking: row.conversion_rate_ranking || null,
-          ...normalizeInsightRow(row)
-        });
-      }
-
-      // Se reescribe para TODAS las campañas sincronizadas — no sólo las que
-      // trajeron filas — para que no sobrevivan anuncios de una ventana previa.
-      for (const localCampaignId of localIdByExternal.values()) {
-        const rows = (rowsByCampaign.get(localCampaignId) || []).sort((a, b) => b.spend - a.spend);
-        await db('campaigns').where({ id: localCampaignId }).update({
-          meta_ads_insights: rows.length ? JSON.stringify(rows) : null
-        });
-        summary.adInsights += rows.length;
-      }
-    } catch (err) {
-      summary.errors.push(`No se pudieron traer las métricas por anuncio: ${err.message}`);
+    // Se reescribe para TODAS las campañas sincronizadas — no sólo las que
+    // trajeron filas — para que no sobrevivan objetos de una ventana previa.
+    for (const localCampaignId of localIdByExternal.values()) {
+      const bySpend = (a, b) => (b.spend || 0) - (a.spend || 0);
+      const adsetRows = (adsetRowsByCampaign.get(localCampaignId) || []).sort(bySpend);
+      const adRows = (adRowsByCampaign.get(localCampaignId) || []).sort(bySpend);
+      await db('campaigns').where({ id: localCampaignId }).update({
+        meta_adsets_insights: adsetRows.length ? JSON.stringify(adsetRows) : null,
+        meta_ads_insights: adRows.length ? JSON.stringify(adRows) : null
+      });
+      summary.adsetInsights += adsetRows.length;
+      summary.adInsights += adRows.length;
     }
 
     return summary;
@@ -525,6 +616,21 @@ export class MetaAdsService {
    * está disponible. Antes que quedarse sin métricas, se reintenta con el
    * juego mínimo.
    */
+  /**
+   * `/insights` de un nivel, indexado por el id del objeto. Si Meta falla se
+   * anota en el resumen y se sigue con un mapa vacío: el panel prefiere
+   * mostrar la jerarquía sin métricas antes que no mostrar nada.
+   */
+  async #insightsById(account, { level, datePreset, idField, fields, fallbackFields, summary, what }) {
+    try {
+      const rows = await this.#insights(account, { level, datePreset, fields, fallbackFields });
+      return new Map(rows.filter((r) => r[idField]).map((r) => [String(r[idField]), r]));
+    } catch (err) {
+      summary.errors.push(`No se pudieron traer las métricas de ${what}: ${err.message}`);
+      return new Map();
+    }
+  }
+
   async #insights(account, { level, datePreset, fields, fallbackFields }) {
     const params = { level, date_preset: datePreset, limit: '500' };
     try {

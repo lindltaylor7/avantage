@@ -2492,6 +2492,19 @@ app.get('/api/campaigns/performance/export', requireAuth, requirePermission('lea
  * Responde 404 si la campaña no tiene imagen — el frontend muestra un
  * ícono de respaldo en su lugar.
  */
+app.get('/api/campaigns/:id/ads/:adId/image', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const image = await campaignService.getAdCreativeImage(req.params.id, req.params.adId);
+    if (!image) return res.status(404).end();
+    res.type(image.mimeType);
+    res.set('Cache-Control', 'private, max-age=86400');
+    res.sendFile(image.path);
+  } catch (error) {
+    console.error('❌ Error al servir la imagen del anuncio:', error);
+    res.status(500).end();
+  }
+});
+
 app.get('/api/campaigns/:id/image', requireAuth, requirePermission('leads.view'), async (req, res) => {
   try {
     const campaign = await campaignService.getCampaign(req.params.id);

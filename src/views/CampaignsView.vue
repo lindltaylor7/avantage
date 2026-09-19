@@ -296,6 +296,85 @@
                           </div>
                         </div>
 
+                        <!-- Desglose por conjunto de anuncios: el nivel intermedio
+                             de la jerarquía de Meta. El presupuesto y el objetivo de
+                             optimización viven aquí, no en el anuncio. -->
+                        <div v-if="campaign.metaAdsets && campaign.metaAdsets.length" class="metrics-block">
+                          <div class="metrics-block-head">
+                            <h4 class="metrics-block-title">🗂️ Rendimiento por conjunto de anuncios</h4>
+                            <span class="metrics-block-note">
+                              {{ campaign.metaAdsets.length }} {{ campaign.metaAdsets.length === 1 ? 'conjunto' : 'conjuntos' }}
+                              <template v-if="campaign.budgetType">
+                                · Presupuesto de la campaña: {{ campaign.budgetType === 'diario' ? 'diario' : 'total' }}
+                              </template>
+                              <template v-else>· El presupuesto lo lleva cada conjunto</template>
+                            </span>
+                          </div>
+                          <div class="ads-insights-wrapper">
+                            <table class="data-table ads-insights-table">
+                              <thead>
+                                <tr>
+                                  <th class="col-ad-name">Nombre del conjunto</th>
+                                  <th>Entrega</th>
+                                  <th>Anuncios</th>
+                                  <th>Presupuesto</th>
+                                  <th>Resultados</th>
+                                  <th>Coste por resultado</th>
+                                  <th>Alcance</th>
+                                  <th>Frecuencia</th>
+                                  <th>Importe gastado</th>
+                                  <th>Optimización</th>
+                                  <th>Fin</th>
+                                  <th>Impresiones</th>
+                                  <th>CPM</th>
+                                  <th>Clics en el enlace</th>
+                                  <th>CPC del enlace</th>
+                                  <th>CTR del enlace</th>
+                                  <th>Clics (todos)</th>
+                                  <th>CTR (todos)</th>
+                                  <th>CPC (todos)</th>
+                                  <th>Visitas a la página</th>
+                                  <th>Coste por visita</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                <tr v-for="set in campaign.metaAdsets" :key="set.adsetId">
+                                  <td class="col-ad-name">
+                                    <strong class="ad-row-name" :title="set.adsetName">{{ set.adsetName }}</strong>
+                                    <span v-if="!set.hasInsights" class="ad-row-sub">Sin entrega en este periodo</span>
+                                  </td>
+                                  <td><span class="pill pill-xs" :class="deliveryPillClass(set.delivery)">{{ deliveryLabel(set.delivery) }}</span></td>
+                                  <td class="data-mono">{{ num(adCountForAdset(campaign, set.adsetId)) }}</td>
+                                  <td class="data-mono">
+                                    {{ set.budget != null ? money(set.budget) : '—' }}
+                                    <span v-if="set.budgetType" class="ad-row-sub">{{ set.budgetType === 'diario' ? 'Diario' : 'Total' }}</span>
+                                  </td>
+                                  <td class="data-mono">
+                                    {{ numOrDash(set.results) }}
+                                    <span v-if="set.resultIndicator" class="ad-row-sub">{{ set.resultIndicator }}</span>
+                                  </td>
+                                  <td class="data-mono">{{ set.costPerResult != null ? money(set.costPerResult) : '—' }}</td>
+                                  <td class="data-mono">{{ numOrDash(set.reach) }}</td>
+                                  <td class="data-mono">{{ set.frequency != null ? set.frequency : '—' }}</td>
+                                  <td class="data-mono">{{ money(set.spend) }}</td>
+                                  <td class="data-mono">{{ optimizationGoalLabel(set.optimizationGoal) }}</td>
+                                  <td class="data-mono">{{ set.endTime ? formatDate(set.endTime) : 'Sin fecha' }}</td>
+                                  <td class="data-mono">{{ numOrDash(set.impressions) }}</td>
+                                  <td class="data-mono">{{ set.cpm != null ? money(set.cpm) : '—' }}</td>
+                                  <td class="data-mono">{{ numOrDash(set.linkClicks) }}</td>
+                                  <td class="data-mono">{{ set.costPerLinkClick != null ? money(set.costPerLinkClick) : '—' }}</td>
+                                  <td class="data-mono">{{ pct(set.linkCtr) }}</td>
+                                  <td class="data-mono">{{ numOrDash(set.clicks) }}</td>
+                                  <td class="data-mono">{{ pct(set.ctr) }}</td>
+                                  <td class="data-mono">{{ set.cpc != null ? money(set.cpc) : '—' }}</td>
+                                  <td class="data-mono">{{ numOrDash(set.landingPageViews) }}</td>
+                                  <td class="data-mono">{{ set.costPerLandingPageView != null ? money(set.costPerLandingPageView) : '—' }}</td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+
                         <!-- Desglose por anuncio: mismas columnas que el informe
                              del Administrador de anuncios. Las tres clasificaciones
                              y la entrega sólo existen a este nivel. -->
@@ -303,7 +382,7 @@
                           <div class="metrics-block-head">
                             <h4 class="metrics-block-title">🧾 Rendimiento por anuncio</h4>
                             <span class="metrics-block-note">
-                              {{ campaign.metaAds.length }} {{ campaign.metaAds.length === 1 ? 'anuncio' : 'anuncios' }} con datos · desplázate en horizontal para ver todas las columnas
+                              {{ campaign.metaAds.length }} {{ campaign.metaAds.length === 1 ? 'anuncio' : 'anuncios' }} · desplázate en horizontal para ver todas las columnas
                             </span>
                           </div>
                           <div class="ads-insights-wrapper">
@@ -338,16 +417,28 @@
                               <tbody>
                                 <tr v-for="ad in campaign.metaAds" :key="ad.adId">
                                   <td class="col-ad-name">
-                                    <strong class="ad-row-name" :title="ad.adName">{{ ad.adName }}</strong>
-                                    <span v-if="ad.adsetName" class="ad-row-sub">{{ ad.adsetName }}</span>
+                                    <div class="ad-row-identity">
+                                      <img
+                                        v-if="adImageUrls[ad.adId]"
+                                        :src="adImageUrls[ad.adId]"
+                                        alt=""
+                                        class="ad-row-thumb"
+                                      />
+                                      <span v-else class="ad-row-thumb ad-row-thumb-fallback" aria-hidden="true">🖼️</span>
+                                      <span class="ad-row-identity-text">
+                                        <strong class="ad-row-name" :title="ad.adName">{{ ad.adName }}</strong>
+                                        <span v-if="ad.adsetName" class="ad-row-sub">{{ ad.adsetName }}</span>
+                                        <span v-if="!ad.hasInsights" class="ad-row-sub">Sin entrega en este periodo</span>
+                                      </span>
+                                    </div>
                                   </td>
                                   <td><span class="pill pill-xs" :class="deliveryPillClass(ad.delivery)">{{ deliveryLabel(ad.delivery) }}</span></td>
                                   <td class="data-mono">
-                                    {{ ad.results != null ? num(ad.results) : '—' }}
+                                    {{ numOrDash(ad.results) }}
                                     <span v-if="ad.resultIndicator" class="ad-row-sub">{{ ad.resultIndicator }}</span>
                                   </td>
                                   <td class="data-mono">{{ ad.costPerResult != null ? money(ad.costPerResult) : '—' }}</td>
-                                  <td class="data-mono">{{ num(ad.reach) }}</td>
+                                  <td class="data-mono">{{ numOrDash(ad.reach) }}</td>
                                   <td class="data-mono">{{ ad.frequency != null ? ad.frequency : '—' }}</td>
                                   <td class="data-mono">
                                     {{ ad.adsetBudget != null ? money(ad.adsetBudget) : '—' }}
@@ -358,16 +449,16 @@
                                   <td><span class="pill pill-xs" :class="rankPillClass(ad.qualityRanking)" :title="rankTitle(ad.qualityRanking)">{{ rankLabel(ad.qualityRanking) }}</span></td>
                                   <td><span class="pill pill-xs" :class="rankPillClass(ad.engagementRanking)" :title="rankTitle(ad.engagementRanking)">{{ rankLabel(ad.engagementRanking) }}</span></td>
                                   <td><span class="pill pill-xs" :class="rankPillClass(ad.conversionRanking)" :title="rankTitle(ad.conversionRanking)">{{ rankLabel(ad.conversionRanking) }}</span></td>
-                                  <td class="data-mono">{{ num(ad.impressions) }}</td>
+                                  <td class="data-mono">{{ numOrDash(ad.impressions) }}</td>
                                   <td class="data-mono">{{ ad.cpm != null ? money(ad.cpm) : '—' }}</td>
-                                  <td class="data-mono">{{ num(ad.linkClicks) }}</td>
-                                  <td class="data-mono">{{ num(ad.shopClicks) }}</td>
+                                  <td class="data-mono">{{ numOrDash(ad.linkClicks) }}</td>
+                                  <td class="data-mono">{{ numOrDash(ad.shopClicks) }}</td>
                                   <td class="data-mono">{{ ad.costPerLinkClick != null ? money(ad.costPerLinkClick) : '—' }}</td>
                                   <td class="data-mono">{{ pct(ad.linkCtr) }}</td>
-                                  <td class="data-mono">{{ num(ad.clicks) }}</td>
+                                  <td class="data-mono">{{ numOrDash(ad.clicks) }}</td>
                                   <td class="data-mono">{{ pct(ad.ctr) }}</td>
                                   <td class="data-mono">{{ ad.cpc != null ? money(ad.cpc) : '—' }}</td>
-                                  <td class="data-mono">{{ num(ad.landingPageViews) }}</td>
+                                  <td class="data-mono">{{ numOrDash(ad.landingPageViews) }}</td>
                                   <td class="data-mono">{{ ad.costPerLandingPageView != null ? money(ad.costPerLandingPageView) : '—' }}</td>
                                 </tr>
                               </tbody>
@@ -683,7 +774,31 @@ async function hydrateCampaignImages(campaigns) {
   }
 }
 
-onBeforeUnmount(() => releaseCampaignImages(new Set()));
+// Miniatura de cada anuncio dentro del detalle. A diferencia de la de la
+// campaña, sólo se pide al desplegar la fila: una cuenta con decenas de
+// anuncios dispararía una petición por anuncio en cada carga del informe.
+const adImageUrls = reactive({});
+
+function releaseAdImages() {
+  for (const key of Object.keys(adImageUrls)) {
+    URL.revokeObjectURL(adImageUrls[key]);
+    delete adImageUrls[key];
+  }
+}
+
+async function hydrateAdImages(campaign) {
+  for (const ad of campaign?.metaAds || []) {
+    const key = String(ad.adId);
+    if (adImageUrls[key]) continue;
+    const url = await loadApiImage(`/api/campaigns/${campaign.id}/ads/${ad.adId}/image`);
+    if (url) adImageUrls[key] = url;
+  }
+}
+
+onBeforeUnmount(() => {
+  releaseCampaignImages(new Set());
+  releaseAdImages();
+});
 
 const exporting = ref(false);
 const exportMsg = ref('');
@@ -717,6 +832,7 @@ async function loadReport() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'No se pudo cargar el rendimiento.');
     report.value = data;
+    releaseAdImages();
     await hydrateCampaignImages(data.campaigns || []);
   } catch (err) {
     errorMsg.value = err.message;
@@ -819,6 +935,9 @@ function toggleTrace(id) {
 
 function toggleExpand(id) {
   expandedId.value = expandedId.value === id ? null : id;
+  if (expandedId.value == null) return;
+  const campaign = (report.value?.campaigns || []).find((c) => c.id === expandedId.value);
+  if (campaign) hydrateAdImages(campaign);
 }
 
 // ─────────────────────────── Campañas (CRUD) ──────────────────────────
@@ -942,6 +1061,14 @@ function num(n) {
   return Number(n || 0).toLocaleString('es-PE');
 }
 
+/**
+ * Un objeto que nunca se entregó no tiene métricas: Meta muestra "—", no 0.
+ * Pintar un cero haría pensar que se midió y dio cero.
+ */
+function numOrDash(n) {
+  return n != null ? num(n) : '—';
+}
+
 function money(n) {
   const value = Number(n || 0);
   return `S/ ${value.toLocaleString('es-PE', { minimumFractionDigits: value % 1 ? 2 : 0, maximumFractionDigits: 2 })}`;
@@ -992,6 +1119,33 @@ const RANKING_META = {
   below_average_10: { short: '10% inf.', label: 'Por debajo del promedio (10% inferior de los anuncios)', pill: 'pill-danger' },
   unknown: { short: '—', label: 'Sin datos suficientes (Meta necesita al menos 500 impresiones)', pill: 'pill-neutral' }
 };
+/** Objetivo de optimización del conjunto, en la redacción del panel de Meta. */
+const OPTIMIZATION_GOALS = {
+  CONVERSATIONS: 'Conversaciones',
+  LEAD_GENERATION: 'Clientes potenciales',
+  QUALITY_LEAD: 'Clientes potenciales de calidad',
+  LINK_CLICKS: 'Clics en el enlace',
+  LANDING_PAGE_VIEWS: 'Visitas a la página',
+  OFFSITE_CONVERSIONS: 'Conversiones',
+  REACH: 'Alcance',
+  IMPRESSIONS: 'Impresiones',
+  POST_ENGAGEMENT: 'Interacción',
+  PAGE_LIKES: 'Me gusta de la página',
+  THRUPLAY: 'Reproducciones de video',
+  PROFILE_VISIT: 'Visitas al perfil',
+  APP_INSTALLS: 'Instalaciones de la app'
+};
+
+function optimizationGoalLabel(goal) {
+  if (!goal) return '—';
+  return OPTIMIZATION_GOALS[goal] || goal.toLowerCase().replace(/_/g, ' ');
+}
+
+/** Cuántos anuncios de la campaña cuelgan de un conjunto. */
+function adCountForAdset(campaign, adsetId) {
+  return (campaign.metaAds || []).filter((ad) => String(ad.adsetId) === String(adsetId)).length;
+}
+
 function rankLabel(value) { return RANKING_META[value]?.short || '—'; }
 function rankTitle(value) { return RANKING_META[value]?.label || 'Sin datos suficientes'; }
 function rankPillClass(value) { return RANKING_META[value]?.pill || 'pill-neutral'; }
@@ -1424,6 +1578,24 @@ onMounted(() => {
   border-right: 1px solid var(--border-color);
   max-width: 220px;
   white-space: normal;
+}
+.ad-row-identity { display: flex; align-items: flex-start; gap: 0.5rem; }
+.ad-row-identity-text { min-width: 0; }
+.ad-row-thumb {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  border: 1px solid var(--border-color);
+  background: var(--bg-soft);
+}
+.ad-row-thumb-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  opacity: 0.45;
 }
 .ad-row-name { display: block; font-size: 0.76rem; color: var(--text-main); line-height: 1.3; }
 .ad-row-sub { display: block; font-size: 0.64rem; color: var(--text-muted); font-family: var(--font-body); line-height: 1.25; }

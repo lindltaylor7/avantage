@@ -1,4 +1,7 @@
+import fs from 'fs';
+import path from 'path';
 import { db } from '../db/connection.js';
+import { campaignAdImageDir } from '../middleware/upload.js';
 
 /**
  * Campañas de marketing digital: definición manual (nombre, presupuesto,
@@ -38,6 +41,8 @@ function median(values) {
   const mid = Math.floor(nums.length / 2);
   return nums.length % 2 ? nums[mid] : (nums[mid - 1] + nums[mid]) / 2;
 }
+
+const AD_IMAGE_MIME_TYPES = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' };
 
 const WON_STATUSES = new Set(['ganado']);
 const LOST_STATUSES = new Set(['perdido', 'descartado']);
@@ -99,6 +104,27 @@ export class CampaignService {
 
   async deleteCampaign(id) {
     return db('campaigns').where({ id }).del();
+  }
+
+  /**
+   * Imagen del creativo de un anuncio, para la pestaña de Anuncios.
+   *
+   * El nombre del archivo sale de `meta_ads_insights` (lo escribió la
+   * sincronización), nunca del parámetro de la ruta: un `adId` manipulado no
+   * puede sacar la lectura de la carpeta de imágenes.
+   */
+  async getAdCreativeImage(campaignId, adId) {
+    const campaign = await db('campaigns').where({ id: campaignId }).first();
+    if (!campaign) return null;
+
+    const ads = parseMetaInsights(campaign.meta_ads_insights) || [];
+    const ad = ads.find((a) => String(a.adId) === String(adId));
+    if (!ad?.imageFilename) return null;
+
+    const file = path.join(campaignAdImageDir, path.basename(ad.imageFilename));
+    if (!fs.existsSync(file)) return null;
+
+    return { path: file, mimeType: AD_IMAGE_MIME_TYPES[path.extname(file).slice(1).toLowerCase()] || 'image/jpeg' };
   }
 
   #sanitize(data) {
@@ -420,9 +446,11 @@ export class CampaignService {
         hasImage: !!campaign.ad_image_filename,
         lastSyncedAt: campaign.last_synced_at || null,
         insightsWindow: parseMetaInsights(campaign.meta_insights)?.window || null,
-        // Una fila por anuncio de la campaña, con las mismas métricas del
-        // Administrador de anuncios más las tres clasificaciones de calidad.
+        // La jerarquía del Administrador de anuncios: la campaña, sus
+        // conjuntos y sus anuncios, todos con el mismo juego de métricas.
+        metaAdsets: parseMetaInsights(campaign.meta_adsets_insights) || [],
         metaAds: parseMetaInsights(campaign.meta_ads_insights) || [],
+        budgetType: campaign.budget_type || null,
         ads: campaign.ads.map((a) => ({ id: a.id, sourceId: a.ad_source_id, label: a.ad_label })),
         ...summary
       };

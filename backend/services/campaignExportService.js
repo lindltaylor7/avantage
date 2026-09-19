@@ -1,8 +1,8 @@
 import ExcelJS from 'exceljs';
 
 /**
- * Exporta el rendimiento de campañas a un libro de Excel (.xlsx) con dos
- * hojas:
+ * Exporta el rendimiento de campañas a un libro de Excel (.xlsx) con una hoja
+ * por nivel de la jerarquía de Meta, del detalle al agregado:
  *
  *   - "Anuncios"  : una fila por anuncio con **las mismas columnas y en el
  *                   mismo orden** que exporta el Administrador de anuncios de
@@ -10,9 +10,15 @@ import ExcelJS from 'exceljs';
  *                   un informe descargado de ahí. Al final se añaden la
  *                   campaña y el conjunto, que Meta no incluye en ese informe
  *                   pero hacen falta al juntar varias campañas en una hoja.
+ *   - "Conjuntos de anuncios" : una fila por conjunto, con el presupuesto y el
+ *                   objetivo de optimización —que viven en este nivel, no en
+ *                   el anuncio— y las mismas métricas del informe.
  *   - "Campañas"  : una fila por campaña, con esas mismas métricas agregadas
  *                   más el funnel real del CRM (conversaciones atribuidas,
  *                   citas, ganados, costos por etapa y ROAS).
+ *
+ * Los objetos sin entrega salen igual, con las métricas vacías: es lo que hace
+ * el propio informe de Meta, y esconderlos daría a entender que no existen.
  *
  * Los datos salen de `campaignService.getPerformance()`, así que la hoja
  * refleja exactamente lo que muestra la vista de Campañas para el mismo rango.
@@ -62,6 +68,18 @@ function toLocalDate(value) {
   return new Date(y, m - 1, d);
 }
 
+/** Ídem para la entrega ("Entrega de anuncios" en el informe). */
+function deliveryLabel(value) {
+  if (!value) return '-';
+  return DELIVERY_LABELS[value] || String(value).toLowerCase().replace(/_/g, ' ');
+}
+
+function budgetTypeLabel(value) {
+  if (value === 'diario') return 'Presupuesto diario';
+  if (value === 'total') return 'Presupuesto total';
+  return '-';
+}
+
 function rankingLabel(value) {
   if (!value) return '-';
   return RANKING_LABELS[value] || value;
@@ -109,6 +127,46 @@ function adColumns(currency) {
     // Añadidas al final para no alterar el orden del informe de Meta.
     { header: 'Campaña', key: 'campaignName', width: 34 },
     { header: 'Conjunto de anuncios', key: 'adsetName', width: 32 }
+  ];
+}
+
+/**
+ * Columnas del informe a nivel de conjunto de anuncios. Mismo orden que el de
+ * anuncios menos las tres clasificaciones comparativas (sólo existen por
+ * anuncio) y más el objetivo de optimización, que es lo que de verdad decide
+ * la entrega del conjunto.
+ */
+function adsetColumns(currency) {
+  return [
+    { header: 'Inicio del informe', key: 'reportStart', width: 17, fmt: DATE_FMT },
+    { header: 'Fin del informe', key: 'reportStop', width: 17, fmt: DATE_FMT },
+    { header: 'Nombre del conjunto de anuncios', key: 'adsetName', width: 40 },
+    { header: 'Entrega de anuncios', key: 'delivery', width: 20 },
+    { header: 'Configuración de atribución', key: 'attributionSetting', width: 24 },
+    { header: 'Resultados', key: 'results', width: 12, fmt: INT_FMT },
+    { header: 'Indicador de resultado', key: 'resultIndicator', width: 34 },
+    { header: 'Alcance', key: 'reach', width: 12, fmt: INT_FMT },
+    { header: 'Frecuencia', key: 'frequency', width: 12, fmt: DEC_FMT },
+    { header: 'Coste por resultados', key: 'costPerResult', width: 19, fmt: MONEY_FMT },
+    { header: 'Presupuesto del conjunto de anuncios', key: 'budget', width: 32, fmt: MONEY_FMT },
+    { header: 'Tipo de presupuesto del conjunto de anuncios', key: 'budgetType', width: 36 },
+    { header: `Importe gastado (${currency})`, key: 'spend', width: 20, fmt: MONEY_FMT },
+    { header: 'Inicio', key: 'startTime', width: 14, fmt: DATE_FMT },
+    { header: 'Fin', key: 'endTime', width: 14, fmt: DATE_FMT },
+    { header: 'Objetivo de optimización', key: 'optimizationGoal', width: 26 },
+    { header: 'Impresiones', key: 'impressions', width: 13, fmt: INT_FMT },
+    { header: `CPM (coste por 1000 impresiones) (${currency})`, key: 'cpm', width: 32, fmt: MONEY_FMT },
+    { header: 'Clics en el enlace', key: 'linkClicks', width: 17, fmt: INT_FMT },
+    { header: 'shop_clicks', key: 'shopClicks', width: 13, fmt: INT_FMT },
+    { header: `CPC (Coste por clic en el enlace) (${currency})`, key: 'costPerLinkClick', width: 32, fmt: MONEY_FMT },
+    { header: 'CTR (tasa de clics en el enlace)', key: 'linkCtr', width: 27, fmt: DEC_FMT },
+    { header: 'Clics (todos)', key: 'clicks', width: 13, fmt: INT_FMT },
+    { header: 'CTR (todos)', key: 'ctr', width: 13, fmt: DEC_FMT },
+    { header: `CPC (todos) (${currency})`, key: 'cpc', width: 18, fmt: MONEY_FMT },
+    { header: 'Visitas a la página de destino', key: 'landingPageViews', width: 25, fmt: INT_FMT },
+    { header: `Coste por visita a la página de destino (${currency})`, key: 'costPerLandingPageView', width: 36, fmt: MONEY_FMT },
+    { header: 'Anuncios del conjunto', key: 'adCount', width: 20, fmt: INT_FMT },
+    { header: 'Campaña', key: 'campaignName', width: 34 }
   ];
 }
 
@@ -210,6 +268,7 @@ export class CampaignExportService {
     workbook.created = new Date();
 
     this.#addAdsSheet(workbook, campaigns, currency);
+    this.#addAdsetsSheet(workbook, campaigns, currency);
     this.#addCampaignsSheet(workbook, campaigns, currency);
 
     const stamp = new Date().toISOString().slice(0, 10);
@@ -227,7 +286,7 @@ export class CampaignExportService {
           reportStart: toLocalDate(ad.dateStart),
           reportStop: toLocalDate(ad.dateStop),
           adName: ad.adName,
-          delivery: ad.delivery ? (DELIVERY_LABELS[ad.delivery] || ad.delivery.toLowerCase().replace(/_/g, ' ')) : '-',
+          delivery: deliveryLabel(ad.delivery),
           attributionSetting: ad.attributionSetting || '-',
           results: ad.results,
           resultIndicator: ad.resultIndicator || '-',
@@ -235,8 +294,7 @@ export class CampaignExportService {
           frequency: ad.frequency,
           costPerResult: ad.costPerResult,
           adsetBudget: ad.adsetBudget,
-          adsetBudgetType: ad.adsetBudgetType === 'diario' ? 'Presupuesto diario'
-            : ad.adsetBudgetType === 'total' ? 'Presupuesto total' : '-',
+          adsetBudgetType: budgetTypeLabel(ad.adsetBudgetType),
           spend: ad.spend,
           endTime: toLocalDate(ad.endTime),
           qualityRanking: rankingLabel(ad.qualityRanking),
@@ -264,6 +322,63 @@ export class CampaignExportService {
     if (sheet.rowCount === 1) {
       sheet.addRow({
         adName: 'Todavía no hay métricas por anuncio. Pulsa «Sincronizar con Meta» en la vista de Campañas.'
+      });
+    }
+    return sheet;
+  }
+
+  #addAdsetsSheet(workbook, campaigns, currency) {
+    const sheet = workbook.addWorksheet('Conjuntos de anuncios');
+    const columns = adsetColumns(currency);
+    styleSheet(sheet, columns, 3); // fija hasta el nombre del conjunto
+
+    for (const campaign of campaigns) {
+      // Cuántos anuncios cuelgan de cada conjunto: es la columna que explica
+      // por qué un conjunto con presupuesto no gastó nada (no tiene anuncios).
+      const adCountByAdset = new Map();
+      for (const ad of campaign.metaAds || []) {
+        if (!ad.adsetId) continue;
+        adCountByAdset.set(String(ad.adsetId), (adCountByAdset.get(String(ad.adsetId)) || 0) + 1);
+      }
+
+      for (const set of campaign.metaAdsets || []) {
+        sheet.addRow({
+          reportStart: toLocalDate(set.dateStart),
+          reportStop: toLocalDate(set.dateStop),
+          adsetName: set.adsetName,
+          delivery: deliveryLabel(set.delivery),
+          attributionSetting: set.attributionSetting || '-',
+          results: set.results,
+          resultIndicator: set.resultIndicator || '-',
+          reach: set.reach,
+          frequency: set.frequency,
+          costPerResult: set.costPerResult,
+          budget: set.budget,
+          budgetType: budgetTypeLabel(set.budgetType),
+          spend: set.spend,
+          startTime: toLocalDate(set.startTime),
+          endTime: toLocalDate(set.endTime),
+          optimizationGoal: set.optimizationGoal || '-',
+          impressions: set.impressions,
+          cpm: set.cpm,
+          linkClicks: set.linkClicks,
+          shopClicks: set.shopClicks,
+          costPerLinkClick: set.costPerLinkClick,
+          linkCtr: set.linkCtr,
+          clicks: set.clicks,
+          ctr: set.ctr,
+          cpc: set.cpc,
+          landingPageViews: set.landingPageViews,
+          costPerLandingPageView: set.costPerLandingPageView,
+          adCount: adCountByAdset.get(String(set.adsetId)) || 0,
+          campaignName: campaign.name
+        });
+      }
+    }
+
+    if (sheet.rowCount === 1) {
+      sheet.addRow({
+        adsetName: 'Todavía no hay conjuntos de anuncios sincronizados. Pulsa «Sincronizar con Meta» en la vista de Campañas.'
       });
     }
     return sheet;
