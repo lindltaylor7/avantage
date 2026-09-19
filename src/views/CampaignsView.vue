@@ -218,6 +218,15 @@
                     <td class="col-actions" @click.stop>
                       <button type="button" class="icon-btn" title="Editar campaña" @click="openEditModal(campaign)">✏️</button>
                       <button
+                        type="button"
+                        class="icon-btn"
+                        :class="{ 'is-muted': !campaign.sampleContacts.length }"
+                        :title="campaign.sampleContacts.length
+                          ? `Trazabilidad de ${campaign.sampleContacts.length} lead(s) de esta campaña`
+                          : 'Sin leads atribuidos a esta campaña en el rango'"
+                        @click="openTrace(campaign)"
+                      >🧭</button>
+                      <button
                         v-if="campaign.source !== 'meta'"
                         type="button"
                         class="icon-btn"
@@ -495,48 +504,6 @@
                           </span>
                           <span v-if="!campaign.ads.length" class="ad-chips-empty">sin anuncios asociados</span>
                         </div>
-
-                        <button type="button" class="btn-secondary campaign-trace-btn" @click="toggleTrace(campaign.id)">
-                          {{ openTraceId === campaign.id ? '▲ Ocultar trazabilidad' : '🔍 Ver trazabilidad de leads' }}
-                        </button>
-
-                        <div v-if="openTraceId === campaign.id" class="trace-panel">
-                          <p v-if="!campaign.sampleContacts.length" class="trace-hint">
-                            Todavía no hay contactos atribuidos a esta campaña en el rango seleccionado.
-                          </p>
-                          <template v-else>
-                            <p class="trace-hint">
-                              Recorrido real de {{ campaign.sampleContacts.length }} contacto(s) de esta campaña, desde el anuncio hasta su etapa actual.
-                            </p>
-                            <div class="trace-leads">
-                              <div v-for="(lead, li) in campaign.sampleContacts" :key="li" class="trace-lead">
-                                <div class="trace-lead-header">
-                                  <strong class="trace-lead-name">{{ lead.name }}</strong>
-                                  <span v-if="lead.topic" class="trace-lead-topic">{{ lead.topic }}</span>
-                                  <span class="pill" :class="stagePillClass(lead.currentStage)">{{ stageLabel(lead.currentStage) }}</span>
-                                  <span v-if="lead.viability != null" class="pill pill-neutral">Viab. {{ lead.viability }}%</span>
-                                </div>
-                                <ol class="trace-timeline">
-                                  <li
-                                    v-for="(step, idx) in lead.timeline"
-                                    :key="idx"
-                                    class="trace-step"
-                                    :class="{ 'is-last': idx === lead.timeline.length - 1 }"
-                                  >
-                                    <span class="trace-step-dot" :class="stepDotClass(lead, step, idx)"></span>
-                                    <span class="trace-step-body">
-                                      <span class="trace-step-label">{{ step.stage }}</span>
-                                      <span class="trace-step-time data-mono">
-                                        <template v-if="step.at">{{ formatDateTime(step.at) }}</template>
-                                        <template v-else-if="step.note">{{ step.note }}</template>
-                                      </span>
-                                    </span>
-                                  </li>
-                                </ol>
-                              </div>
-                            </div>
-                          </template>
-                        </div>
                       </div>
                     </td>
                   </tr>
@@ -610,6 +577,90 @@
     </template>
 
     <!-- Modal de campaña -->
+    <!-- Trazabilidad de leads: el recorrido real de cada contacto, agrupado
+         por el anuncio del que llegó. -->
+    <div v-if="traceCampaign" class="cmp-modal-overlay" @click.self="closeTrace">
+      <div class="cmp-modal cmp-modal-wide">
+        <div class="cmp-modal-head">
+          <div class="trace-head-text">
+            <h3>🧭 Trazabilidad de leads</h3>
+            <span class="trace-head-sub">{{ traceCampaign.name }} · {{ rangeLabel }}</span>
+          </div>
+          <button type="button" class="icon-btn" @click="closeTrace">✕</button>
+        </div>
+
+        <div class="cmp-modal-body trace-modal-body">
+          <p v-if="!traceCampaign.sampleContacts.length" class="trace-hint">
+            Todavía no hay contactos atribuidos a esta campaña en el rango seleccionado.
+          </p>
+
+          <template v-else>
+            <!-- Resumen del embudo, para leer el detalle en contexto -->
+            <div class="trace-summary">
+              <div v-for="stage in traceSummary" :key="stage.key" class="trace-summary-item">
+                <span class="trace-summary-value">{{ num(stage.count) }}</span>
+                <span class="trace-summary-label">{{ stage.label }}</span>
+              </div>
+            </div>
+
+            <div v-for="group in traceGroups" :key="group.key" class="trace-ad-group">
+              <!-- De qué anuncio llegaron estos leads -->
+              <div class="trace-ad-head">
+                <img
+                  v-if="group.adId && adImageUrls[group.adId]"
+                  :src="adImageUrls[group.adId]"
+                  alt=""
+                  class="trace-ad-thumb"
+                />
+                <span v-else class="trace-ad-thumb trace-ad-thumb-fallback" aria-hidden="true">🖼️</span>
+                <div class="trace-ad-text">
+                  <strong class="trace-ad-name">{{ group.adName }}</strong>
+                  <span class="trace-ad-sub">
+                    <template v-if="group.adsetName">{{ group.adsetName }} · </template>
+                    <template v-if="group.adHeadline">“{{ group.adHeadline }}” · </template>
+                    ID {{ group.adSourceId || '—' }}
+                  </span>
+                </div>
+                <span class="trace-ad-count">
+                  {{ group.leads.length }} {{ group.leads.length === 1 ? 'lead' : 'leads' }}
+                  <template v-if="group.won"> · {{ group.won }} ganado(s)</template>
+                </span>
+              </div>
+
+              <div class="trace-leads">
+                <div v-for="(lead, li) in group.leads" :key="li" class="trace-lead">
+                  <div class="trace-lead-header">
+                    <strong class="trace-lead-name">{{ lead.name }}</strong>
+                    <span v-if="lead.topic" class="trace-lead-topic">{{ lead.topic }}</span>
+                    <span class="pill" :class="stagePillClass(lead.currentStage)">{{ stageLabel(lead.currentStage) }}</span>
+                    <span v-if="lead.viability != null" class="pill pill-neutral">Viab. {{ lead.viability }}%</span>
+                    <span v-if="lead.quotedValue" class="pill pill-neutral">{{ money(lead.quotedValue) }}</span>
+                  </div>
+                  <ol class="trace-timeline">
+                    <li
+                      v-for="(step, idx) in lead.timeline"
+                      :key="idx"
+                      class="trace-step"
+                      :class="{ 'is-last': idx === lead.timeline.length - 1 }"
+                    >
+                      <span class="trace-step-dot" :class="stepDotClass(lead, step, idx)"></span>
+                      <span class="trace-step-body">
+                        <span class="trace-step-label">{{ step.stage }}</span>
+                        <span class="trace-step-time data-mono">
+                          <template v-if="step.at">{{ formatDateTime(step.at) }}</template>
+                          <template v-else-if="step.note">{{ step.note }}</template>
+                        </span>
+                      </span>
+                    </li>
+                  </ol>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
     <div v-if="showModal" class="cmp-modal-overlay" @click.self="closeModal">
       <div class="cmp-modal">
         <div class="cmp-modal-head">
@@ -703,7 +754,7 @@ const report = ref(null);
 const loading = ref(false);
 const errorMsg = ref('');
 const rangeDays = ref(30);
-const openTraceId = ref(null);
+const traceCampaign = ref(null);
 const expandedId = ref(null);
 const assignSelection = reactive({});
 
@@ -834,6 +885,7 @@ async function loadReport() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'No se pudo cargar el rendimiento.');
     report.value = data;
+    traceCampaign.value = null;
     releaseAdImages();
     await hydrateCampaignImages(data.campaigns || []);
   } catch (err) {
@@ -931,9 +983,63 @@ async function syncMeta() {
   }
 }
 
-function toggleTrace(id) {
-  openTraceId.value = openTraceId.value === id ? null : id;
+/**
+ * Trazabilidad de una campaña en un modal: el recorrido de cada lead agrupado
+ * por el anuncio del que llegó. Se apoya en `sampleContacts`, que ya viene en
+ * el informe, así que no hace falta pedir nada más al abrirlo — sólo las
+ * miniaturas de los creativos, que sí son una petición por anuncio.
+ */
+function openTrace(campaign) {
+  traceCampaign.value = campaign;
+  hydrateAdImages(campaign);
 }
+
+function closeTrace() {
+  traceCampaign.value = null;
+}
+
+/** Leads de la campaña abierta, agrupados por anuncio de procedencia. */
+const traceGroups = computed(() => {
+  const leads = traceCampaign.value?.sampleContacts || [];
+  const groups = new Map();
+  for (const lead of leads) {
+    // Un anuncio que ya no está en las métricas (o un referral sin mapear)
+    // sigue siendo un grupo propio: su id es lo único que lo identifica.
+    const key = lead.adId || lead.adSourceId || 'sin-anuncio';
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        adId: lead.adId || null,
+        adSourceId: lead.adSourceId || null,
+        adName: lead.adName || 'Anuncio sin identificar',
+        adsetName: lead.adsetName || null,
+        adHeadline: lead.adHeadline || null,
+        leads: [],
+        won: 0
+      });
+    }
+    const group = groups.get(key);
+    group.leads.push(lead);
+    if (lead.currentStage === 'ganado') group.won++;
+  }
+  return [...groups.values()].sort((a, b) => b.leads.length - a.leads.length);
+});
+
+/** Embudo de los leads listados, para leer el detalle en contexto. */
+const traceSummary = computed(() => {
+  const leads = traceCampaign.value?.sampleContacts || [];
+  const count = (...stages) => leads.filter((l) => stages.includes(l.currentStage)).length;
+  return [
+    { key: 'total', label: 'Leads', count: leads.length },
+    { key: 'respondido', label: 'En conversación', count: count('respondido') },
+    { key: 'calificado', label: 'Calificados', count: count('calificado') },
+    { key: 'cita_agendada', label: 'Con cita', count: count('cita_agendada') },
+    { key: 'ganado', label: 'Ganados', count: count('ganado') },
+    { key: 'perdido', label: 'Perdidos', count: count('perdido') }
+  ];
+});
+
+const rangeLabel = computed(() => RANGE_OPTIONS.find((o) => o.value === rangeDays.value)?.label || '');
 
 function toggleExpand(id) {
   expandedId.value = expandedId.value === id ? null : id;
@@ -1454,6 +1560,9 @@ onMounted(() => {
   line-height: 1;
 }
 .icon-btn:hover { background: var(--surface-3); }
+/* Campaña sin leads atribuidos: el botón sigue abriendo el modal, que explica
+   por qué está vacío, pero se ve apagado para no invitar al clic. */
+.icon-btn.is-muted { opacity: 0.45; }
 .expand-btn { transition: transform 0.15s ease; }
 .expand-btn.is-open { transform: rotate(180deg); }
 
@@ -1621,11 +1730,56 @@ onMounted(() => {
 .ad-chip-x:hover { color: var(--accent-rose); }
 .ad-chips-empty { font-size: 0.74rem; color: var(--text-muted); font-style: italic; }
 
-.campaign-trace-btn { margin-top: 1.1rem; width: auto; padding: 0.5rem 1rem; font-size: 0.82rem; }
+/* Trazabilidad (modal) */
+.trace-head-text { display: flex; flex-direction: column; gap: 0.15rem; }
+.trace-head-sub { font-size: 0.76rem; color: var(--text-muted); }
+.trace-modal-body { gap: 1.25rem; }
+.trace-hint { font-size: 0.8rem; color: var(--text-muted); }
 
-/* Trazabilidad */
-.trace-panel { margin-top: 1.1rem; padding-top: 1.1rem; border-top: 1px solid var(--border-color); }
-.trace-hint { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem; }
+/* Resumen del embudo, arriba del detalle */
+.trace-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 0.5rem;
+}
+.trace-summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.6rem 0.7rem;
+  background: var(--surface-1);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+.trace-summary-value { font-size: 1.15rem; font-weight: 700; color: var(--text-main); font-family: var(--font-mono); }
+.trace-summary-label { font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+
+/* Cabecera del anuncio del que llegaron los leads del grupo */
+.trace-ad-group { display: flex; flex-direction: column; gap: 0.75rem; }
+.trace-ad-head {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--surface-1);
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--primary);
+  border-radius: var(--radius-md);
+}
+.trace-ad-thumb {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  border: 1px solid var(--border-color);
+  background: var(--bg-soft);
+}
+.trace-ad-thumb-fallback { display: inline-flex; align-items: center; justify-content: center; opacity: 0.45; }
+.trace-ad-text { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; flex: 1; }
+.trace-ad-name { font-size: 0.85rem; color: var(--text-main); }
+.trace-ad-sub { font-size: 0.7rem; color: var(--text-muted); }
+.trace-ad-count { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
 .trace-leads { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
 .trace-lead {
   background: var(--surface-1);
@@ -1734,6 +1888,7 @@ onMounted(() => {
   padding: 1rem 1.25rem;
   border-bottom: 1px solid var(--border-color);
 }
+.cmp-modal-wide { max-width: 980px; }
 .cmp-modal-head h3 { font-size: 1.05rem; font-weight: 700; color: var(--text-main); }
 .cmp-modal-body { padding: 1.25rem; overflow-y: auto; display: flex; flex-direction: column; gap: 0.85rem; }
 .fld { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.78rem; color: var(--text-muted); }

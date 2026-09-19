@@ -275,6 +275,28 @@ export class CampaignService {
     });
   }
 
+  /**
+   * De qué anuncio llegó un contacto. El `source_id` del referral que manda
+   * WhatsApp puede ser el id del anuncio, el de la publicación que hay detrás
+   * o el del media de Instagram —la sincronización mapea los tres al mismo
+   * anuncio—, así que se busca primero la fila de métricas por id y, si no
+   * casa, por el nombre que guardó el mapeo.
+   */
+  #resolveContactAd(contact, campaign, metaAds) {
+    const sourceId = contact.sourceId ? String(contact.sourceId) : null;
+    const label = campaign?.ads?.find((a) => String(a.ad_source_id) === sourceId)?.ad_label || null;
+    const metaAd = metaAds.find((a) => String(a.adId) === sourceId)
+      || (label ? metaAds.find((a) => a.adName === label) : null);
+    return {
+      adSourceId: sourceId,
+      // Sólo hay `adId` cuando el anuncio existe en las métricas: es lo que
+      // permite pedirle la miniatura del creativo al backend.
+      adId: metaAd?.adId || null,
+      adName: metaAd?.adName || label || null,
+      adsetName: metaAd?.adsetName || null
+    };
+  }
+
   #summariseGroup(contacts, campaign) {
     const conversations = contacts.length;
     const responded = contacts.filter((c) => c.responded).length;
@@ -285,6 +307,7 @@ export class CampaignService {
 
     const spend = campaign ? resolveSpend(campaign) : 0;
     const meta = campaign ? parseMetaInsights(campaign.meta_insights) : null;
+    const metaAds = (campaign ? parseMetaInsights(campaign.meta_ads_insights) : null) || [];
     const quotedValue = contacts.reduce((sum, c) => sum + (c.quotedValue || 0), 0);
 
     const rate = (num, den) => (den > 0 ? Math.round((num / den) * 1000) / 10 : 0);
@@ -360,16 +383,25 @@ export class CampaignService {
         costPerLeadMeta: meta && meta.messagingStarted > 0 && spend > 0
           ? Math.round((spend / meta.messagingStarted) * 100) / 100 : null
       },
+      // El modal de trazabilidad los agrupa por anuncio, así que se mandan
+      // bastantes más de los que cabían en la vista en línea anterior.
       sampleContacts: contacts
         .slice()
         .sort((x, y) => new Date(y.firstMessageAt) - new Date(x.firstMessageAt))
-        .slice(0, 12)
+        .slice(0, 60)
         .map((c) => ({
           name: c.lead?.full_name || c.contactName || c.waId,
+          leadId: c.lead?.id || null,
           topic: c.lead?.topic || null,
           currentStage: c.currentStage,
           viability: c.viability,
+          platform: c.platform || null,
           adHeadline: c.headline,
+          firstMessageAt: c.firstMessageAt,
+          firstResponseMinutes: c.firstResponseMinutes,
+          meetingAt: c.meetingAt,
+          quotedValue: c.quotedValue,
+          ...this.#resolveContactAd(c, campaign, metaAds),
           timeline: this.#buildTimeline(c)
         }))
     };
