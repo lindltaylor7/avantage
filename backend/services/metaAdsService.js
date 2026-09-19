@@ -240,6 +240,20 @@ function toDateOnly(value) {
 }
 
 /**
+ * Los presets `last_Nd` de Meta terminan AYER: lo que pasó hoy no entra en
+ * ellos. Como el panel se compara contra el Administrador de anuncios —donde
+ * lo normal es mirar "Hoy"— un resultado de hoy parecía perdido. Por eso la
+ * ventana se pide como rango explícito que llega hasta hoy, y el preset sólo
+ * decide cuántos días abarca.
+ */
+const PRESET_DAYS = { last_7d: 7, last_14d: 14, last_30d: 30, last_90d: 90 };
+
+/** `YYYY-MM-DD` de un instante desplazado al huso de la cuenta. */
+function dayInAccountTz(millis, offsetHours) {
+  return new Date(millis + offsetHours * 3600000).toISOString().slice(0, 10);
+}
+
+/**
  * Integración con la Meta Marketing API: importa las campañas de Ads, mapea
  * automáticamente sus anuncios (para atribuir el tráfico Click-to-WhatsApp por
  * `referral.source_id`) y trae las métricas de rendimiento del Administrador de
@@ -252,6 +266,7 @@ export class MetaAdsService {
   constructor({ fetchImpl } = {}) {
     this.fetch = fetchImpl || globalThis.fetch;
     this._resolvedAccount = null; // cache: { id, name }
+    this._tzOffsetHours = null;   // cache: huso de la cuenta, para fijar "hoy"
   }
 
   get accessToken() {
@@ -356,13 +371,16 @@ export class MetaAdsService {
 
   /**
    * Sincroniza campañas + anuncios + métricas. `datePreset` es la ventana de
-   * insights de Meta (last_7d | last_30d | last_90d | maximum).
+   * insights de Meta (last_7d | last_30d | last_90d | maximum), que se traduce
+   * a un rango de fechas que incluye hoy (ver `#timeParams`).
    */
   async sync({ datePreset = 'last_30d' } = {}) {
     const account = (await this.resolveAccount()).id;
+    const timeParams = await this.#timeParams(account, datePreset);
+    const window = timeParams.time_range ? JSON.parse(timeParams.time_range) : { preset: datePreset };
     const summary = {
       campaigns: 0, adsets: 0, adsMapped: 0, insightsUpdated: 0, adsetInsights: 0, adInsights: 0,
-      adAccount: account, datePreset, errors: []
+      adAccount: account, datePreset, window, errors: []
     };
 
     // 1) Campañas
@@ -507,7 +525,7 @@ export class MetaAdsService {
     try {
       const insights = await this.#insights(account, {
         level: 'campaign',
-        datePreset,
+        timeParams,
         fields: CAMPAIGN_INSIGHT_FIELDS,
         fallbackFields: CAMPAIGN_INSIGHT_FIELDS_FALLBACK
       });
@@ -516,7 +534,7 @@ export class MetaAdsService {
         const localCampaignId = localIdByExternal.get(String(row.campaign_id));
         if (!localCampaignId) continue;
         await db('campaigns').where({ id: localCampaignId }).update({
-          meta_insights: JSON.stringify({ ...normalizeInsightRow(row), window: datePreset }),
+          meta_insights: JSON.stringify({ ...normalizeInsightRow(row), window: datePreset, windowRange: window }),
           last_synced_at: db.fn.now()
         });
         summary.insightsUpdated++;
@@ -530,7 +548,7 @@ export class MetaAdsService {
     //    revés: así un conjunto o un anuncio sin entrega sigue apareciendo.
     const adsetInsightsById = await this.#insightsById(account, {
       level: 'adset',
-      datePreset,
+      timeParams,
       idField: 'adset_id',
       fields: ADSET_INSIGHT_FIELDS,
       fallbackFields: ADSET_INSIGHT_FIELDS_FALLBACK,
@@ -540,7 +558,7 @@ export class MetaAdsService {
 
     const adInsightsById = await this.#insightsById(account, {
       level: 'ad',
-      datePreset,
+      timeParams,
       idField: 'ad_id',
       fields: AD_INSIGHT_FIELDS,
       fallbackFields: AD_INSIGHT_FIELDS_FALLBACK,
@@ -621,9 +639,43 @@ export class MetaAdsService {
    * anota en el resumen y se sigue con un mapa vacío: el panel prefiere
    * mostrar la jerarquía sin métricas antes que no mostrar nada.
    */
-  async #insightsById(account, { level, datePreset, idField, fields, fallbackFields, summary, what }) {
+  /**
+   * Huso horario de la cuenta publicitaria: es el que decide qué día es "hoy"
+   * para Meta, y puede no ser el del servidor. Se cachea por instancia porque
+   * no cambia entre sincronizaciones.
+   */
+  async #accountTimezoneOffset(account) {
+    if (this._tzOffsetHours != null) return this._tzOffsetHours;
     try {
-      const rows = await this.#insights(account, { level, datePreset, fields, fallbackFields });
+      const info = await this.#graphGet(account, { fields: 'timezone_offset_hours_utc' });
+      this._tzOffsetHours = Number(info.timezone_offset_hours_utc || 0);
+    } catch {
+      this._tzOffsetHours = 0; // ante la duda, UTC: peor es quedarse sin métricas
+    }
+    return this._tzOffsetHours;
+  }
+
+  /**
+   * Parámetros de ventana para `/insights`. Se traduce el preset a un
+   * `time_range` que **incluye hoy** (ver `PRESET_DAYS`); `maximum` se deja
+   * como preset porque no tiene equivalente en fechas.
+   */
+  async #timeParams(account, datePreset) {
+    const days = PRESET_DAYS[datePreset];
+    if (!days) return { date_preset: datePreset };
+    const offset = await this.#accountTimezoneOffset(account);
+    const now = Date.now();
+    return {
+      time_range: JSON.stringify({
+        since: dayInAccountTz(now - (days - 1) * 86400000, offset),
+        until: dayInAccountTz(now, offset)
+      })
+    };
+  }
+
+  async #insightsById(account, { level, timeParams, idField, fields, fallbackFields, summary, what }) {
+    try {
+      const rows = await this.#insights(account, { level, timeParams, fields, fallbackFields });
       return new Map(rows.filter((r) => r[idField]).map((r) => [String(r[idField]), r]));
     } catch (err) {
       summary.errors.push(`No se pudieron traer las métricas de ${what}: ${err.message}`);
@@ -631,8 +683,8 @@ export class MetaAdsService {
     }
   }
 
-  async #insights(account, { level, datePreset, fields, fallbackFields }) {
-    const params = { level, date_preset: datePreset, limit: '500' };
+  async #insights(account, { level, timeParams, fields, fallbackFields }) {
+    const params = { level, ...timeParams, limit: '500' };
     try {
       return await this.#graphGet(`${account}/insights`, { ...params, fields });
     } catch (err) {

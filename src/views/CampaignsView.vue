@@ -303,6 +303,7 @@
                           <div class="metrics-block-head">
                             <h4 class="metrics-block-title">🗂️ Rendimiento por conjunto de anuncios</h4>
                             <span class="metrics-block-note">
+                              Informe {{ reportWindowLabel(campaign.metrics) }} ·
                               {{ campaign.metaAdsets.length }} {{ campaign.metaAdsets.length === 1 ? 'conjunto' : 'conjuntos' }}
                               <template v-if="campaign.budgetType">
                                 · Presupuesto de la campaña: {{ campaign.budgetType === 'diario' ? 'diario' : 'total' }}
@@ -382,6 +383,7 @@
                           <div class="metrics-block-head">
                             <h4 class="metrics-block-title">🧾 Rendimiento por anuncio</h4>
                             <span class="metrics-block-note">
+                              Informe {{ reportWindowLabel(campaign.metrics) }} ·
                               {{ campaign.metaAds.length }} {{ campaign.metaAds.length === 1 ? 'anuncio' : 'anuncios' }} · desplázate en horizontal para ver todas las columnas
                             </span>
                           </div>
