@@ -4,6 +4,14 @@ import ExcelJS from 'exceljs';
  * Exporta el rendimiento de campañas a un libro de Excel (.xlsx) con una hoja
  * por nivel de la jerarquía de Meta, del detalle al agregado:
  *
+ *   - "Atribución anuncio → venta" : la hoja con la que se abre el libro. Una
+ *                   fila por combinación campaña > conjunto > anuncio, que
+ *                   cruza lo que costó ese anuncio en Meta con lo que pasó
+ *                   después en el CRM (leads, en qué etapa están, ventas
+ *                   cerradas y dinero cobrado), ordenada de mayor a menor
+ *                   ingreso para que los anuncios ganadores queden arriba y
+ *                   los que sólo queman presupuesto, abajo.
+ *
  *   - "Anuncios"  : una fila por anuncio con **las mismas columnas y en el
  *                   mismo orden** que exporta el Administrador de anuncios de
  *                   Meta, para que el archivo se pueda comparar o pegar sobre
@@ -170,6 +178,88 @@ function adsetColumns(currency) {
   ];
 }
 
+/**
+ * Columnas de la hoja de atribución, en tres bloques: de dónde vino el lead,
+ * qué costó traerlo y qué pasó con él dentro del CRM.
+ */
+function adAttributionColumns(currency) {
+  return [
+    // ── Bloque A: identificación y origen ──
+    { header: 'Campaña', key: 'campaignName', width: 34 },
+    { header: 'ID del conjunto de anuncios', key: 'adsetId', width: 22 },
+    { header: 'Conjunto de anuncios', key: 'adsetName', width: 36 },
+    { header: 'ID del anuncio', key: 'adId', width: 20 },
+    { header: 'Anuncio', key: 'adName', width: 44 },
+    // ── Bloque B: inversión y conversión inicial ──
+    { header: `Inversión (${currency})`, key: 'spend', width: 17, fmt: MONEY_FMT },
+    { header: 'Impresiones', key: 'impressions', width: 13, fmt: INT_FMT },
+    { header: 'Clics en el enlace', key: 'linkClicks', width: 17, fmt: INT_FMT },
+    { header: 'CTR del enlace (%)', key: 'linkCtr', width: 18, fmt: DEC_FMT },
+    { header: 'Leads generados', key: 'leads', width: 16, fmt: INT_FMT },
+    { header: `Costo por lead (${currency})`, key: 'costPerLead', width: 22, fmt: MONEY_FMT },
+    // ── Bloque C: calidad y ventas según el CRM ──
+    { header: 'Leads en cotización', key: 'quotation', width: 19, fmt: INT_FMT },
+    { header: 'Leads en seguimiento', key: 'followUp', width: 20, fmt: INT_FMT },
+    { header: 'Leads descartados', key: 'discarded', width: 18, fmt: INT_FMT },
+    { header: 'Ventas cerradas', key: 'won', width: 16, fmt: INT_FMT },
+    { header: `Ingreso cobrado (${currency})`, key: 'revenue', width: 23, fmt: MONEY_FMT },
+    { header: `Ingreso registrado, incl. cuotas por cobrar (${currency})`, key: 'billedRevenue', width: 33, fmt: MONEY_FMT },
+    { header: 'ROAS real (CRM)', key: 'roas', width: 16, fmt: DEC_FMT }
+  ];
+}
+
+const round2 = (n) => Math.round(n * 100) / 100;
+
+/**
+ * Una fila de la hoja de atribución. `ad` son las métricas de Meta (null si el
+ * anuncio ya no figura en la sincronización) y `crm` el funnel atribuido a ese
+ * anuncio (null si el anuncio no trajo ni un lead, que es justo el caso que
+ * interesa ver para cortar presupuesto).
+ */
+function adAttributionRow(campaign, ad, crm) {
+  const spend = ad?.spend ?? null;
+  const leads = crm?.leads || 0;
+  const revenue = crm?.paidRevenue || 0;
+
+  return {
+    campaignName: campaign.name,
+    adsetId: ad?.adsetId || crm?.adsetId || '-',
+    adsetName: ad?.adsetName || crm?.adsetName || '-',
+    // Sin anuncio en las métricas se cae al `source_id` del referral: es el
+    // identificador con el que llegó el lead y el que permite rastrearlo.
+    adId: ad?.adId || crm?.adId || crm?.adSourceId || '-',
+    adName: ad?.adName || crm?.adName || crm?.headline || '-',
+    spend,
+    impressions: ad?.impressions ?? null,
+    linkClicks: ad?.linkClicks ?? null,
+    linkCtr: ad?.linkCtr ?? null,
+    leads,
+    costPerLead: spend > 0 && leads > 0 ? round2(spend / leads) : null,
+    quotation: crm?.quotation || 0,
+    followUp: crm?.followUp || 0,
+    discarded: crm?.discarded || 0,
+    won: crm?.won || 0,
+    revenue,
+    billedRevenue: crm?.billedRevenue || 0,
+    roas: spend > 0 && revenue > 0 ? round2(revenue / spend) : null
+  };
+}
+
+/**
+ * Ranking de efectividad: primero lo que cerró más dinero, y a igualdad se va
+ * bajando por el funnel (ventas, cotizaciones, leads). El último criterio es
+ * el gasto en orden descendente, así que entre los anuncios que no produjeron
+ * nada sale arriba el que más presupuesto se comió — el primero que conviene
+ * apagar.
+ */
+function byEffectiveness(a, b) {
+  return (b.revenue - a.revenue)
+    || (b.won - a.won)
+    || (b.quotation - a.quotation)
+    || (b.leads - a.leads)
+    || ((b.spend || 0) - (a.spend || 0));
+}
+
 function campaignColumns(currency) {
   return [
     { header: 'Campaña', key: 'name', width: 34 },
@@ -267,12 +357,58 @@ export class CampaignExportService {
     workbook.creator = 'Panel Tesis Perú';
     workbook.created = new Date();
 
+    this.#addAdAttributionSheet(workbook, campaigns, currency);
     this.#addAdsSheet(workbook, campaigns, currency);
     this.#addAdsetsSheet(workbook, campaigns, currency);
     this.#addCampaignsSheet(workbook, campaigns, currency);
 
     const stamp = new Date().toISOString().slice(0, 10);
     return { workbook, filename: `campanas-meta-ads-${stamp}.xlsx` };
+  }
+
+  /**
+   * Hoja de atribución anuncio → venta: una fila por campaña > conjunto >
+   * anuncio con el cruce entre la inversión de Meta y el desenlace comercial.
+   *
+   * Se listan los anuncios de las métricas de Meta —incluidos los que no
+   * trajeron ningún lead— y, a continuación, los grupos del CRM que no casaron
+   * con ninguno de ellos, para que ningún lead atribuido quede fuera del
+   * reporte por haberse borrado el anuncio en Meta.
+   */
+  #addAdAttributionSheet(workbook, campaigns, currency) {
+    const sheet = workbook.addWorksheet('Atribución anuncio → venta');
+    const columns = adAttributionColumns(currency);
+    styleSheet(sheet, columns, 5); // fija los cinco campos de identificación
+
+    const rows = [];
+    for (const campaign of campaigns) {
+      const crmByAdId = new Map();
+      const unmatched = [];
+      for (const group of campaign.adBreakdown || []) {
+        if (group.adId) crmByAdId.set(String(group.adId), group);
+        else unmatched.push(group);
+      }
+
+      for (const ad of campaign.metaAds || []) {
+        const key = String(ad.adId);
+        rows.push(adAttributionRow(campaign, ad, crmByAdId.get(key) || null));
+        crmByAdId.delete(key);
+      }
+
+      for (const group of [...crmByAdId.values(), ...unmatched]) {
+        rows.push(adAttributionRow(campaign, null, group));
+      }
+    }
+
+    rows.sort(byEffectiveness);
+    rows.forEach((row) => sheet.addRow(row));
+
+    if (sheet.rowCount === 1) {
+      sheet.addRow({
+        campaignName: 'No hay anuncios ni leads atribuidos en el rango seleccionado. Pulsa «Sincronizar con Meta» en la vista de Campañas.'
+      });
+    }
+    return sheet;
   }
 
   #addAdsSheet(workbook, campaigns, currency) {

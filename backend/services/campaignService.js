@@ -49,6 +49,15 @@ const LOST_STATUSES = new Set(['perdido', 'descartado']);
 const APPOINTMENT_STATUSES = new Set(['cita_agendada']);
 
 /**
+ * Etapas en las que el lead ya tiene una propuesta económica sobre la mesa.
+ * Se miran además de las tablas de cotizaciones/contratos/ingresos porque el
+ * equipo negocia por WhatsApp y a veces mueve la tarjeta antes de emitir el
+ * documento: si sólo se contara `quotes`, un anuncio que está cerrando trato
+ * aparecería como si no hubiera pasado de la primera conversación.
+ */
+const QUOTATION_STATUSES = new Set(['transferido_closer', 'en_negociacion']);
+
+/**
  * Lee una columna JSON de `campaigns` (`meta_insights`, un objeto, o
  * `meta_ads_insights`, un arreglo). Según el driver, Knex la devuelve ya
  * parseada o como texto.
@@ -221,13 +230,40 @@ export class CampaignService {
       if (!prev || new Date(m.created_at) < new Date(prev.created_at)) meetingByWa.set(m.wa_id, m);
     }
 
-    const wonLeadIds = leads.filter((l) => WON_STATUSES.has(l.status)).map((l) => l.id);
+    // Propuestas y dinero real por lead. El ingreso sale del libro de
+    // Finanzas (`finance_income`) y no de `quotes`: una cotización es lo que
+    // se pidió, un ingreso "pagado" es lo que el cliente de verdad depositó, y
+    // el ROAS del reporte por anuncio sólo tiene sentido con lo segundo.
+    const leadIds = leads.map((l) => l.id);
     const quoteByLead = new Map();
-    if (wonLeadIds.length) {
-      const quotes = await db('quotes').whereIn('lead_id', wonLeadIds).orderBy('created_at', 'desc')
-        .select('lead_id', 'amount', 'currency');
+    const proposalLeadIds = new Set();
+    const paidByLead = new Map();
+    const billedByLead = new Map();
+
+    if (leadIds.length) {
+      const [quotes, contracts, income] = await Promise.all([
+        db('quotes').whereIn('lead_id', leadIds).orderBy('created_at', 'desc')
+          .select('lead_id', 'amount', 'currency'),
+        db('contracts').whereIn('lead_id', leadIds).whereNot('status', 'anulado')
+          .select('lead_id'),
+        db('finance_income').whereIn('lead_id', leadIds)
+          .select('lead_id', 'monto', 'estado')
+      ]);
+
       for (const q of quotes) {
         if (!quoteByLead.has(q.lead_id)) quoteByLead.set(q.lead_id, q); // la más reciente
+        proposalLeadIds.add(q.lead_id);
+      }
+      for (const c of contracts) proposalLeadIds.add(c.lead_id);
+      for (const i of income) {
+        const amount = Number(i.monto) || 0;
+        billedByLead.set(i.lead_id, (billedByLead.get(i.lead_id) || 0) + amount);
+        if (String(i.estado).toLowerCase() === 'pagado') {
+          paidByLead.set(i.lead_id, (paidByLead.get(i.lead_id) || 0) + amount);
+        }
+        // Tener el cierre registrado en Finanzas implica que la propuesta ya
+        // se hizo, aunque la cuota siga sin cobrarse.
+        proposalLeadIds.add(i.lead_id);
       }
     }
 
@@ -246,6 +282,18 @@ export class CampaignService {
       const lost = lead && LOST_STATUSES.has(lead.status);
 
       const quote = won && lead ? quoteByLead.get(lead.id) : null;
+      const paidRevenue = lead ? paidByLead.get(lead.id) || 0 : 0;
+      const billedRevenue = lead ? billedByLead.get(lead.id) || 0 : 0;
+      const hasProposal = lead ? proposalLeadIds.has(lead.id) : false;
+
+      // Etapa comercial del reporte por anuncio: cuatro cajones excluyentes y
+      // por prioridad, para que la suma de las cuatro columnas sea siempre el
+      // total de leads del anuncio. Un cerrado no se vuelve a contar como
+      // cotización, y "seguimiento" es todo lo que no cayó en los otros tres.
+      let crmStage = 'seguimiento';
+      if (won) crmStage = 'ganado';
+      else if (lost) crmStage = 'descartado';
+      else if (hasProposal || (lead && QUOTATION_STATUSES.has(lead.status))) crmStage = 'cotizacion';
 
       let currentStage = 'conversacion';
       if (responded) currentStage = 'respondido';
@@ -265,6 +313,10 @@ export class CampaignService {
         meetingBookedAt: meeting?.created_at || null,
         quotedValue: quote ? Number(quote.amount) : null,
         quotedCurrency: quote?.currency || null,
+        paidRevenue,
+        billedRevenue,
+        hasProposal,
+        crmStage,
         responded,
         qualified: !!qualified,
         hasAppointment: !!hasAppointment,
@@ -293,6 +345,7 @@ export class CampaignService {
       // permite pedirle la miniatura del creativo al backend.
       adId: metaAd?.adId || null,
       adName: metaAd?.adName || label || null,
+      adsetId: metaAd?.adsetId || null,
       adsetName: metaAd?.adsetName || null
     };
   }
@@ -383,6 +436,9 @@ export class CampaignService {
         costPerLeadMeta: meta && meta.messagingStarted > 0 && spend > 0
           ? Math.round((spend / meta.messagingStarted) * 100) / 100 : null
       },
+      // Funnel comercial por anuncio concreto, que es el grano del exportable
+      // de atribución. Va sobre TODOS los contactos, no sobre la muestra.
+      adBreakdown: campaign ? this.#breakdownByAd(contacts, campaign, metaAds) : [],
       // El modal de trazabilidad los agrupa por anuncio, así que se mandan
       // bastantes más de los que cabían en la vista en línea anterior.
       sampleContacts: contacts
@@ -405,6 +461,65 @@ export class CampaignService {
           timeline: this.#buildTimeline(c)
         }))
     };
+  }
+
+  /**
+   * Agrega el funnel del CRM por anuncio individual: cuántos leads trajo cada
+   * anuncio, en qué etapa comercial están y cuánto dinero cobró la empresa de
+   * ellos. Es el cruce "gasto de Meta ↔ venta real" que pide el exportable.
+   *
+   * Se agrupa por `adId` cuando el referral casó con un anuncio de las
+   * métricas de Meta y, si no, por el `source_id` crudo: un anuncio borrado
+   * en Meta —o fuera de la ventana sincronizada— sigue apareciendo con sus
+   * leads en vez de desaparecer del reporte junto con el dinero que trajo.
+   */
+  #breakdownByAd(contacts, campaign, metaAds) {
+    const groups = new Map();
+
+    for (const c of contacts) {
+      const ad = this.#resolveContactAd(c, campaign, metaAds);
+      const key = ad.adId ? `ad:${ad.adId}` : `src:${ad.adSourceId || 'sin-origen'}`;
+
+      let group = groups.get(key);
+      if (!group) {
+        group = {
+          key,
+          adId: ad.adId,
+          adName: ad.adName,
+          adsetId: ad.adsetId,
+          adsetName: ad.adsetName,
+          adSourceId: ad.adSourceId,
+          headline: c.headline || null,
+          leads: 0,
+          responded: 0,
+          qualified: 0,
+          appointments: 0,
+          quotation: 0,
+          followUp: 0,
+          discarded: 0,
+          won: 0,
+          paidRevenue: 0,
+          billedRevenue: 0,
+          quotedValue: 0
+        };
+        groups.set(key, group);
+      }
+
+      group.leads += 1;
+      if (c.responded) group.responded += 1;
+      if (c.qualified) group.qualified += 1;
+      if (c.hasAppointment) group.appointments += 1;
+      if (c.crmStage === 'ganado') group.won += 1;
+      else if (c.crmStage === 'cotizacion') group.quotation += 1;
+      else if (c.crmStage === 'descartado') group.discarded += 1;
+      else group.followUp += 1;
+      group.paidRevenue += c.paidRevenue || 0;
+      group.billedRevenue += c.billedRevenue || 0;
+      group.quotedValue += c.quotedValue || 0;
+      if (!group.headline && c.headline) group.headline = c.headline;
+    }
+
+    return [...groups.values()];
   }
 
   #buildTimeline(c) {

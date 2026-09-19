@@ -2459,9 +2459,12 @@ app.get('/api/campaigns/performance', requireAuth, requirePermission('leads.view
 });
 
 /**
- * El mismo rendimiento pero como libro de Excel (.xlsx): una hoja "Anuncios"
- * con las columnas del informe del Administrador de anuncios y una hoja
- * "Campañas" con el agregado por campaña más el funnel del CRM.
+ * El mismo rendimiento pero como libro de Excel (.xlsx): abre con la hoja
+ * "Atribución anuncio → venta" —una fila por campaña > conjunto > anuncio que
+ * cruza la inversión de Meta con las ventas reales del CRM, ordenada por
+ * ingreso—, seguida de las hojas "Anuncios" y "Conjuntos de anuncios" con las
+ * columnas del informe del Administrador de anuncios y de "Campañas" con el
+ * agregado por campaña más el funnel del CRM.
  *
  * `campaignIds` (opcional, separados por coma) limita la exportación a las
  * campañas que el usuario tenga filtradas en pantalla.

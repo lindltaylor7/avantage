@@ -32,7 +32,7 @@
           type="button"
           class="btn-secondary export-btn"
           :disabled="exporting || !report || !report.campaigns.length"
-          title="Descargar el rendimiento en Excel (.xlsx)"
+          title="Descargar el rendimiento en Excel (.xlsx): atribución anuncio → venta, anuncios, conjuntos y campañas"
           @click="exportExcel"
         >{{ exporting ? '⏳ Generando…' : '⬇ Exportar a Excel' }}</button>
         <button type="button" class="btn-primary new-campaign-btn" @click="openCreateModal">＋ Nueva campaña</button>
