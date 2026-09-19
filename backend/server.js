@@ -2603,7 +2603,7 @@ app.get('/api/campaigns/meta/status', requireAuth, requirePermission('leads.view
  */
 app.post('/api/campaigns/meta/sync', requireAuth, requirePermission('leads.view'), async (req, res) => {
   try {
-    const datePreset = ['last_7d', 'last_14d', 'last_30d', 'last_90d', 'maximum'].includes(req.body?.datePreset)
+    const datePreset = ['today', 'last_7d', 'last_14d', 'last_30d', 'last_90d', 'maximum'].includes(req.body?.datePreset)
       ? req.body.datePreset
       : 'last_30d';
     const summary = await metaAdsService.sync({ datePreset });

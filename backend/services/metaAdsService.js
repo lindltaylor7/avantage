@@ -371,8 +371,8 @@ export class MetaAdsService {
 
   /**
    * Sincroniza campañas + anuncios + métricas. `datePreset` es la ventana de
-   * insights de Meta (last_7d | last_30d | last_90d | maximum), que se traduce
-   * a un rango de fechas que incluye hoy (ver `#timeParams`).
+   * insights de Meta (today | last_7d | last_30d | last_90d | maximum); las
+   * de varios días se traducen a un rango que llega hasta hoy (`#timeParams`).
    */
   async sync({ datePreset = 'last_30d' } = {}) {
     const account = (await this.resolveAccount()).id;

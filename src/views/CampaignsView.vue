@@ -743,7 +743,15 @@ import { apiFetch } from '../apiClient.js';
 import { loadApiImage } from '../apiImage.js';
 import BrandIcon from '../components/BrandIcon.vue';
 
+/**
+ * "Hoy" no son las últimas 24 h: es desde las 00:00 de hoy, que es lo que se
+ * compara contra la columna "Hoy" del Administrador de anuncios. Por eso va
+ * como valor propio y no como un número de días (ver `rangeFrom`).
+ */
+const TODAY_RANGE = 'today';
+
 const RANGE_OPTIONS = [
+  { value: TODAY_RANGE, label: 'Hoy' },
   { value: 7, label: '7 días' },
   { value: 30, label: '30 días' },
   { value: 90, label: '90 días' },
@@ -754,6 +762,16 @@ const report = ref(null);
 const loading = ref(false);
 const errorMsg = ref('');
 const rangeDays = ref(30);
+
+/** Inicio del rango elegido; `null` cuando es "Todo" (sin filtro de fecha). */
+function rangeFrom() {
+  if (rangeDays.value === TODAY_RANGE) {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    return start;
+  }
+  return rangeDays.value > 0 ? new Date(Date.now() - rangeDays.value * 86400000) : null;
+}
 const traceCampaign = ref(null);
 const expandedId = ref(null);
 const assignSelection = reactive({});
@@ -877,10 +895,8 @@ async function loadReport() {
   errorMsg.value = '';
   try {
     const params = new URLSearchParams();
-    if (rangeDays.value > 0) {
-      const from = new Date(Date.now() - rangeDays.value * 86400000);
-      params.set('from', from.toISOString());
-    }
+    const from = rangeFrom();
+    if (from) params.set('from', from.toISOString());
     const res = await apiFetch(`/api/campaigns/performance?${params.toString()}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'No se pudo cargar el rendimiento.');
@@ -913,9 +929,8 @@ async function exportExcel() {
   exportMsg.value = '';
   try {
     const params = new URLSearchParams();
-    if (rangeDays.value > 0) {
-      params.set('from', new Date(Date.now() - rangeDays.value * 86400000).toISOString());
-    }
+    const from = rangeFrom();
+    if (from) params.set('from', from.toISOString());
     const all = report.value?.campaigns || [];
     if (filteredCampaigns.value.length && filteredCampaigns.value.length < all.length) {
       params.set('campaignIds', filteredCampaigns.value.map((c) => c.id).join(','));
@@ -956,7 +971,8 @@ async function loadMetaStatus() {
   } catch { /* silencioso: el banner de config se muestra solo si hay respuesta */ }
 }
 
-const PRESET_BY_RANGE = { 7: 'last_7d', 30: 'last_30d', 90: 'last_90d', 0: 'maximum' };
+/** Ventana de insights que se le pide a Meta según el rango en pantalla. */
+const PRESET_BY_RANGE = { [TODAY_RANGE]: 'today', 7: 'last_7d', 30: 'last_30d', 90: 'last_90d', 0: 'maximum' };
 
 async function syncMeta() {
   syncing.value = true;
