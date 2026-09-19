@@ -260,12 +260,24 @@ export class MetaAdsService {
     }
     try {
       const account = await this.resolveAccount({ force: true });
+
+      // `resolveAccount` NO toca el Graph cuando la cuenta viene de
+      // META_ADS_ACCOUNT_ID, así que sin esta llamada el panel daría por buena
+      // una configuración con el token ya muerto (y luego fallaría al
+      // sincronizar). Leer la propia cuenta valida el token y, de paso, trae
+      // el nombre y la moneda reales.
+      const live = await this.#graphGet(account.id, { fields: 'id,name,account_status,currency' });
+
       return {
         configured: true,
         hasToken: true,
         usingPageToken: !process.env.META_ADS_ACCESS_TOKEN,
         accountId: account.id,
-        accountName: account.name,
+        accountName: live.name || account.name,
+        accountCurrency: live.currency || null,
+        // 1 = activa; cualquier otro valor (deshabilitada, con pagos
+        // pendientes, en revisión) impide que Meta entregue datos nuevos.
+        accountDisabled: live.account_status != null && Number(live.account_status) !== 1,
         accountSource: account.source,
         accountOptions: account.options || 1
       };
@@ -273,7 +285,10 @@ export class MetaAdsService {
       return {
         configured: false,
         hasToken: true,
-        reason: (err.code || 'error').toLowerCase(),
+        // El código 190 es siempre "token inválido": caducado, revocado o con
+        // la sesión cerrada. Se distingue del resto porque la solución es otra
+        // (regenerar el token, no tocar permisos ni el ID de cuenta).
+        reason: err.metaCode === 190 ? 'invalid_token' : (err.code || 'error').toLowerCase(),
         error: err.message,
         metaCode: err.metaCode || null
       };

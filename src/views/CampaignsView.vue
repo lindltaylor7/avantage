@@ -44,6 +44,14 @@
         🔌 No hay ningún token de Meta configurado. Define <code>META_ADS_ACCESS_TOKEN</code> (o
         <code>META_PAGE_ACCESS_TOKEN</code>) en el <code>.env</code>.
       </template>
+      <template v-else-if="metaStatus.reason === 'invalid_token'">
+        🔑 El token de Meta dejó de ser válido: se cerró la sesión del usuario de Facebook, se cambió la
+        contraseña o el token caducó. Genera uno nuevo y actualiza <code>META_ADS_ACCESS_TOKEN</code> en el
+        <code>.env</code>. Para que no vuelva a pasar, usa un token de <strong>usuario del sistema</strong>
+        (Business Manager → Configuración del negocio → Usuarios del sistema → Generar token, con
+        <code>ads_read</code>): esos no dependen de la sesión de nadie.
+        <span class="state-detail">{{ metaStatus.error }}</span>
+      </template>
       <template v-else-if="metaStatus.reason === 'no_ad_account'">
         🔌 El token de Meta no tiene acceso a ninguna cuenta publicitaria. Agrégale el permiso
         <code>ads_read</code> y asigna el usuario/System User a la cuenta de Meta Ads, o define
@@ -60,6 +68,10 @@
       <template v-if="metaStatus.accountSource === 'auto' && metaStatus.accountOptions > 1">
         · detectadas {{ metaStatus.accountOptions }} cuentas, usando la primera activa; fija una con <code>META_ADS_ACCOUNT_ID</code>
       </template>
+    </p>
+    <p v-if="metaStatus && metaStatus.accountDisabled" class="state-banner state-hint">
+      ⚠️ La cuenta publicitaria no está activa en Meta (deshabilitada, con pagos pendientes o en revisión).
+      El token funciona, pero Meta no entregará datos nuevos hasta que se regularice.
     </p>
     <p v-if="syncMsg" class="state-banner" :class="syncError ? 'state-error' : 'state-ok'">{{ syncMsg }}</p>
     <p v-if="exportMsg" class="state-banner state-error">⚠️ {{ exportMsg }}</p>
@@ -1161,6 +1173,8 @@ onMounted(() => {
   margin-left: 0.4rem;
   vertical-align: middle;
 }
+.state-detail { display: block; margin-top: 0.35rem; font-size: 0.74rem; opacity: 0.8; font-family: var(--font-mono); }
+
 .export-btn { white-space: nowrap; }
 .export-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
