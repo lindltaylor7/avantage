@@ -28,6 +28,13 @@
           :title="metaStatus && !metaStatus.configured ? 'Configura las credenciales de Meta Ads primero' : ''"
           @click="syncMeta"
         >{{ syncing ? '↻ Sincronizando…' : '↻ Sincronizar con Meta' }}</button>
+        <button
+          type="button"
+          class="btn-secondary export-btn"
+          :disabled="exporting || !report || !report.campaigns.length"
+          title="Descargar el rendimiento en Excel (.xlsx)"
+          @click="exportExcel"
+        >{{ exporting ? '⏳ Generando…' : '⬇ Exportar a Excel' }}</button>
         <button type="button" class="btn-primary new-campaign-btn" @click="openCreateModal">＋ Nueva campaña</button>
       </div>
     </header>
@@ -55,6 +62,7 @@
       </template>
     </p>
     <p v-if="syncMsg" class="state-banner" :class="syncError ? 'state-error' : 'state-ok'">{{ syncMsg }}</p>
+    <p v-if="exportMsg" class="state-banner state-error">⚠️ {{ exportMsg }}</p>
     <p v-if="errorMsg" class="state-banner state-error">⚠️ {{ errorMsg }}</p>
     <p v-else-if="loading && !report" class="state-banner">Cargando rendimiento de campañas…</p>
 
@@ -665,6 +673,9 @@ async function hydrateCampaignImages(campaigns) {
 
 onBeforeUnmount(() => releaseCampaignImages(new Set()));
 
+const exporting = ref(false);
+const exportMsg = ref('');
+
 const metaStatus = ref(null);
 const syncing = ref(false);
 const syncMsg = ref('');
@@ -705,6 +716,55 @@ async function loadReport() {
 function setRange(value) {
   rangeDays.value = value;
   loadReport();
+}
+
+/**
+ * Descarga el libro de Excel que arma el backend. El endpoint exige el token
+ * Bearer, así que no sirve un `<a href>` directo: hay que pedirlo con
+ * `apiFetch` y disparar la descarga desde un blob.
+ *
+ * Se exporta lo que el usuario tiene en pantalla — mismo rango de fechas y,
+ * si hay filtros activos, sólo las campañas filtradas.
+ */
+async function exportExcel() {
+  exporting.value = true;
+  exportMsg.value = '';
+  try {
+    const params = new URLSearchParams();
+    if (rangeDays.value > 0) {
+      params.set('from', new Date(Date.now() - rangeDays.value * 86400000).toISOString());
+    }
+    const all = report.value?.campaigns || [];
+    if (filteredCampaigns.value.length && filteredCampaigns.value.length < all.length) {
+      params.set('campaignIds', filteredCampaigns.value.map((c) => c.id).join(','));
+    }
+
+    const res = await apiFetch(`/api/campaigns/performance/export?${params.toString()}`);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'No se pudo generar el Excel.');
+    }
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filenameFromResponse(res) || `campanas-meta-ads-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    exportMsg.value = `No se pudo exportar: ${err.message}`;
+  } finally {
+    exporting.value = false;
+  }
+}
+
+/** Nombre del archivo que propone el backend en `Content-Disposition`. */
+function filenameFromResponse(res) {
+  const header = res.headers.get('Content-Disposition') || '';
+  return header.match(/filename="?([^"]+)"?/)?.[1] || null;
 }
 
 async function loadMetaStatus() {
@@ -1101,6 +1161,9 @@ onMounted(() => {
   margin-left: 0.4rem;
   vertical-align: middle;
 }
+.export-btn { white-space: nowrap; }
+.export-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
 .kpi-meta { border-color: rgba(24, 119, 242, 0.28); }
 .metric-meta { background: rgba(24, 119, 242, 0.06); border-color: rgba(24, 119, 242, 0.2); }
 

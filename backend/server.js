@@ -17,6 +17,7 @@ import { buildContractDocument } from './services/contractDocument.js';
 import { buildQuotationDocument } from './services/quotationDocument.js';
 import { CampaignService } from './services/campaignService.js';
 import { MetaAdsService } from './services/metaAdsService.js';
+import { CampaignExportService } from './services/campaignExportService.js';
 import { UserService } from './services/userService.js';
 import { RoleService } from './services/roleService.js';
 import { ProjectUpdateService } from './services/projectUpdateService.js';
@@ -110,6 +111,7 @@ const contractService = new ContractService();
 const contractTemplateService = new ContractTemplateService();
 const campaignService = new CampaignService();
 const metaAdsService = new MetaAdsService();
+const campaignExportService = new CampaignExportService({ campaignService });
 const userService = new UserService();
 const roleService = new RoleService();
 const projectUpdateService = new ProjectUpdateService();
@@ -2453,6 +2455,34 @@ app.get('/api/campaigns/performance', requireAuth, requirePermission('leads.view
   } catch (error) {
     console.error('❌ Error al calcular el rendimiento de campañas:', error);
     res.status(500).json({ error: 'Error al calcular el rendimiento de campañas.', details: error.message });
+  }
+});
+
+/**
+ * El mismo rendimiento pero como libro de Excel (.xlsx): una hoja "Anuncios"
+ * con las columnas del informe del Administrador de anuncios y una hoja
+ * "Campañas" con el agregado por campaña más el funnel del CRM.
+ *
+ * `campaignIds` (opcional, separados por coma) limita la exportación a las
+ * campañas que el usuario tenga filtradas en pantalla.
+ */
+app.get('/api/campaigns/performance/export', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const { from = null, to = null, campaignIds = null } = req.query;
+    const ids = campaignIds
+      ? String(campaignIds).split(',').map((v) => Number(v.trim())).filter(Number.isFinite)
+      : null;
+
+    const { workbook, filename } = await campaignExportService.buildWorkbook({ from, to, campaignIds: ids });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error('❌ Error al exportar el rendimiento de campañas:', error);
+    // Si ya se empezó a escribir el libro no se puede responder JSON.
+    if (res.headersSent) return res.end();
+    res.status(500).json({ error: 'Error al exportar el rendimiento de campañas.', details: error.message });
   }
 });
 
