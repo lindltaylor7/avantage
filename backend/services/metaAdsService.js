@@ -53,17 +53,150 @@ function normalizeAccountId(raw) {
   return clean.startsWith('act_') ? clean : `act_${clean}`;
 }
 
-/** Suma las conversaciones de mensajería iniciadas del arreglo `actions`. */
-function extractMessagingStarted(actions) {
+/** Tipos de acción con los que Meta cuenta una conversación de mensajería. */
+const MESSAGING_ACTION_TYPES = [
+  'onsite_conversion.messaging_conversation_started_7d',
+  'onsite_conversion.total_messaging_connection',
+  'messaging_conversation_started_7d'
+];
+
+function round2(value) {
+  if (value == null || value === '' || Number.isNaN(Number(value))) return null;
+  return Math.round(Number(value) * 100) / 100;
+}
+
+/** Suma el valor de las acciones de `actions` cuyo tipo esté en `types`. */
+function sumActions(actions, types) {
   if (!Array.isArray(actions)) return 0;
-  const types = new Set([
-    'onsite_conversion.messaging_conversation_started_7d',
-    'onsite_conversion.total_messaging_connection',
-    'messaging_conversation_started_7d'
-  ]);
+  const want = new Set(types);
   return actions
-    .filter((a) => types.has(a.action_type))
+    .filter((a) => want.has(a.action_type))
     .reduce((sum, a) => sum + Number(a.value || 0), 0);
+}
+
+/** Igual que `sumActions` pero por expresión regular (los tipos de tienda varían). */
+function sumActionsMatching(actions, pattern) {
+  if (!Array.isArray(actions)) return 0;
+  return actions
+    .filter((a) => pattern.test(String(a.action_type || '')))
+    .reduce((sum, a) => sum + Number(a.value || 0), 0);
+}
+
+/** Primer valor de `cost_per_action_type` para alguno de los tipos pedidos. */
+function costPerAction(costs, types) {
+  if (!Array.isArray(costs)) return null;
+  const want = new Set(types);
+  const hit = costs.find((c) => want.has(c.action_type));
+  return hit ? round2(hit.value) : null;
+}
+
+const LEAD_ACTION_TYPES = ['lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead'];
+const PURCHASE_ACTION_TYPES = ['purchase', 'offsite_conversion.fb_pixel_purchase', 'omni_purchase'];
+
+const R_MESSAGING = { types: MESSAGING_ACTION_TYPES, label: 'Conversaciones con mensajes iniciadas' };
+const R_LEADS = { types: LEAD_ACTION_TYPES, label: 'Clientes potenciales' };
+const R_PURCHASE = { types: PURCHASE_ACTION_TYPES, label: 'Compras' };
+const R_LANDING = { types: ['landing_page_view'], label: 'Visitas a la página de destino' };
+const R_LINK = { types: ['link_click'], label: 'Clics en el enlace' };
+const R_ENGAGEMENT = { types: ['post_engagement', 'page_engagement'], label: 'Interacciones con la publicación' };
+const R_VIDEO = { types: ['video_view'], label: 'Reproducciones de video' };
+const R_INSTALLS = { types: ['mobile_app_install', 'app_install'], label: 'Instalaciones de la aplicación' };
+const R_REACH = { metric: 'reach', label: 'Alcance' };
+
+/**
+ * "Resultados" e "Indicador de resultado" del Administrador de anuncios: Meta
+ * no expone esa columna ya resuelta por la API, la calcula según el objetivo
+ * de optimización de la campaña. Se reconstruye eligiendo, para cada objetivo,
+ * la primera acción candidata que tenga valor — así una campaña de mensajes
+ * reporta conversaciones y una de tráfico, clics en el enlace.
+ */
+const RESULT_CANDIDATES_BY_OBJECTIVE = {
+  MESSAGES: [R_MESSAGING],
+  OUTCOME_LEADS: [R_MESSAGING, R_LEADS, R_LANDING],
+  LEAD_GENERATION: [R_LEADS, R_MESSAGING],
+  CONVERSIONS: [R_PURCHASE, R_LEADS, R_LANDING],
+  OUTCOME_SALES: [R_PURCHASE, R_LEADS, R_LANDING],
+  OUTCOME_TRAFFIC: [R_LANDING, R_LINK],
+  LINK_CLICKS: [R_LINK, R_LANDING],
+  OUTCOME_ENGAGEMENT: [R_MESSAGING, R_ENGAGEMENT, R_VIDEO],
+  POST_ENGAGEMENT: [R_ENGAGEMENT],
+  VIDEO_VIEWS: [R_VIDEO],
+  OUTCOME_AWARENESS: [R_REACH],
+  BRAND_AWARENESS: [R_REACH],
+  REACH: [R_REACH],
+  OUTCOME_APP_PROMOTION: [R_INSTALLS],
+  APP_INSTALLS: [R_INSTALLS]
+};
+
+/** Orden por defecto cuando el objetivo de la campaña no se reconoce. */
+const DEFAULT_RESULT_CANDIDATES = [R_MESSAGING, R_LEADS, R_PURCHASE, R_LANDING, R_LINK, R_ENGAGEMENT];
+
+function resolveResult(row) {
+  const objective = String(row.objective || '').toUpperCase();
+  const candidates = RESULT_CANDIDATES_BY_OBJECTIVE[objective] || DEFAULT_RESULT_CANDIDATES;
+  for (const candidate of candidates) {
+    const value = candidate.metric === 'reach'
+      ? Number(row.reach || 0)
+      : sumActions(row.actions, candidate.types);
+    if (value > 0) return { value, label: candidate.label };
+  }
+  return { value: null, label: null };
+}
+
+/**
+ * Traduce una fila de `/insights` (de campaña o de anuncio) al mismo juego de
+ * métricas que muestra el Administrador de anuncios, con los nombres que usa
+ * el panel. Se aplica igual en los dos niveles para que la tabla por anuncio y
+ * el resumen de la campaña sean comparables columna a columna.
+ */
+function normalizeInsightRow(row) {
+  const spend = Number(row.spend || 0);
+  const result = resolveResult(row);
+  return {
+    objective: row.objective || null,
+    impressions: Number(row.impressions || 0),
+    reach: Number(row.reach || 0),
+    frequency: round2(row.frequency),
+    spend,
+    clicks: Number(row.clicks || 0),                              // Clics (todos)
+    ctr: round2(row.ctr),                                         // CTR (todos)
+    cpc: round2(row.cpc),                                         // CPC (todos)
+    cpm: round2(row.cpm),
+    linkClicks: Number(row.inline_link_clicks || 0),              // Clics en el enlace
+    linkCtr: round2(row.inline_link_click_ctr),                   // CTR del enlace
+    costPerLinkClick: round2(row.cost_per_inline_link_click),     // CPC del enlace
+    landingPageViews: sumActions(row.actions, ['landing_page_view']),
+    costPerLandingPageView: costPerAction(row.cost_per_action_type, ['landing_page_view']),
+    shopClicks: sumActionsMatching(row.actions, /shop_click/),
+    messagingStarted: sumActions(row.actions, MESSAGING_ACTION_TYPES),
+    results: result.value,
+    resultIndicator: result.label,
+    costPerResult: result.value > 0 && spend > 0 ? round2(spend / result.value) : null,
+    attributionSetting: row.attribution_setting || null,
+    dateStart: row.date_start || null,
+    dateStop: row.date_stop || null
+  };
+}
+
+/**
+ * Campos de `/insights`. Meta rechaza la petición entera si un solo campo no
+ * está disponible para la cuenta o la versión del Graph, así que cada nivel
+ * lleva un juego reducido de respaldo con el que se reintenta.
+ */
+const CAMPAIGN_INSIGHT_FIELDS = 'campaign_id,objective,impressions,reach,frequency,clicks,ctr,cpc,cpm,spend,'
+  + 'inline_link_clicks,inline_link_click_ctr,cost_per_inline_link_click,actions,cost_per_action_type,'
+  + 'attribution_setting,date_start,date_stop';
+const CAMPAIGN_INSIGHT_FIELDS_FALLBACK = 'campaign_id,objective,impressions,reach,clicks,ctr,cpc,cpm,spend,actions,date_start,date_stop';
+const AD_INSIGHT_FIELDS = 'ad_id,ad_name,adset_id,adset_name,campaign_id,objective,impressions,reach,frequency,'
+  + 'clicks,ctr,cpc,cpm,spend,inline_link_clicks,inline_link_click_ctr,cost_per_inline_link_click,actions,'
+  + 'cost_per_action_type,quality_ranking,engagement_rate_ranking,conversion_rate_ranking,attribution_setting,'
+  + 'date_start,date_stop';
+const AD_INSIGHT_FIELDS_FALLBACK = 'ad_id,ad_name,adset_id,campaign_id,impressions,reach,clicks,ctr,cpc,cpm,spend,actions,date_start,date_stop';
+
+/** `daily_budget`/`lifetime_budget` llegan en céntimos de la moneda de la cuenta. */
+function budgetFromCents(value) {
+  const cents = Number(value || 0);
+  return cents > 0 ? Math.round(cents) / 100 : null;
 }
 
 function toDateOnly(value) {
@@ -74,8 +207,11 @@ function toDateOnly(value) {
 /**
  * Integración con la Meta Marketing API: importa las campañas de Ads, mapea
  * automáticamente sus anuncios (para atribuir el tráfico Click-to-WhatsApp por
- * `referral.source_id`) y trae las métricas de rendimiento (gasto, impresiones,
- * alcance, clics, CPM, CPC, CTR y conversaciones de mensajería iniciadas).
+ * `referral.source_id`) y trae las métricas de rendimiento del Administrador de
+ * anuncios, a nivel de campaña y desglosadas por anuncio (gasto, resultados y
+ * coste por resultado, alcance, frecuencia, impresiones, CPM, clics y CTR/CPC
+ * del enlace y totales, visitas a la página de destino, conversaciones de
+ * mensajería iniciadas y las tres clasificaciones de calidad).
  */
 export class MetaAdsService {
   constructor({ fetchImpl } = {}) {
@@ -174,7 +310,7 @@ export class MetaAdsService {
    */
   async sync({ datePreset = 'last_30d' } = {}) {
     const account = (await this.resolveAccount()).id;
-    const summary = { campaigns: 0, adsMapped: 0, insightsUpdated: 0, adAccount: account, datePreset, errors: [] };
+    const summary = { campaigns: 0, adsMapped: 0, insightsUpdated: 0, adInsights: 0, adAccount: account, datePreset, errors: [] };
 
     // 1) Campañas
     const campaigns = await this.#graphGet(`${account}/campaigns`, {
@@ -217,7 +353,7 @@ export class MetaAdsService {
     let ads = [];
     try {
       ads = await this.#graphGet(`${account}/ads`, {
-        fields: 'id,name,campaign_id,effective_status,creative{effective_object_story_id,effective_instagram_media_id,object_story_id,thumbnail_url}',
+        fields: 'id,name,campaign_id,adset_id,effective_status,creative{effective_object_story_id,effective_instagram_media_id,object_story_id,thumbnail_url}',
         limit: '500'
       });
     } catch (err) {
@@ -229,7 +365,16 @@ export class MetaAdsService {
     // thumbnail/imagen que se encuentre — para reconocer la campaña de un
     // vistazo en el panel.
     const imageSetForCampaign = new Set();
+    // Nombre, entrega y conjunto de cada anuncio: `/insights?level=ad` no
+    // devuelve el `effective_status`, así que se guarda de aquí y se cruza
+    // después por `ad_id`.
+    const adMetaById = new Map();
     for (const ad of ads) {
+      adMetaById.set(String(ad.id), {
+        name: ad.name || null,
+        effectiveStatus: ad.effective_status || null,
+        adsetId: ad.adset_id ? String(ad.adset_id) : null
+      });
       const localCampaignId = localIdByExternal.get(String(ad.campaign_id));
       if (!localCampaignId) continue;
 
@@ -269,31 +414,18 @@ export class MetaAdsService {
 
     // 3) Métricas por campaña
     try {
-      const insights = await this.#graphGet(`${account}/insights`, {
+      const insights = await this.#insights(account, {
         level: 'campaign',
-        date_preset: datePreset,
-        fields: 'campaign_id,impressions,reach,clicks,spend,cpm,cpc,ctr,actions,date_start,date_stop',
-        limit: '500'
+        datePreset,
+        fields: CAMPAIGN_INSIGHT_FIELDS,
+        fallbackFields: CAMPAIGN_INSIGHT_FIELDS_FALLBACK
       });
 
       for (const row of insights) {
         const localCampaignId = localIdByExternal.get(String(row.campaign_id));
         if (!localCampaignId) continue;
-        const meta_insights = {
-          impressions: Number(row.impressions || 0),
-          reach: Number(row.reach || 0),
-          clicks: Number(row.clicks || 0),
-          spend: Number(row.spend || 0),
-          cpm: row.cpm != null ? Number(row.cpm) : null,
-          cpc: row.cpc != null ? Number(row.cpc) : null,
-          ctr: row.ctr != null ? Number(row.ctr) : null,
-          messagingStarted: extractMessagingStarted(row.actions),
-          window: datePreset,
-          dateStart: row.date_start || null,
-          dateStop: row.date_stop || null
-        };
         await db('campaigns').where({ id: localCampaignId }).update({
-          meta_insights: JSON.stringify(meta_insights),
+          meta_insights: JSON.stringify({ ...normalizeInsightRow(row), window: datePreset }),
           last_synced_at: db.fn.now()
         });
         summary.insightsUpdated++;
@@ -302,6 +434,90 @@ export class MetaAdsService {
       summary.errors.push(`No se pudieron traer las métricas: ${err.message}`);
     }
 
+    // 4) Métricas por anuncio. Las tres clasificaciones (calidad, tasa de
+    //    interacción y tasa de conversión) sólo existen a nivel de anuncio, y
+    //    el presupuesto es del conjunto de anuncios, no del anuncio: se trae
+    //    aparte y se adjunta a cada fila por `adset_id`.
+    try {
+      const adRows = await this.#insights(account, {
+        level: 'ad',
+        datePreset,
+        fields: AD_INSIGHT_FIELDS,
+        fallbackFields: AD_INSIGHT_FIELDS_FALLBACK
+      });
+
+      const adsetById = new Map();
+      try {
+        const adsets = await this.#graphGet(`${account}/adsets`, {
+          fields: 'id,name,campaign_id,daily_budget,lifetime_budget,end_time',
+          limit: '500'
+        });
+        for (const set of adsets) {
+          const daily = budgetFromCents(set.daily_budget);
+          const lifetime = budgetFromCents(set.lifetime_budget);
+          adsetById.set(String(set.id), {
+            name: set.name || null,
+            budget: daily ?? lifetime,
+            budgetType: daily ? 'diario' : (lifetime ? 'total' : null),
+            endTime: set.end_time || null
+          });
+        }
+      } catch (err) {
+        summary.errors.push(`No se pudo traer el presupuesto de los conjuntos de anuncios: ${err.message}`);
+      }
+
+      const rowsByCampaign = new Map();
+      for (const row of adRows) {
+        const localCampaignId = localIdByExternal.get(String(row.campaign_id));
+        if (!localCampaignId) continue;
+        const adMeta = adMetaById.get(String(row.ad_id)) || {};
+        const adset = adsetById.get(String(row.adset_id || adMeta.adsetId || '')) || {};
+        if (!rowsByCampaign.has(localCampaignId)) rowsByCampaign.set(localCampaignId, []);
+        rowsByCampaign.get(localCampaignId).push({
+          adId: String(row.ad_id),
+          adName: row.ad_name || adMeta.name || `Anuncio ${row.ad_id}`,
+          adsetName: row.adset_name || adset.name || null,
+          delivery: adMeta.effectiveStatus || null,
+          adsetBudget: adset.budget ?? null,
+          adsetBudgetType: adset.budgetType || null,
+          endTime: adset.endTime || null,
+          qualityRanking: row.quality_ranking || null,
+          engagementRanking: row.engagement_rate_ranking || null,
+          conversionRanking: row.conversion_rate_ranking || null,
+          ...normalizeInsightRow(row)
+        });
+      }
+
+      // Se reescribe para TODAS las campañas sincronizadas — no sólo las que
+      // trajeron filas — para que no sobrevivan anuncios de una ventana previa.
+      for (const localCampaignId of localIdByExternal.values()) {
+        const rows = (rowsByCampaign.get(localCampaignId) || []).sort((a, b) => b.spend - a.spend);
+        await db('campaigns').where({ id: localCampaignId }).update({
+          meta_ads_insights: rows.length ? JSON.stringify(rows) : null
+        });
+        summary.adInsights += rows.length;
+      }
+    } catch (err) {
+      summary.errors.push(`No se pudieron traer las métricas por anuncio: ${err.message}`);
+    }
+
     return summary;
+  }
+
+  /**
+   * `/insights` con reintento: el juego completo de campos varía por cuenta y
+   * por versión del Graph, y Meta rechaza la petición entera si uno solo no
+   * está disponible. Antes que quedarse sin métricas, se reintenta con el
+   * juego mínimo.
+   */
+  async #insights(account, { level, datePreset, fields, fallbackFields }) {
+    const params = { level, date_preset: datePreset, limit: '500' };
+    try {
+      return await this.#graphGet(`${account}/insights`, { ...params, fields });
+    } catch (err) {
+      if (!fallbackFields) throw err;
+      console.warn(`⚠️ [Meta Ads] Campos completos rechazados en level=${level} (${err.message}); se reintenta con el juego mínimo.`);
+      return this.#graphGet(`${account}/insights`, { ...params, fields: fallbackFields });
+    }
   }
 }

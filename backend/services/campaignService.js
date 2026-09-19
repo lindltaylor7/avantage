@@ -43,6 +43,11 @@ const WON_STATUSES = new Set(['ganado']);
 const LOST_STATUSES = new Set(['perdido', 'descartado']);
 const APPOINTMENT_STATUSES = new Set(['cita_agendada']);
 
+/**
+ * Lee una columna JSON de `campaigns` (`meta_insights`, un objeto, o
+ * `meta_ads_insights`, un arreglo). Según el driver, Knex la devuelve ya
+ * parseada o como texto.
+ */
 function parseMetaInsights(raw) {
   if (!raw) return null;
   if (typeof raw === 'object') return raw;
@@ -302,12 +307,29 @@ export class CampaignService {
         costPerQualified: perStage(qualified),
         costPerAppointment: perStage(appointments),
         costPerWon: perStage(won),
+        // Métricas tal como las reporta el Administrador de anuncios (Meta).
+        // `metaSpend` es el gasto real de Meta; `spend` puede venir del gasto
+        // manual de la campaña cuando no hay sincronización.
+        metaSpend: meta?.spend ?? null,
         impressions: meta?.impressions ?? null,
         reach: meta?.reach ?? null,
-        clicks: meta?.clicks ?? null,
-        ctr: meta?.ctr ?? null,
+        frequency: meta?.frequency ?? null,
+        clicks: meta?.clicks ?? null,               // Clics (todos)
+        ctr: meta?.ctr ?? null,                     // CTR (todos)
         cpm: meta?.cpm ?? null,
-        cpc: meta?.cpc ?? null,
+        cpc: meta?.cpc ?? null,                     // CPC (todos)
+        linkClicks: meta?.linkClicks ?? null,       // Clics en el enlace
+        linkCtr: meta?.linkCtr ?? null,
+        costPerLinkClick: meta?.costPerLinkClick ?? null,
+        landingPageViews: meta?.landingPageViews ?? null,
+        costPerLandingPageView: meta?.costPerLandingPageView ?? null,
+        shopClicks: meta?.shopClicks ?? null,
+        metaResults: meta?.results ?? null,
+        metaResultIndicator: meta?.resultIndicator ?? null,
+        metaCostPerResult: meta?.costPerResult ?? null,
+        attributionSetting: meta?.attributionSetting ?? null,
+        reportStart: meta?.dateStart ?? null,
+        reportStop: meta?.dateStop ?? null,
         metaMessagingStarted: meta?.messagingStarted ?? null,
         costPerLeadMeta: meta && meta.messagingStarted > 0 && spend > 0
           ? Math.round((spend / meta.messagingStarted) * 100) / 100 : null
@@ -398,6 +420,9 @@ export class CampaignService {
         hasImage: !!campaign.ad_image_filename,
         lastSyncedAt: campaign.last_synced_at || null,
         insightsWindow: parseMetaInsights(campaign.meta_insights)?.window || null,
+        // Una fila por anuncio de la campaña, con las mismas métricas del
+        // Administrador de anuncios más las tres clasificaciones de calidad.
+        metaAds: parseMetaInsights(campaign.meta_ads_insights) || [],
         ads: campaign.ads.map((a) => ({ id: a.id, sourceId: a.ad_source_id, label: a.ad_label })),
         ...summary
       };
@@ -441,10 +466,12 @@ export class CampaignService {
         acc.clicks += Number(m.clicks || 0);
         acc.reach += Number(m.reach || 0);
         acc.messagingStarted += Number(m.messagingStarted || 0);
+        acc.linkClicks += Number(m.linkClicks || 0);
+        acc.landingPageViews += Number(m.landingPageViews || 0);
         acc.hasData = true;
       }
       return acc;
-    }, { impressions: 0, clicks: 0, reach: 0, messagingStarted: 0, hasData: false });
+    }, { impressions: 0, clicks: 0, reach: 0, messagingStarted: 0, linkClicks: 0, landingPageViews: 0, hasData: false });
 
     return {
       generatedAt: new Date().toISOString(),
@@ -471,7 +498,11 @@ export class CampaignService {
         metaReach: metaTotals.hasData ? metaTotals.reach : null,
         metaMessagingStarted: metaTotals.hasData ? metaTotals.messagingStarted : null,
         metaCtr: metaTotals.hasData && metaTotals.impressions > 0
-          ? Math.round((metaTotals.clicks / metaTotals.impressions) * 10000) / 100 : null
+          ? Math.round((metaTotals.clicks / metaTotals.impressions) * 10000) / 100 : null,
+        metaLinkClicks: metaTotals.hasData ? metaTotals.linkClicks : null,
+        metaLandingPageViews: metaTotals.hasData ? metaTotals.landingPageViews : null,
+        metaLinkCtr: metaTotals.hasData && metaTotals.impressions > 0
+          ? Math.round((metaTotals.linkClicks / metaTotals.impressions) * 10000) / 100 : null
       },
       meta: {
         syncedCampaigns: campaigns.filter((c) => c.source === 'meta').length,

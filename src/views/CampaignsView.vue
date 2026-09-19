@@ -113,6 +113,15 @@
             <span class="kpi-sub" v-if="report.kpis.metaCtr != null">CTR {{ report.kpis.metaCtr }}%</span>
           </div>
           <div class="kpi-tile kpi-meta">
+            <span class="kpi-label">Clics en el enlace (Meta)</span>
+            <span class="kpi-value">{{ num(report.kpis.metaLinkClicks) }}</span>
+            <span class="kpi-sub" v-if="report.kpis.metaLinkCtr != null">CTR del enlace {{ report.kpis.metaLinkCtr }}%</span>
+          </div>
+          <div class="kpi-tile kpi-meta" v-if="report.kpis.metaLandingPageViews">
+            <span class="kpi-label">Visitas a la página (Meta)</span>
+            <span class="kpi-value">{{ num(report.kpis.metaLandingPageViews) }}</span>
+          </div>
+          <div class="kpi-tile kpi-meta">
             <span class="kpi-label">Conversaciones (Meta)</span>
             <span class="kpi-value">{{ num(report.kpis.metaMessagingStarted) }}</span>
           </div>
@@ -230,26 +239,138 @@
                           </div>
                         </div>
 
-                        <!-- Métricas de marketing -->
-                        <div class="metric-grid">
-                          <template v-if="campaign.metrics.impressions != null">
-                            <div class="metric metric-meta"><span class="metric-label">Impresiones</span><span class="metric-value">{{ num(campaign.metrics.impressions) }}</span></div>
+                        <!-- Métricas del Administrador de anuncios (Meta) -->
+                        <div v-if="campaign.metrics.impressions != null" class="metrics-block">
+                          <div class="metrics-block-head">
+                            <h4 class="metrics-block-title">📊 Meta Ads</h4>
+                            <span class="metrics-block-note">
+                              Informe {{ reportWindowLabel(campaign.metrics) }}
+                              <template v-if="campaign.metrics.attributionSetting">
+                                · Configuración de atribución: {{ campaign.metrics.attributionSetting }}
+                              </template>
+                            </span>
+                          </div>
+                          <div class="metric-grid">
+                            <div class="metric metric-meta">
+                              <span class="metric-label">Resultados</span>
+                              <span class="metric-value">{{ campaign.metrics.metaResults != null ? num(campaign.metrics.metaResults) : '—' }}</span>
+                              <span v-if="campaign.metrics.metaResultIndicator" class="metric-sub">{{ campaign.metrics.metaResultIndicator }}</span>
+                            </div>
+                            <div class="metric metric-meta"><span class="metric-label">Coste por resultado</span><span class="metric-value">{{ campaign.metrics.metaCostPerResult != null ? money(campaign.metrics.metaCostPerResult) : '—' }}</span></div>
+                            <div class="metric metric-meta"><span class="metric-label">Importe gastado</span><span class="metric-value">{{ money(campaign.metrics.metaSpend ?? campaign.metrics.spend) }}</span></div>
                             <div class="metric metric-meta"><span class="metric-label">Alcance</span><span class="metric-value">{{ num(campaign.metrics.reach) }}</span></div>
-                            <div class="metric metric-meta"><span class="metric-label">Clics</span><span class="metric-value">{{ num(campaign.metrics.clicks) }}</span></div>
-                            <div class="metric metric-meta"><span class="metric-label">CTR</span><span class="metric-value">{{ campaign.metrics.ctr != null ? campaign.metrics.ctr + '%' : '—' }}</span></div>
+                            <div class="metric metric-meta"><span class="metric-label">Frecuencia</span><span class="metric-value">{{ campaign.metrics.frequency != null ? campaign.metrics.frequency : '—' }}</span></div>
+                            <div class="metric metric-meta"><span class="metric-label">Impresiones</span><span class="metric-value">{{ num(campaign.metrics.impressions) }}</span></div>
                             <div class="metric metric-meta"><span class="metric-label">CPM</span><span class="metric-value">{{ campaign.metrics.cpm != null ? money(campaign.metrics.cpm) : '—' }}</span></div>
-                            <div class="metric metric-meta"><span class="metric-label">CPC</span><span class="metric-value">{{ campaign.metrics.cpc != null ? money(campaign.metrics.cpc) : '—' }}</span></div>
+                            <div class="metric metric-meta"><span class="metric-label">Clics en el enlace</span><span class="metric-value">{{ num(campaign.metrics.linkClicks) }}</span></div>
+                            <div class="metric metric-meta"><span class="metric-label">CTR del enlace</span><span class="metric-value">{{ pct(campaign.metrics.linkCtr) }}</span></div>
+                            <div class="metric metric-meta"><span class="metric-label">CPC del enlace</span><span class="metric-value">{{ campaign.metrics.costPerLinkClick != null ? money(campaign.metrics.costPerLinkClick) : '—' }}</span></div>
+                            <div class="metric metric-meta"><span class="metric-label">Clics (todos)</span><span class="metric-value">{{ num(campaign.metrics.clicks) }}</span></div>
+                            <div class="metric metric-meta"><span class="metric-label">CTR (todos)</span><span class="metric-value">{{ pct(campaign.metrics.ctr) }}</span></div>
+                            <div class="metric metric-meta"><span class="metric-label">CPC (todos)</span><span class="metric-value">{{ campaign.metrics.cpc != null ? money(campaign.metrics.cpc) : '—' }}</span></div>
+                            <div class="metric metric-meta"><span class="metric-label">Visitas a la página de destino</span><span class="metric-value">{{ num(campaign.metrics.landingPageViews) }}</span></div>
+                            <div class="metric metric-meta"><span class="metric-label">Coste por visita a la página</span><span class="metric-value">{{ campaign.metrics.costPerLandingPageView != null ? money(campaign.metrics.costPerLandingPageView) : '—' }}</span></div>
+                            <div v-if="campaign.metrics.shopClicks" class="metric metric-meta"><span class="metric-label">Clics en la tienda</span><span class="metric-value">{{ num(campaign.metrics.shopClicks) }}</span></div>
+                            <div class="metric metric-meta"><span class="metric-label">Conversaciones (Meta)</span><span class="metric-value">{{ num(campaign.metrics.metaMessagingStarted) }}</span></div>
                             <div class="metric metric-meta"><span class="metric-label">Costo/conv. (Meta)</span><span class="metric-value">{{ campaign.metrics.costPerLeadMeta != null ? money(campaign.metrics.costPerLeadMeta) : '—' }}</span></div>
-                          </template>
-                          <div class="metric"><span class="metric-label">Tasa de calificación</span><span class="metric-value">{{ campaign.metrics.qualificationRate }}%</span></div>
-                          <div class="metric"><span class="metric-label">Conversación → cita</span><span class="metric-value">{{ campaign.metrics.conversationToAppointmentRate }}%</span></div>
-                          <div class="metric"><span class="metric-label">Cita → ganado</span><span class="metric-value">{{ campaign.metrics.appointmentToWonRate }}%</span></div>
-                          <div class="metric"><span class="metric-label">Viabilidad prom.</span><span class="metric-value">{{ campaign.metrics.avgViability != null ? campaign.metrics.avgViability + '%' : '—' }}</span></div>
-                          <div class="metric"><span class="metric-label">1ª respuesta (mediana)</span><span class="metric-value">{{ responseLabel(campaign.metrics.medianFirstResponseMin) }}</span></div>
-                          <div class="metric"><span class="metric-label">Costo / conversación</span><span class="metric-value">{{ campaign.metrics.costPerConversation != null ? money(campaign.metrics.costPerConversation) : '—' }}</span></div>
-                          <div class="metric"><span class="metric-label">Costo / ganado</span><span class="metric-value">{{ campaign.metrics.costPerWon != null ? money(campaign.metrics.costPerWon) : '—' }}</span></div>
-                          <div class="metric"><span class="metric-label">Valor cotizado</span><span class="metric-value">{{ money(campaign.metrics.quotedValue) }}</span></div>
-                          <div class="metric"><span class="metric-label">ROAS</span><span class="metric-value">{{ campaign.metrics.roas != null ? campaign.metrics.roas + '×' : '—' }}</span></div>
+                          </div>
+                        </div>
+
+                        <!-- Desglose por anuncio: mismas columnas que el informe
+                             del Administrador de anuncios. Las tres clasificaciones
+                             y la entrega sólo existen a este nivel. -->
+                        <div v-if="campaign.metaAds && campaign.metaAds.length" class="metrics-block">
+                          <div class="metrics-block-head">
+                            <h4 class="metrics-block-title">🧾 Rendimiento por anuncio</h4>
+                            <span class="metrics-block-note">
+                              {{ campaign.metaAds.length }} {{ campaign.metaAds.length === 1 ? 'anuncio' : 'anuncios' }} con datos · desplázate en horizontal para ver todas las columnas
+                            </span>
+                          </div>
+                          <div class="ads-insights-wrapper">
+                            <table class="data-table ads-insights-table">
+                              <thead>
+                                <tr>
+                                  <th class="col-ad-name">Nombre del anuncio</th>
+                                  <th>Entrega</th>
+                                  <th>Resultados</th>
+                                  <th>Coste por resultado</th>
+                                  <th>Alcance</th>
+                                  <th>Frecuencia</th>
+                                  <th>Presupuesto del conjunto</th>
+                                  <th>Importe gastado</th>
+                                  <th>Fin</th>
+                                  <th>Calidad</th>
+                                  <th>Interacción</th>
+                                  <th>Conversión</th>
+                                  <th>Impresiones</th>
+                                  <th>CPM</th>
+                                  <th>Clics en el enlace</th>
+                                  <th>Clics en la tienda</th>
+                                  <th>CPC del enlace</th>
+                                  <th>CTR del enlace</th>
+                                  <th>Clics (todos)</th>
+                                  <th>CTR (todos)</th>
+                                  <th>CPC (todos)</th>
+                                  <th>Visitas a la página</th>
+                                  <th>Coste por visita</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                <tr v-for="ad in campaign.metaAds" :key="ad.adId">
+                                  <td class="col-ad-name">
+                                    <strong class="ad-row-name" :title="ad.adName">{{ ad.adName }}</strong>
+                                    <span v-if="ad.adsetName" class="ad-row-sub">{{ ad.adsetName }}</span>
+                                  </td>
+                                  <td><span class="pill pill-xs" :class="deliveryPillClass(ad.delivery)">{{ deliveryLabel(ad.delivery) }}</span></td>
+                                  <td class="data-mono">
+                                    {{ ad.results != null ? num(ad.results) : '—' }}
+                                    <span v-if="ad.resultIndicator" class="ad-row-sub">{{ ad.resultIndicator }}</span>
+                                  </td>
+                                  <td class="data-mono">{{ ad.costPerResult != null ? money(ad.costPerResult) : '—' }}</td>
+                                  <td class="data-mono">{{ num(ad.reach) }}</td>
+                                  <td class="data-mono">{{ ad.frequency != null ? ad.frequency : '—' }}</td>
+                                  <td class="data-mono">
+                                    {{ ad.adsetBudget != null ? money(ad.adsetBudget) : '—' }}
+                                    <span v-if="ad.adsetBudgetType" class="ad-row-sub">{{ ad.adsetBudgetType === 'diario' ? 'Diario' : 'Total' }}</span>
+                                  </td>
+                                  <td class="data-mono">{{ money(ad.spend) }}</td>
+                                  <td class="data-mono">{{ ad.endTime ? formatDate(ad.endTime) : 'Sin fecha' }}</td>
+                                  <td><span class="pill pill-xs" :class="rankPillClass(ad.qualityRanking)" :title="rankTitle(ad.qualityRanking)">{{ rankLabel(ad.qualityRanking) }}</span></td>
+                                  <td><span class="pill pill-xs" :class="rankPillClass(ad.engagementRanking)" :title="rankTitle(ad.engagementRanking)">{{ rankLabel(ad.engagementRanking) }}</span></td>
+                                  <td><span class="pill pill-xs" :class="rankPillClass(ad.conversionRanking)" :title="rankTitle(ad.conversionRanking)">{{ rankLabel(ad.conversionRanking) }}</span></td>
+                                  <td class="data-mono">{{ num(ad.impressions) }}</td>
+                                  <td class="data-mono">{{ ad.cpm != null ? money(ad.cpm) : '—' }}</td>
+                                  <td class="data-mono">{{ num(ad.linkClicks) }}</td>
+                                  <td class="data-mono">{{ num(ad.shopClicks) }}</td>
+                                  <td class="data-mono">{{ ad.costPerLinkClick != null ? money(ad.costPerLinkClick) : '—' }}</td>
+                                  <td class="data-mono">{{ pct(ad.linkCtr) }}</td>
+                                  <td class="data-mono">{{ num(ad.clicks) }}</td>
+                                  <td class="data-mono">{{ pct(ad.ctr) }}</td>
+                                  <td class="data-mono">{{ ad.cpc != null ? money(ad.cpc) : '—' }}</td>
+                                  <td class="data-mono">{{ num(ad.landingPageViews) }}</td>
+                                  <td class="data-mono">{{ ad.costPerLandingPageView != null ? money(ad.costPerLandingPageView) : '—' }}</td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+
+                        <!-- Métricas del funnel propio (CRM) -->
+                        <div class="metrics-block">
+                          <div class="metrics-block-head">
+                            <h4 class="metrics-block-title">🎯 Funnel del CRM</h4>
+                          </div>
+                          <div class="metric-grid">
+                            <div class="metric"><span class="metric-label">Tasa de calificación</span><span class="metric-value">{{ campaign.metrics.qualificationRate }}%</span></div>
+                            <div class="metric"><span class="metric-label">Conversación → cita</span><span class="metric-value">{{ campaign.metrics.conversationToAppointmentRate }}%</span></div>
+                            <div class="metric"><span class="metric-label">Cita → ganado</span><span class="metric-value">{{ campaign.metrics.appointmentToWonRate }}%</span></div>
+                            <div class="metric"><span class="metric-label">Viabilidad prom.</span><span class="metric-value">{{ campaign.metrics.avgViability != null ? campaign.metrics.avgViability + '%' : '—' }}</span></div>
+                            <div class="metric"><span class="metric-label">1ª respuesta (mediana)</span><span class="metric-value">{{ responseLabel(campaign.metrics.medianFirstResponseMin) }}</span></div>
+                            <div class="metric"><span class="metric-label">Costo / conversación</span><span class="metric-value">{{ campaign.metrics.costPerConversation != null ? money(campaign.metrics.costPerConversation) : '—' }}</span></div>
+                            <div class="metric"><span class="metric-label">Costo / ganado</span><span class="metric-value">{{ campaign.metrics.costPerWon != null ? money(campaign.metrics.costPerWon) : '—' }}</span></div>
+                            <div class="metric"><span class="metric-label">Valor cotizado</span><span class="metric-value">{{ money(campaign.metrics.quotedValue) }}</span></div>
+                            <div class="metric"><span class="metric-label">ROAS</span><span class="metric-value">{{ campaign.metrics.roas != null ? campaign.metrics.roas + '×' : '—' }}</span></div>
+                          </div>
                         </div>
 
                         <!-- Anuncios mapeados -->
@@ -608,7 +729,8 @@ async function syncMeta() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'No se pudo sincronizar con Meta.');
     const s = data.summary;
-    syncMsg.value = `✅ Meta: ${s.campaigns} campaña(s), ${s.adsMapped} anuncio(s) mapeado(s), ${s.insightsUpdated} con métricas.`
+    syncMsg.value = `✅ Meta: ${s.campaigns} campaña(s), ${s.adsMapped} anuncio(s) mapeado(s), ${s.insightsUpdated} con métricas`
+      + `, ${s.adInsights || 0} fila(s) de rendimiento por anuncio.`
       + (s.errors?.length ? ` ⚠️ ${s.errors.join(' · ')}` : '');
     await loadReport();
   } catch (err) {
@@ -752,6 +874,55 @@ function money(n) {
   const value = Number(n || 0);
   return `S/ ${value.toLocaleString('es-PE', { minimumFractionDigits: value % 1 ? 2 : 0, maximumFractionDigits: 2 })}`;
 }
+
+/** Los porcentajes de Meta (CTR) ya llegan en puntos porcentuales. */
+function pct(value) {
+  return value != null ? `${value}%` : '—';
+}
+
+/** Ventana del informe de Meta ("Inicio/Fin del informe"). */
+function reportWindowLabel(metrics) {
+  if (!metrics.reportStart && !metrics.reportStop) return 'sin datos de Meta';
+  return `${formatDate(metrics.reportStart)} – ${formatDate(metrics.reportStop)}`;
+}
+
+/** "Entrega de anuncios": `effective_status` del anuncio en Meta. */
+const DELIVERY_META = {
+  ACTIVE: { label: 'Activo', pill: 'pill-success' },
+  PAUSED: { label: 'En pausa', pill: 'pill-warning' },
+  ADSET_PAUSED: { label: 'Conjunto en pausa', pill: 'pill-warning' },
+  CAMPAIGN_PAUSED: { label: 'Campaña en pausa', pill: 'pill-warning' },
+  PENDING_REVIEW: { label: 'En revisión', pill: 'pill-info' },
+  IN_PROCESS: { label: 'En proceso', pill: 'pill-info' },
+  PENDING_BILLING_INFO: { label: 'Falta pago', pill: 'pill-warning' },
+  DISAPPROVED: { label: 'Rechazado', pill: 'pill-danger' },
+  WITH_ISSUES: { label: 'Con problemas', pill: 'pill-danger' },
+  ARCHIVED: { label: 'Archivado', pill: 'pill-neutral' },
+  DELETED: { label: 'Eliminado', pill: 'pill-neutral' },
+  COMPLETED: { label: 'Finalizado', pill: 'pill-neutral' }
+};
+function deliveryLabel(status) {
+  if (!status) return '—';
+  return DELIVERY_META[status]?.label || status.toLowerCase().replace(/_/g, ' ');
+}
+function deliveryPillClass(status) { return DELIVERY_META[status]?.pill || 'pill-neutral'; }
+
+/**
+ * Las tres clasificaciones de Meta comparan el anuncio con los demás que
+ * compiten por la misma audiencia. La etiqueta va abreviada porque la tabla
+ * ya es muy ancha; el texto completo queda en el `title`.
+ */
+const RANKING_META = {
+  above_average: { short: 'Encima', label: 'Por encima del promedio', pill: 'pill-success' },
+  average: { short: 'Promedio', label: 'Promedio', pill: 'pill-info' },
+  below_average_35: { short: '35% inf.', label: 'Por debajo del promedio (35% inferior de los anuncios)', pill: 'pill-warning' },
+  below_average_20: { short: '20% inf.', label: 'Por debajo del promedio (20% inferior de los anuncios)', pill: 'pill-danger' },
+  below_average_10: { short: '10% inf.', label: 'Por debajo del promedio (10% inferior de los anuncios)', pill: 'pill-danger' },
+  unknown: { short: '—', label: 'Sin datos suficientes (Meta necesita al menos 500 impresiones)', pill: 'pill-neutral' }
+};
+function rankLabel(value) { return RANKING_META[value]?.short || '—'; }
+function rankTitle(value) { return RANKING_META[value]?.label || 'Sin datos suficientes'; }
+function rankPillClass(value) { return RANKING_META[value]?.pill || 'pill-neutral'; }
 
 function responseLabel(minutes) {
   if (minutes == null) return '—';
@@ -1123,14 +1294,25 @@ onMounted(() => {
 .funnel-dropoff { font-size: 0.72rem; color: var(--text-muted); font-family: var(--font-mono); text-align: left; }
 .funnel-dropoff-spacer { visibility: hidden; }
 
-/* Métricas */
+/* Métricas — un bloque por origen (Meta Ads / CRM) */
+.metrics-block {
+  margin-top: 1.2rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--border-color);
+}
+.metrics-block-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.metrics-block-title { font-size: 0.84rem; font-weight: 700; color: var(--text-main); margin: 0; }
+.metrics-block-note { font-size: 0.72rem; color: var(--text-muted); }
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 0.6rem;
-  margin-top: 1.2rem;
-  padding-top: 1.1rem;
-  border-top: 1px solid var(--border-color);
 }
 .metric {
   display: flex;
@@ -1143,6 +1325,32 @@ onMounted(() => {
 }
 .metric-label { font-size: 0.68rem; color: var(--text-muted); }
 .metric-value { font-size: 0.95rem; font-weight: 700; color: var(--text-main); font-variant-numeric: tabular-nums; }
+.metric-sub { font-size: 0.64rem; color: var(--text-muted); line-height: 1.25; }
+
+/* Tabla de rendimiento por anuncio — 23 columnas como el informe de Meta, con
+   el nombre del anuncio fijo a la izquierda al desplazarse en horizontal. */
+.ads-insights-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-solid);
+}
+.ads-insights-table { width: max-content; min-width: 100%; font-size: 0.74rem; }
+.ads-insights-table th,
+.ads-insights-table td { white-space: nowrap; padding: 0.45rem 0.65rem; vertical-align: top; }
+.ads-insights-table th { font-size: 0.64rem; }
+.ads-insights-table .col-ad-name {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--bg-card-solid);
+  border-right: 1px solid var(--border-color);
+  max-width: 220px;
+  white-space: normal;
+}
+.ad-row-name { display: block; font-size: 0.76rem; color: var(--text-main); line-height: 1.3; }
+.ad-row-sub { display: block; font-size: 0.64rem; color: var(--text-muted); font-family: var(--font-body); line-height: 1.25; }
+.pill-xs { font-size: 0.66rem; padding: 0.05rem 0.4rem; }
 
 /* Ad chips */
 .ad-chips { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; margin-top: 1rem; }
