@@ -187,7 +187,27 @@ function collapseDuplicatePreposition(text) {
 const INACTIVITY_NUDGE_MS = 60 * 60 * 1000;
 const INACTIVITY_FREEZE_MS = 60 * 60 * 1000;
 
-// El "¿Estás ahí?" solo sale en este rango (hora de Lima, [desde, hasta)).
+// Los recordatorios salen en este orden, uno por cada intento. El texto
+// CAMBIA a propósito: antes había uno solo, hardcodeado, y un contacto que
+// contestaba algo entre medio reiniciaba el ciclo (clearNudge borra
+// `nudge_sent_at`) y recibía el MISMO mensaje palabra por palabra — que es
+// justo lo que lo delata como bot. El segundo es más suave que el primero:
+// se manda a alguien que ya dejó de contestar una vez, y apurarlo ahí
+// espanta. Ninguno de los dos le reclama al contacto ("seguimos esperando tu
+// respuesta" ponía la deuda de su lado).
+const INACTIVITY_NUDGE_TEXTS = [
+  '¿Sigues por ahí? Cuando tengas un momento me cuentas 👀',
+  'Te leo cuando puedas, sin apuro 🙌'
+];
+
+// Tras este número de recordatorios en la MISMA conversación el bot deja de
+// insistir y el lead pasa a "Congelado" para que lo retome una persona. El
+// contador (`nudge_count`) no se reinicia cuando el contacto responde, así
+// que el tope vale para toda la conversación y no por racha de silencio.
+const MAX_INACTIVITY_NUDGES = INACTIVITY_NUDGE_TEXTS.length;
+
+// El recordatorio de inactividad solo sale en este rango (hora de Lima,
+// [desde, hasta)).
 // Caso real: leads que escribieron pasada la medianoche recibían el
 // recordatorio a las 2–5 a.m. — invasivo, y a la hora siguiente quedaban
 // congelados sin haber tenido chance real de responder. Fuera del rango el
@@ -1110,7 +1130,10 @@ export class WhatsappBotService {
 
   /**
    * El contacto congelado volvió a escribir: se retoma la conversación en el
-   * paso donde quedó y el lead vuelve a "En Calificación". Si estaba
+   * paso donde quedó y el lead vuelve a "En Calificación". El contador de
+   * recordatorios vuelve a cero: volvió por su cuenta, así que la
+   * conversación nueva merece sus propios intentos (si no, arrastraría el
+   * tope ya agotado y el primer silencio la congelaría sin avisar). Si estaba
    * agendando, se descartan los días que se le ofrecieron (pudieron pasar
    * horas y ya no ser válidos) para que se recalculen con la agenda actual.
    * Devuelve el estado con el que queda la sesión.
@@ -1132,7 +1155,7 @@ export class WhatsappBotService {
     }
 
     await db('whatsapp_bot_sessions').where({ wa_id: waId }).update({
-      status, nudge_sent_at: null, answers: JSON.stringify(answers), updated_at: db.fn.now()
+      status, nudge_sent_at: null, nudge_count: 0, answers: JSON.stringify(answers), updated_at: db.fn.now()
     });
     await this.moveFunnelStage(waId, 'calificando');
     this.logActivity({ type: 'frozen_reactivated', waId, status });
@@ -3334,11 +3357,24 @@ ${numberedList(fullSlotLabels(offer))}
     const isQuietHours = limaHour < NUDGE_QUIET_END_HOUR || limaHour >= NUDGE_QUIET_START_HOUR;
 
     for (const session of awaitingReply) {
-      if (isQuietHours) break;
       if (withUpcomingMeeting.has(session.wa_id)) continue;
 
       const silentMs = now - new Date(session.updated_at).getTime();
       if (silentMs < INACTIVITY_NUDGE_MS) continue;
+
+      // Ya se le insistió el máximo de veces: no se le manda otro
+      // recordatorio nunca más, se congela de una. Sin esta rama la sesión
+      // se quedaría activa para siempre, porque el bucle de congelado solo
+      // mira las filas que TIENEN `nudge_sent_at` y esta ya no va a volver a
+      // tenerlo. Congelar no manda ningún mensaje, así que puede ocurrir
+      // también en horario de silencio.
+      const nudgesSent = Number(session.nudge_count || 0);
+      if (nudgesSent >= MAX_INACTIVITY_NUDGES) {
+        await this.freezeStaleSession(session);
+        continue;
+      }
+
+      if (isQuietHours) continue;
 
       // Reserva la fila ANTES de enviar (con la condición nudge_sent_at IS
       // NULL en el propio UPDATE) para que dos barridos que se solapen
@@ -3349,12 +3385,12 @@ ${numberedList(fullSlotLabels(offer))}
       const claimed = await db('whatsapp_bot_sessions')
         .where({ id: session.id })
         .whereNull('nudge_sent_at')
-        .update({ nudge_sent_at: db.fn.now() });
+        .update({ nudge_sent_at: db.fn.now(), nudge_count: nudgesSent + 1 });
       if (!claimed) continue;
 
       try {
-        await this.send(session.wa_id, '¿Estás ahí? Seguimos esperando tu respuesta 👀');
-        this.logActivity({ type: 'inactivity_nudge', waId: session.wa_id });
+        await this.send(session.wa_id, INACTIVITY_NUDGE_TEXTS[nudgesSent]);
+        this.logActivity({ type: 'inactivity_nudge', waId: session.wa_id, attempt: nudgesSent + 1 });
       } catch (error) {
         console.error(`❌ [WhatsApp Bot] Error al mandar el recordatorio de inactividad a ${session.wa_id}:`, error);
       }
@@ -3366,16 +3402,29 @@ ${numberedList(fullSlotLabels(offer))}
       const silentSinceNudgeMs = now - new Date(session.nudge_sent_at).getTime();
       if (silentSinceNudgeMs < INACTIVITY_FREEZE_MS) continue;
 
-      try {
-        // Se guarda el paso en el que quedó para retomarlo si vuelve a escribir.
-        const answers = typeof session.answers === 'string' ? JSON.parse(session.answers) : (session.answers || {});
-        answers.__frozenFrom = session.status;
-        await db('whatsapp_bot_sessions').where({ id: session.id }).update({ status: FROZEN_STATUS, answers: JSON.stringify(answers) });
-        await this.moveFunnelStage(session.wa_id, 'congelado');
-        this.logActivity({ type: 'inactivity_frozen', waId: session.wa_id });
-      } catch (error) {
-        console.error(`❌ [WhatsApp Bot] Error al congelar la conversación de ${session.wa_id}:`, error);
-      }
+      await this.freezeStaleSession(session);
+    }
+  }
+
+  /**
+   * Congela una sesión abandonada: el bot deja de insistir y el lead pasa a
+   * "Congelado" en el Setter Funnel para que lo retome una persona. Se guarda
+   * el paso en el que quedó (`__frozenFrom`) para retomarlo ahí mismo si el
+   * contacto vuelve a escribir.
+   *
+   * Lo llaman los dos caminos del barrido: el contacto que no contestó al
+   * recordatorio, y el que ya agotó el tope de recordatorios de la
+   * conversación.
+   */
+  async freezeStaleSession(session) {
+    try {
+      const answers = typeof session.answers === 'string' ? JSON.parse(session.answers) : (session.answers || {});
+      answers.__frozenFrom = session.status;
+      await db('whatsapp_bot_sessions').where({ id: session.id }).update({ status: FROZEN_STATUS, answers: JSON.stringify(answers) });
+      await this.moveFunnelStage(session.wa_id, 'congelado');
+      this.logActivity({ type: 'inactivity_frozen', waId: session.wa_id });
+    } catch (error) {
+      console.error(`❌ [WhatsApp Bot] Error al congelar la conversación de ${session.wa_id}:`, error);
     }
   }
 
