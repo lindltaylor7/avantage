@@ -112,6 +112,19 @@ adelante) desde **hPanel → Avanzado → Node.js**. Pasos:
   probablemente ya te está pasando esto.
 - Cada despliegue nuevo de código requiere repetir `npm install` y `npm run build` (y
   `npm run migrate` si hay migraciones nuevas) antes de reiniciar la app.
+- **Por qué `nodemailer` está fijado en `^9` y no en la última**: nodemailer 10 exige Node >= 20
+  en su campo `engines`. El Node del hosting compartido no siempre es esa versión, así que la
+  rama 9 es lo más alto que se puede subir sin arriesgar el arranque en producción; ya incluye
+  el parche de todas las vulnerabilidades reportadas de `addressparser` y de la opción `raw`.
+  Antes de saltar a 10, confirma la versión de Node en hPanel → Avanzado → Node.js.
+- **Por qué hay un `overrides` de `uuid` en `package.json`**: `uuid` entra solo como dependencia
+  de `exceljs` (exportación de campañas a Excel), y `exceljs@4.4.0` —la última publicada— lo pide
+  como `^8.3.0`, versión con una vulnerabilidad de límites de buffer. La corrección automática que
+  propone `npm audit fix` es **degradar `exceljs` a la 3.4.0**, un salto de versión mayor hacia
+  atrás que rompería la exportación. El `overrides` fuerza `uuid@^11.1.1` manteniendo `exceljs`
+  en su última versión; funciona porque uuid 11 sigue publicando su build CommonJS, que es como
+  `exceljs` lo carga (`require('uuid')`). Si algún día `exceljs` actualiza su propia dependencia,
+  este `overrides` se puede quitar.
 - **Por qué `boot.cjs` y no `server.js` como archivo de inicio**: el hosting de Node.js de
   Hostinger arranca la app con Phusion Passenger, que usa `require()` (CommonJS) para cargar el
   archivo de inicio. Nuestro backend usa módulos ES (`import`/`export`, ver
