@@ -27,7 +27,7 @@ export const BOT_PROMPT_DEFAULTS = {
     'Tono cercano, empático y natural, nada de tono corporativo o de encuesta.',
     'No prometas ni menciones un "reporte de viabilidad", "evaluación con IA" ni ningún puntaje: el valor que ofreces es la reunión con el asesor, no un análisis automático.',
     'Si preguntan por precios/costos, no los inventes ni los evadas en seco: di que el asesor se los detalla en la reunión, y usa eso para impulsar el agendamiento.',
-    'Reconoce en tus propias palabras algo específico de lo que la persona escribió. No inventes que dijo algo que no dijo. Si el mensaje fue solo un saludo sin contenido (ej. "Hola"), no inventes que ya contó su caso: saluda y pregúntale directamente por su carrera y su universidad.',
+    'Reconoce en tus propias palabras algo específico de lo que la persona CONTÓ (su situación, su apuro, su duda), nunca repitiéndole el dato que acaba de darte: si solo respondió tu pregunta con su carrera, su universidad o su tema, eso se guarda y se sigue, no se le devuelve escrito. No inventes que dijo algo que no dijo. Si el mensaje fue solo un saludo sin contenido (ej. "Hola"), no inventes que ya contó su caso: saluda y pregúntale directamente por su carrera y su universidad.',
     'Si preguntan si eres una IA o un bot, sé transparente. Fuera de esa pregunta directa, compórtate como alguien del equipo, no aclares por tu cuenta que eres un bot.',
     'SALUDA UNA SOLA VEZ: solo el primer mensaje de la conversación lleva saludo. Del segundo mensaje en adelante NUNCA empieces con "Hola", "¡Hola!" ni "Buenas" — sigue la conversación como quien ya está hablando con la persona.',
     'EMOJIS: como máximo uno por mensaje y solo cuando aporte. No cierres todos los mensajes con emoji ni repitas el mismo dos veces seguidas: eso es lo que hace que suene a plantilla.',
@@ -145,10 +145,31 @@ export function buildKnowledgeBlock(settings = {}) {
   // La duración va al FINAL a propósito: puesta primero, el modelo abría cada
   // explicación del servicio con la logística de la reunión ("La reunión dura
   // 10 minutos...") en vez de con lo que realmente hace Avantage.
-  const facts = [
-    ...parseFaqFacts(settings.faq_knowledge),
-    `La reunión con el asesor dura aproximadamente ${minutes} minutos.`
+  const facts = [...parseFaqFacts(settings.faq_knowledge)];
+
+  // La identidad legal va SIEMPRE, la haya guardado el panel o no. Es lo
+  // único con lo que Avan puede responderle a quien duda de que la empresa
+  // exista ("no hay confianza", "¿están en Huancayo?"), y son datos de
+  // registro, no texto comercial que el equipo deba mantener a mano: si
+  // alguien recorta la FAQ desde el panel —como ya pasó: la fila guardada se
+  // quedó sin el RUC y sin la dirección— el bot no puede quedarse mudo justo
+  // en el mensaje que decide si el lead sigue o se va. Salen de COMPANY, la
+  // misma fuente que firma cotizaciones y contratos, así que no pueden
+  // desincronizarse de los documentos reales. Cada hecho se omite si la FAQ
+  // del panel ya dice algo sobre eso (se busca su marca), para no repetirlo
+  // con otras palabras.
+  const identityFacts = [
+    [COMPANY.ruc, `Somos ${COMPANY.legalName}, empresa formal con RUC ${COMPANY.ruc}.`],
+    [COMPANY.address, `Nuestra oficina está en ${COMPANY.address}, ${COMPANY.addressCity}.`],
+    ['contrato', 'Trabajamos con un contrato de prestación de servicios.']
   ];
+  for (const [marker, fact] of identityFacts) {
+    const needle = String(marker).toLowerCase();
+    if (!facts.some((f) => f.toLowerCase().includes(needle))) facts.push(fact);
+  }
+
+  // La duración va al final de todo, por lo dicho arriba.
+  facts.push(`La reunión con el asesor dura aproximadamente ${minutes} minutos.`);
 
   return facts.map((f) => `- ${f}`).join('\n');
 }
