@@ -2189,7 +2189,7 @@ app.get('/api/funnel-columns', requireAuth, requirePermission('leads.view'), asy
  */
 app.post('/api/funnel-columns', requireAuth, requirePermission('leads.view'), async (req, res) => {
   try {
-    const { key, label, icon, color, final: isFinal } = req.body;
+    const { key, label, icon, color, final: isFinal, quoted: isQuoted } = req.body;
     if (!label || !label.trim()) {
       return res.status(400).json({ error: 'El nombre de la columna es requerido.' });
     }
@@ -2200,7 +2200,7 @@ app.post('/api/funnel-columns', requireAuth, requirePermission('leads.view'), as
       return res.status(409).json({ error: 'Ya existe una columna con esa clave.' });
     }
 
-    const column = await funnelColumnService.createColumn({ key: columnKey, label: label.trim(), icon, color, final: isFinal });
+    const column = await funnelColumnService.createColumn({ key: columnKey, label: label.trim(), icon, color, final: isFinal, quoted: isQuoted });
     res.status(201).json({ column });
   } catch (error) {
     console.error('❌ Error al crear la columna:', error);
@@ -2234,8 +2234,8 @@ app.put('/api/funnel-columns/:key', requireAuth, requirePermission('leads.view')
     if (!existing) {
       return res.status(404).json({ error: 'Columna no encontrada.' });
     }
-    const { label, icon, color, final: isFinal } = req.body;
-    const column = await funnelColumnService.updateColumn(req.params.key, { label, icon, color, final: isFinal });
+    const { label, icon, color, final: isFinal, quoted: isQuoted } = req.body;
+    const column = await funnelColumnService.updateColumn(req.params.key, { label, icon, color, final: isFinal, quoted: isQuoted });
     res.json({ column });
   } catch (error) {
     console.error('❌ Error al actualizar la columna:', error);
@@ -2303,12 +2303,45 @@ app.post('/api/leads/:id/quote', requireAuth, requirePermission('leads.view'), a
     });
     const emailStatus = await emailService.sendQuoteEmail(lead.email, { quote, lead });
 
+    // Cotizar es, en la práctica, el cambio de etapa: el lead pasa a estar
+    // "ya cotizado". Se mueve solo para no depender de que alguien se acuerde
+    // de arrastrarlo, pero se devuelve `previousStatus` para que el panel
+    // pueda ofrecer "Deshacer" — mover el lead equivocado no puede costar
+    // rehacer nada a mano.
+    //
+    // Si el equipo todavía no marcó ninguna columna como etapa de cotización,
+    // no se inventa un destino: se informa y el lead se queda donde está.
+    let movedTo = null;
+    let previousStatus = null;
+    const quotedColumn = await funnelColumnService.getQuotedColumn();
+    if (quotedColumn && lead.status !== quotedColumn.key) {
+      previousStatus = lead.status;
+      await leadService.updateLeadStatus(lead.id, quotedColumn.key);
+      movedTo = { key: quotedColumn.key, label: quotedColumn.label };
+    }
+
     console.log(`💰 [Cotizaciones] Cotización #${quote.id} generada para el lead #${lead.id} (${lead.email})`);
 
-    res.json({ quote, emailStatus });
+    res.json({ quote, emailStatus, movedTo, previousStatus });
   } catch (error) {
     console.error('❌ Error al generar la cotización:', error);
     res.status(500).json({ error: 'Error al generar la cotización.', details: error.message });
+  }
+});
+
+/**
+ * Historial de cotizaciones de un lead, de la más reciente a la más antigua.
+ * El registro siempre se guardó, pero no había forma de consultarlo desde el
+ * panel: una vez generada, la cotización solo existía en la pestaña que se
+ * abría con el documento.
+ */
+app.get('/api/leads/:id/quotes', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const quotes = await quoteService.getQuotesByLead(req.params.id);
+    res.json({ quotes });
+  } catch (error) {
+    console.error('❌ Error al obtener las cotizaciones del lead:', error);
+    res.status(500).json({ error: 'Error al obtener las cotizaciones del lead.', details: error.message });
   }
 });
 

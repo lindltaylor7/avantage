@@ -435,6 +435,7 @@
               </button>
             </div>
             <span v-if="col.final" class="final-tag">🏆 Etapa Ganadora</span>
+            <span v-if="col.quoted" class="quoted-tag">💰 Etapa de Cotización</span>
           </div>
         </div>
 
@@ -520,6 +521,13 @@
             </label>
           </div>
 
+          <div class="form-group checkbox-group">
+            <label class="checkbox-label">
+              <input v-model="newColumnForm.quoted" type="checkbox" class="custom-checkbox" />
+              <span>Marcar como <strong>Etapa de Cotización</strong> (al generar una cotización, el lead se mueve aquí solo)</span>
+            </label>
+          </div>
+
           <div class="modal-footer-actions">
             <button type="button" class="btn-action-ghost" @click="showCreateColModal = false">Cancelar</button>
             <button type="submit" class="btn-action-primary" :disabled="!newColumnForm.label.trim()">
@@ -596,6 +604,13 @@
             <label class="checkbox-label">
               <input v-model="editColumnForm.final" type="checkbox" class="custom-checkbox" />
               <span>Marcar como <strong>Etapa Ganadora</strong> (genera proyecto automático)</span>
+            </label>
+          </div>
+
+          <div class="form-group checkbox-group">
+            <label class="checkbox-label">
+              <input v-model="editColumnForm.quoted" type="checkbox" class="custom-checkbox" />
+              <span>Marcar como <strong>Etapa de Cotización</strong> (el lead llega aquí al cotizarlo)</span>
             </label>
           </div>
 
@@ -868,6 +883,17 @@
             <p style="color: var(--accent-emerald); margin: 0 0 0.6rem; font-size: 0.88rem;">
               ✅ Cotización de <strong>{{ formatCurrency(quoteSuccess.amount, quoteSuccess.currency) }}</strong> enviada con éxito a <strong>{{ selectedLead.email }}</strong>.
             </p>
+            <p v-if="quoteMove" class="quote-move-line">
+              El lead pasó a <strong>{{ quoteMove.label }}</strong>.
+              <button type="button" class="quote-undo-btn" :disabled="quoteMoveUndoing" @click="undoQuoteMove">
+                {{ quoteMoveUndoing ? 'Deshaciendo…' : 'Deshacer' }}
+              </button>
+            </p>
+            <p v-else-if="!quotedColumn" class="quote-move-line quote-move-hint">
+              Ninguna columna está marcada como <strong>Etapa de Cotización</strong>, así que el lead no se movió.
+              Puedes marcarla al editar una columna del funnel.
+            </p>
+
             <button
               type="button"
               class="btn-action-secondary"
@@ -878,6 +904,33 @@
               {{ quoteDocLoading ? 'Abriendo…' : '📄 Ver / Descargar cotización (PDF)' }}
             </button>
           </div>
+
+          <!-- Historial: hasta ahora una cotización generada solo existía en la
+               pestaña que se abría con el documento. -->
+          <div v-if="quoteHistory.length" class="quote-history">
+            <h4 class="quote-history-title">Cotizaciones emitidas ({{ quoteHistory.length }})</h4>
+            <ul class="quote-history-list">
+              <li v-for="q in quoteHistory" :key="q.id" class="quote-history-item">
+                <div class="quote-history-main">
+                  <span class="quote-history-number">{{ formatQuoteNumber(q) }}</span>
+                  <span class="quote-history-amount">{{ formatCurrency(q.amount, q.currency) }}</span>
+                </div>
+                <div class="quote-history-meta">
+                  <span>{{ formatDateShort(q.created_at) }}</span>
+                  <span v-if="q.concept_title">· {{ q.concept_title }}</span>
+                  <span v-if="isQuoteExpired(q)" class="quote-history-expired">· vencida</span>
+                  <span v-else-if="q.valid_until">· vence {{ formatDateShort(q.valid_until) }}</span>
+                </div>
+                <button
+                  type="button"
+                  class="quote-history-open"
+                  :disabled="quoteDocLoading"
+                  @click="openQuoteDocument(q.id)"
+                >📄 Abrir</button>
+              </li>
+            </ul>
+          </div>
+          <p v-else-if="quoteHistoryLoading" class="quote-history-empty">Cargando cotizaciones…</p>
          </div>
 
           <!-- Panel lateral: conversación con el bot de WhatsApp (Avan) -->
@@ -1041,7 +1094,8 @@ const newColumnForm = reactive({
   label: '',
   icon: '🎯',
   color: '#56624A',
-  final: false
+  final: false,
+  quoted: false
 });
 
 const showEditColModal = ref(false);
@@ -1050,7 +1104,8 @@ const editColumnForm = reactive({
   label: '',
   icon: '',
   color: '',
-  final: false
+  final: false,
+  quoted: false
 });
 
 const showDeleteColModal = ref(false);
@@ -1068,6 +1123,16 @@ const quoteNotes = ref('');
 const quoteSubmitting = ref(false);
 const quoteSuccess = ref(null);
 const quoteDocLoading = ref(false);
+// Historial de cotizaciones del lead abierto. El registro siempre existió en
+// la base; lo que faltaba era traerlo al panel.
+const quoteHistory = ref([]);
+const quoteHistoryLoading = ref(false);
+// Movimiento de etapa que disparó la última cotización, con la etapa previa
+// para poder deshacerlo. Se ofrece deshacer mientras el aviso siga visible en
+// vez de por unos segundos: cotizar al lead equivocado se nota al rato, no al
+// instante, y un temporizador solo obliga a rehacerlo a mano.
+const quoteMove = ref(null);
+const quoteMoveUndoing = ref(false);
 
 // Conversación con el bot de WhatsApp (Avan) para el lead seleccionado.
 const showBotChat = ref(false);
@@ -1086,6 +1151,9 @@ watch(selectedLead, () => {
   quoteScope.value = '';
   quoteNotes.value = '';
   quoteSuccess.value = null;
+  quoteMove.value = null;
+  quoteHistory.value = [];
+  if (selectedLead.value) loadQuoteHistory();
 
   showBotChat.value = false;
   botChatMessages.value = [];
@@ -1319,6 +1387,7 @@ function openCreateColumnModal() {
   newColumnForm.icon = '🎯';
   newColumnForm.color = PRESET_COLORS[Math.floor(Math.random() * PRESET_COLORS.length)].hex;
   newColumnForm.final = false;
+  newColumnForm.quoted = false;
   showCreateColModal.value = true;
 }
 
@@ -1334,7 +1403,8 @@ async function saveNewColumn() {
         label: trimmed,
         icon: newColumnForm.icon || '📌',
         color: newColumnForm.color || '#56624A',
-        final: Boolean(newColumnForm.final)
+        final: Boolean(newColumnForm.final),
+        quoted: Boolean(newColumnForm.quoted)
       })
     });
     const data = await response.json();
@@ -1364,6 +1434,7 @@ function openEditColumnModal(col, index) {
   editColumnForm.icon = col.icon || '📌';
   editColumnForm.color = col.color || '#56624A';
   editColumnForm.final = Boolean(col.final);
+  editColumnForm.quoted = Boolean(col.quoted);
   showEditColModal.value = true;
 }
 
@@ -1378,7 +1449,8 @@ async function saveEditedColumn() {
         label: editColumnForm.label.trim(),
         icon: editColumnForm.icon || '📌',
         color: editColumnForm.color || '#56624A',
-        final: Boolean(editColumnForm.final)
+        final: Boolean(editColumnForm.final),
+        quoted: Boolean(editColumnForm.quoted)
       })
     });
     const data = await response.json();
@@ -1619,6 +1691,64 @@ async function moveLeadToStatus(lead, newStatus) {
   }
 }
 
+/** Columna marcada como etapa de cotización, si el equipo definió alguna. */
+const quotedColumn = computed(() => columns.value.find((c) => c.quoted) || null);
+
+/** Mismo formato que imprime el documento (ver quotationDocument.js). */
+function formatQuoteNumber(quote) {
+  const year = new Date(quote.created_at || Date.now()).getFullYear();
+  return `CTZ-${year}-${String(quote.id).padStart(4, '0')}`;
+}
+
+function isQuoteExpired(quote) {
+  if (!quote.valid_until) return false;
+  return new Date(quote.valid_until) < new Date(new Date().toDateString());
+}
+
+/** Trae las cotizaciones ya emitidas para el lead abierto. */
+async function loadQuoteHistory() {
+  const lead = selectedLead.value;
+  if (!lead) return;
+  quoteHistoryLoading.value = true;
+  try {
+    const response = await apiFetch(`/api/leads/${lead.id}/quotes`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Error al obtener las cotizaciones.');
+    // El lead pudo cambiar mientras la petición viajaba.
+    if (selectedLead.value?.id === lead.id) quoteHistory.value = data.quotes || [];
+  } catch {
+    // El historial es informativo: si falla, no se bloquea el resto del modal.
+    if (selectedLead.value?.id === lead.id) quoteHistory.value = [];
+  } finally {
+    quoteHistoryLoading.value = false;
+  }
+}
+
+/** Devuelve el lead a la etapa en la que estaba antes de cotizarlo. */
+async function undoQuoteMove() {
+  const move = quoteMove.value;
+  const lead = selectedLead.value;
+  if (!move || !lead) return;
+  quoteMoveUndoing.value = true;
+  try {
+    const response = await apiFetch(`/api/leads/${lead.id}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: move.previousStatus })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Error al mover el lead.');
+    lead.status = data.lead.status;
+    const inBoard = leads.value.find((l) => l.id === lead.id);
+    if (inBoard) inBoard.status = data.lead.status;
+    quoteMove.value = null;
+  } catch (err) {
+    alert('No se pudo deshacer el movimiento: ' + err.message);
+  } finally {
+    quoteMoveUndoing.value = false;
+  }
+}
+
 async function submitQuote() {
   if (!selectedLead.value || !quoteAmount.value) return;
   quoteSubmitting.value = true;
@@ -1639,6 +1769,19 @@ async function submitQuote() {
     if (!response.ok) throw new Error(data.error || 'Error al generar la cotización.');
     quoteSuccess.value = data.quote;
     showQuoteForm.value = false;
+
+    // El backend mueve el lead a la etapa de cotización (si el equipo marcó
+    // alguna) y devuelve de dónde venía, para poder deshacerlo desde el aviso.
+    if (data.movedTo && data.previousStatus) {
+      selectedLead.value.status = data.movedTo.key;
+      const inBoard = leads.value.find((l) => l.id === selectedLead.value.id);
+      if (inBoard) inBoard.status = data.movedTo.key;
+      quoteMove.value = { ...data.movedTo, previousStatus: data.previousStatus };
+    } else {
+      quoteMove.value = null;
+    }
+
+    loadQuoteHistory();
     // Abre automáticamente el documento imprimible con la marca de Avantage.
     openQuoteDocument(data.quote.id);
   } catch (err) {
@@ -2758,6 +2901,83 @@ onMounted(() => {
   border-color: var(--primary);
   color: #fff;
 }
+
+.quoted-tag {
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: var(--accent-amber, #b8860b);
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.quote-move-line {
+  margin: 0 0 0.6rem;
+  font-size: 0.83rem;
+  color: var(--text-main);
+}
+
+.quote-move-hint { color: var(--text-muted); }
+
+.quote-undo-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-left: 0.4rem;
+  font: inherit;
+  font-weight: 700;
+  color: var(--accent-cyan, #2a7fb8);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.quote-undo-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.quote-history { margin-top: 1rem; }
+
+.quote-history-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin: 0 0 0.5rem;
+}
+
+.quote-history-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+
+.quote-history-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.2rem 0.8rem;
+  align-items: center;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border-color);
+  border-radius: 9px;
+  background: var(--surface-2);
+}
+
+.quote-history-main { display: flex; align-items: baseline; gap: 0.6rem; }
+.quote-history-number { font-size: 0.8rem; font-weight: 700; letter-spacing: 0.4px; }
+.quote-history-amount { font-size: 0.85rem; font-weight: 700; color: var(--accent-emerald, #2e7d46); }
+.quote-history-meta { grid-column: 1; font-size: 0.72rem; color: var(--text-muted); display: flex; gap: 0.3rem; flex-wrap: wrap; }
+.quote-history-expired { color: var(--accent-danger, #b23a2c); font-weight: 600; }
+
+.quote-history-open {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  background: var(--surface-3);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.quote-history-open:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.quote-history-empty { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.8rem; }
 
 .final-tag {
   color: var(--accent-emerald);
