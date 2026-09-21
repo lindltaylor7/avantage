@@ -34,15 +34,24 @@
           Eliminadas
           <span v-if="deletionsLog.length" class="btn-count">{{ deletionsLog.length }}</span>
         </button>
-        <button
-          class="btn-action-secondary"
-          @click="downloadTodayConversations"
-          :disabled="isDownloading"
-          title="Descargar todas las conversaciones de hoy en un archivo .txt"
-        >
-          <span class="btn-icon">⬇️</span>
-          {{ isDownloading ? 'Generando...' : 'Descargar conversaciones de hoy' }}
-        </button>
+        <div class="download-group">
+          <input
+            type="date"
+            class="date-input"
+            v-model="exportDate"
+            :max="limaToday"
+            title="Elige el día de las conversaciones a descargar"
+          />
+          <button
+            class="btn-action-secondary"
+            @click="downloadConversations"
+            :disabled="isDownloading || !exportDate"
+            :title="`Descargar todas las conversaciones del ${exportDateLabel} en un archivo .txt`"
+          >
+            <span class="btn-icon">⬇️</span>
+            {{ isDownloading ? 'Generando...' : `Descargar conversaciones ${isExportToday ? 'de hoy' : 'del ' + exportDateLabel}` }}
+          </button>
+        </div>
       </div>
     </header>
 
@@ -567,6 +576,23 @@ const isSimulating = ref(false);
 const simMessagesSent = ref([]);
 const isDownloading = ref(false);
 
+/**
+ * Fecha (calendario de Lima) cuyas conversaciones se van a exportar. Se puede
+ * cambiar con el selector del header; arranca en "hoy" porque es el caso
+ * habitual. Perú es UTC-5 todo el año, así que "hoy" se calcula en esa zona y
+ * no en la del navegador, para que coincida con lo que agrupa el backend.
+ */
+const limaToday = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit'
+}).format(new Date());
+const exportDate = ref(limaToday);
+const isExportToday = computed(() => exportDate.value === limaToday);
+const exportDateLabel = computed(() => {
+  if (!exportDate.value) return '';
+  const [y, m, d] = exportDate.value.split('-');
+  return `${d}/${m}/${y}`;
+});
+
 let pollHandle = null;
 
 const ACTIVITY_META = {
@@ -1034,14 +1060,20 @@ async function clearActivity() {
 
 /**
  * Descarga en un .txt todas las conversaciones (entrantes + salientes) del día
- * de hoy. Se pide con apiFetch para adjuntar el token y luego se fuerza la
- * descarga desde el blob, ya que el endpoint responde con Content-Disposition.
+ * elegido en el selector (por defecto, hoy). Se pide con apiFetch para adjuntar
+ * el token y luego se fuerza la descarga desde el blob, ya que el endpoint
+ * responde con Content-Disposition.
  */
-async function downloadTodayConversations() {
+async function downloadConversations() {
+  const date = exportDate.value;
+  if (!date) {
+    errorMessage.value = 'Elige una fecha para descargar las conversaciones.';
+    return;
+  }
   isDownloading.value = true;
   errorMessage.value = '';
   try {
-    const response = await apiFetch('/api/whatsapp/conversations/export');
+    const response = await apiFetch(`/api/whatsapp/conversations/export?date=${encodeURIComponent(date)}`);
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       throw new Error(data.error || 'No se pudieron descargar las conversaciones.');
@@ -1049,10 +1081,7 @@ async function downloadTodayConversations() {
     const blob = await response.blob();
     const disposition = response.headers.get('Content-Disposition') || '';
     const match = disposition.match(/filename="?([^"]+)"?/);
-    const limaToday = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit'
-    }).format(new Date());
-    const filename = match ? match[1] : `conversaciones-whatsapp-${limaToday}.txt`;
+    const filename = match ? match[1] : `conversaciones-whatsapp-${date}.txt`;
 
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -1330,6 +1359,29 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.4rem;
   transition: all 0.2s ease;
+}
+
+.download-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.date-input {
+  background: var(--surface-2);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.86rem;
+  font-weight: 600;
+  font-family: var(--font-heading);
+  cursor: pointer;
+}
+
+.date-input:focus {
+  outline: none;
+  border-color: var(--primary);
 }
 
 .btn-action-secondary:hover:not(:disabled) {
