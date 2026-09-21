@@ -224,6 +224,8 @@ export class FinanceLedgerService {
         'leads.dni as lead_dni',
         'leads.email as lead_email',
         'leads.phone as lead_phone',
+        // Sale impresa en el comprobante de pago.
+        'leads.field_of_study as lead_career',
         'users.name as created_by_name'
       )
       .where('finance_income.id', id)

@@ -2,12 +2,23 @@ import { fileURLToPath } from 'url';
 import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
 import { BRAND_MARK_CID, BRAND_MARK_PATH, buildQuotationDocument, formatQuoteNumber } from './quotationDocument.js';
+import { buildPaymentReceiptDocument, formatReceiptNumber } from './paymentReceiptDocument.js';
 dotenv.config();
 
 /**
  * Servicio para formatear y enviar el informe de viabilidad de tesis por correo electrónico
  */
-export class EmailService {
+export /** Escapa la nota libre del asesor antes de meterla en el cuerpo HTML. */
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+class EmailService {
   constructor() {
     this.transporter = null;
     this.initPromise = this.initializeTransporter();
@@ -193,6 +204,58 @@ export class EmailService {
    */
   buildHtmlQuote({ quote, lead }) {
     return buildQuotationDocument({ quote, lead, forPrint: false, forEmail: true });
+  }
+
+  /**
+   * Envía al cliente el comprobante de un pago ya verificado por Finanzas.
+   *
+   * Va como cuerpo HTML y no como adjunto, por la misma razón que la
+   * cotización: el cliente lo ve apenas abre el correo, sin descargar nada.
+   * El símbolo viaja adjunto por `cid:` porque los clientes de correo
+   * bloquean las imágenes `data:`.
+   */
+  async sendPaymentReceiptEmail(recipientEmail, { income, message }) {
+    await this.initPromise;
+
+    const fromAddress = process.env.SMTP_FROM || '"Avantage Group" <tesis@avantagegroup.pe>';
+    const number = formatReceiptNumber(income);
+    const document = buildPaymentReceiptDocument({ income, forEmail: true });
+    // La nota del asesor va ANTES del comprobante: es lo que el cliente lee
+    // primero, y el documento queda como constancia debajo.
+    const note = (message || '').trim();
+    const htmlContent = note
+      ? `<p style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5">${escapeHtml(note).replace(/\n/g, '<br>')}</p>${document}`
+      : document;
+
+    const mailOptions = {
+      from: fromAddress,
+      to: recipientEmail,
+      subject: `🧾 Comprobante de pago ${number} — Avantage Group`,
+      html: htmlContent,
+      attachments: [{
+        filename: 'avantage-group.png',
+        path: fileURLToPath(BRAND_MARK_PATH),
+        cid: BRAND_MARK_CID
+      }]
+    };
+
+    try {
+      if (!this.transporter) {
+        return { success: false, error: 'El servicio de correo no está configurado.', recipient: recipientEmail, mode: 'Sin transporte' };
+      }
+      const info = await this.transporter.sendMail(mailOptions);
+      const previewUrl = nodemailer.getTestMessageUrl(info) || null;
+      return {
+        success: true,
+        messageId: info.messageId,
+        recipient: recipientEmail,
+        previewUrl,
+        mode: previewUrl ? 'Ethereal Mail (Prueba activa)' : 'Servidor SMTP Directo'
+      };
+    } catch (error) {
+      console.error('Error al enviar el comprobante de pago:', error);
+      return { success: false, error: error.message, recipient: recipientEmail, mode: 'Error' };
+    }
   }
 
   /**

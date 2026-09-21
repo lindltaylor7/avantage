@@ -327,6 +327,24 @@
                     <span v-if="row.is_initial_payment" class="initial-payment-tag" title="Primer pago: activa el proyecto del lead">
                       1er pago
                     </span>
+
+                    <!-- El comprobante certifica un pago: solo se emite una
+                         vez que Finanzas verificó el voucher. -->
+                    <template v-if="row.estado === 'verificado'">
+                      <button
+                        type="button"
+                        class="receipt-btn"
+                        :disabled="receiptLoading === row.id"
+                        title="Ver el comprobante de pago (para imprimir o guardar como PDF)"
+                        @click="openReceipt(row)"
+                      >{{ receiptLoading === row.id ? '…' : '🧾 Comprobante' }}</button>
+                      <button
+                        type="button"
+                        class="receipt-btn"
+                        title="Enviar el comprobante al correo del cliente"
+                        @click="receiptModalRow = row"
+                      >📧</button>
+                    </template>
                   </div>
                 </td>
                 <td>
@@ -437,6 +455,7 @@
     </template>
 
     <SendTributarioModal v-if="sendModalRow" :income="sendModalRow" @close="sendModalRow = null" />
+    <SendReceiptModal v-if="receiptModalRow" :income="receiptModalRow" @close="receiptModalRow = null" />
   </section>
 </template>
 
@@ -445,12 +464,14 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import { apiFetch } from "../../apiClient.js";
 import { hasPermission } from "../../auth.js";
 import { isPdfReceipt, loadReceiptUrl } from "./receiptImage.js";
+import { openIncomeReceipt } from "./receiptDocument.js";
 import { dayOnly, formatAmount, formatDate } from "./format.js";
 import { BANCOS, CUOTAS, EMITIR_OPCIONES, calcItf } from "./incomeOptions.js";
 import { useLedgerTable } from "./useLedgerTable.js";
 import DealPlanHeader from "./DealPlanHeader.vue";
 import LedgerPagination from "./LedgerPagination.vue";
 import SendTributarioModal from "./SendTributarioModal.vue";
+import SendReceiptModal from "./SendReceiptModal.vue";
 import "./ledger.css";
 
 // Debe coincidir con MAX_FINANCE_RECEIPTS del backend.
@@ -477,6 +498,19 @@ const verifySaving = ref(null);
 // El visto bueno de un ingreso es competencia exclusiva de Finanzas.
 const canVerify = hasPermission("finance.verify");
 const sendModalRow = ref(null);
+const receiptModalRow = ref(null);
+const receiptLoading = ref(null);
+
+async function openReceipt(row) {
+  receiptLoading.value = row.id;
+  try {
+    await openIncomeReceipt(row.id);
+  } catch (error) {
+    alert(error.message);
+  } finally {
+    receiptLoading.value = null;
+  }
+}
 const editingRow = ref(null);
 const editingTotal = ref(false);
 const totalAmountDraft = ref("");

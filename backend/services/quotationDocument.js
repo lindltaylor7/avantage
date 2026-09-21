@@ -184,6 +184,14 @@ function monogram(cls, markSrc) {
 }
 
 /**
+ * Piezas de marca compartidas con otros documentos que deben verse como parte
+ * de la misma familia (hoy, el comprobante de pago de Finanzas). Se exportan
+ * desde acá en vez de duplicarse: la paleta, el logo y la iconografía tienen
+ * que cambiar en un solo lugar o los documentos se desalinean entre sí.
+ */
+export { C as BRAND_COLORS, BRAND_MARK, icon, brandLogo, monogram, formatMoney, formatLongDate };
+
+/**
  * Construye el documento HTML completo de la cotización.
  * @param {object} params
  * @param {object} params.quote  Fila de la tabla `quotes`.

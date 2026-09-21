@@ -15,6 +15,7 @@ import { ContractService } from './services/contractService.js';
 import { ContractTemplateService } from './services/contractTemplateService.js';
 import { buildContractDocument } from './services/contractDocument.js';
 import { buildQuotationDocument } from './services/quotationDocument.js';
+import { buildPaymentReceiptDocument } from './services/paymentReceiptDocument.js';
 import { CampaignService } from './services/campaignService.js';
 import { MetaAdsService } from './services/metaAdsService.js';
 import { CampaignExportService } from './services/campaignExportService.js';
@@ -886,6 +887,62 @@ app.post('/api/finance/income/:id/tributario/send', requireAuth, requirePermissi
   } catch (error) {
     console.error('❌ Error al enviar el archivo tributario:', error);
     res.status(502).json({ error: error.message || 'Error al enviar el archivo tributario.' });
+  }
+});
+
+/**
+ * Comprobante de pago imprimible de un ingreso VERIFICADO.
+ *
+ * Se exige la verificación —no basta con "pagado"— porque el comprobante es
+ * lo que el cliente guarda como constancia: emitirlo antes de que Finanzas
+ * revise el voucher sería certificar un pago que todavía nadie confirmó.
+ */
+function assertVerifiedIncome(income, res) {
+  if (!income) {
+    res.status(404).json({ error: 'Ingreso no encontrado.' });
+    return false;
+  }
+  if (income.estado !== 'verificado') {
+    res.status(409).json({ error: 'El comprobante solo se emite para un ingreso verificado por Finanzas.' });
+    return false;
+  }
+  return true;
+}
+
+app.get('/api/finance/income/:id/receipt', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const income = await financeLedgerService.getIncomeById(req.params.id);
+    if (!assertVerifiedIncome(income, res)) return;
+
+    const html = buildPaymentReceiptDocument({ income, forPrint: true });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (error) {
+    console.error('❌ Error al generar el comprobante de pago:', error);
+    res.status(500).json({ error: 'Error al generar el comprobante de pago.', details: error.message });
+  }
+});
+
+/** Manda ese mismo comprobante al correo del cliente. */
+app.post('/api/finance/income/:id/receipt/send', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const { to, message } = req.body || {};
+    const income = await financeLedgerService.getIncomeById(req.params.id);
+    if (!assertVerifiedIncome(income, res)) return;
+
+    const recipient = (to || '').trim() || income.lead_email;
+    if (!recipient) {
+      return res.status(400).json({ error: 'No hay un correo de destino (el lead no tiene correo registrado).' });
+    }
+
+    const result = await emailService.sendPaymentReceiptEmail(recipient, { income, message });
+    if (!result.success) return res.status(502).json({ error: result.error || 'No se pudo enviar el correo.' });
+
+    console.log(`🧾 [Finanzas] Comprobante del ingreso ${income.code} enviado a ${recipient}`);
+    res.json({ result: { ...result, channel: 'email' } });
+  } catch (error) {
+    console.error('❌ Error al enviar el comprobante de pago:', error);
+    res.status(502).json({ error: error.message || 'Error al enviar el comprobante de pago.' });
   }
 });
 
