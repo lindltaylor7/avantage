@@ -5,10 +5,7 @@ import { BRAND_MARK_CID, BRAND_MARK_PATH, buildQuotationDocument, formatQuoteNum
 import { buildPaymentReceiptDocument, formatReceiptNumber } from './paymentReceiptDocument.js';
 dotenv.config();
 
-/**
- * Servicio para formatear y enviar el informe de viabilidad de tesis por correo electrónico
- */
-export /** Escapa la nota libre del asesor antes de meterla en el cuerpo HTML. */
+/** Escapa la nota libre del asesor antes de meterla en el cuerpo HTML. */
 function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -18,7 +15,10 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
-class EmailService {
+/**
+ * Servicio para formatear y enviar el informe de viabilidad de tesis por correo electrónico
+ */
+export class EmailService {
   constructor() {
     this.transporter = null;
     this.initPromise = this.initializeTransporter();
