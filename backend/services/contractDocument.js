@@ -33,6 +33,26 @@ const LESSOR_SIGNATURE = (() => {
   }
 })();
 
+/**
+ * Logo oficial de Avantage Group. Va embebido como data URI, igual que la
+ * firma: el documento se abre en el navegador y se imprime a PDF desde ahí,
+ * así que no puede depender de que el servidor sirva un archivo aparte.
+ *
+ * El PNG trae el trazo sobre fondo transparente (el original venía con fondo
+ * crema, que sobre la hoja blanca se veía como un recuadro). Si el archivo
+ * falta, el encabezado cae en la marca vectorial de siempre en vez de quedar
+ * sin identificación.
+ */
+const BRAND_LOGO = (() => {
+  try {
+    const png = readFileSync(new URL('../assets/logo-avantage.png', import.meta.url));
+    return `data:image/png;base64,${png.toString('base64')}`;
+  } catch {
+    console.warn('⚠️ [Contratos] No se encontró backend/assets/logo-avantage.png: se usará la marca vectorial de respaldo.');
+    return null;
+  }
+})();
+
 const BLANK = '____________________';
 
 const ORDINALS = ['PRIMERA', 'SEGUNDA', 'TERCERA', 'CUARTA', 'QUINTA', 'SEXTA', 'SÉPTIMA', 'OCTAVA', 'NOVENA'];
@@ -263,7 +283,9 @@ export function buildContractDocument(contract) {
   .c-head { display: flex; align-items: center; justify-content: space-between; padding-bottom: 10px; margin-bottom: 18px; border-bottom: 2px solid #8a9b30; font-family: 'Montserrat', sans-serif; }
   .c-brand { display: flex; align-items: center; gap: 10px; }
   .c-brand svg { width: 42px; height: 35px; }
-  .c-brand strong { display: block; font-size: 12pt; letter-spacing: 2px; }
+  /* El logo lleva su propio texto, así que manda el alto y el ancho sigue su
+     proporción. print-color-adjust para que el olivo no salga en gris. */
+  .c-logo { height: 38px; width: auto; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .c-brand small { font-size: 7.5pt; color: #5d5e51; letter-spacing: 0.4px; }
   .c-number { text-align: right; font-size: 8pt; color: #5d5e51; }
   .c-number b { display: block; font-size: 10pt; color: #1f1f1c; }
@@ -322,8 +344,10 @@ export function buildContractDocument(contract) {
   <div class="c-content">
     <header class="c-head">
       <div class="c-brand">
-        <svg viewBox="0 0 70 58" aria-hidden="true">${agMarkPaths()}</svg>
-        <div><strong>AVANTAGE GROUP</strong><small>${esc(COMPANY.legalName)} · RUC ${esc(COMPANY.ruc)}</small></div>
+        ${BRAND_LOGO
+          ? `<img class="c-logo" src="${BRAND_LOGO}" alt="Avantage Group">`
+          : `<svg viewBox="0 0 70 58" aria-hidden="true">${agMarkPaths()}</svg>`}
+        <div><small>${esc(COMPANY.legalName)} · RUC ${esc(COMPANY.ruc)}</small></div>
       </div>
       <div class="c-number">Contrato<b>${esc(number)}</b></div>
     </header>
