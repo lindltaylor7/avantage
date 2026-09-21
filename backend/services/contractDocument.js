@@ -8,7 +8,7 @@
  * contrato ocupa varias páginas: los márgenes van en `@page` para que el
  * texto fluya página a página con el mismo margen en cada una.
  */
-import { COMPANY, agMarkPaths, esc } from './quotationDocument.js';
+import { COMPANY, PAYMENT_METHODS, agMarkPaths, esc } from './quotationDocument.js';
 import { readFileSync } from 'fs';
 
 /**
@@ -120,8 +120,34 @@ export function contractPlaceholders(contract) {
     servicio: contract.service_description,
     monto: formatAmountLegal(contract.total_amount, contract.currency),
     ciudad: contract.city,
-    fecha: formatLongDate(contract.contract_date)
+    fecha: formatLongDate(contract.contract_date),
+    universidad: contract.university,
+    carrera: contract.career
   };
+}
+
+/**
+ * Marcadores que no son un dato suelto sino un BLOQUE (hoy, una tabla). Se
+ * expanden ANTES de partir el cuerpo en bloques, porque lo que devuelven son
+ * filas que el parser tiene que leer después como tabla; pasarlos por
+ * fillPlaceholders() las envolvería en <strong> y las dejaría como una línea
+ * suelta de texto.
+ *
+ * Las cuentas salen de PAYMENT_METHODS —la misma lista que imprime las
+ * cotizaciones—, así que un cambio de cuenta no puede quedar desfasado entre
+ * un documento y otro.
+ */
+const BLOCK_PLACEHOLDERS = {
+  cuentas_bancarias: () => [
+    'Banco | Moneda | Titular y número de cuenta',
+    ...PAYMENT_METHODS.map((m) => `${m.bank} | Soles | ${COMPANY.legalName} ${m.account}${m.cci ? ` — ${m.cci}` : ''}`)
+  ].join('\n')
+};
+
+function expandBlockPlaceholders(text) {
+  return String(text || '').replace(/\{\{\s*([a-z_]+)\s*\}\}/g, (match, key) => (
+    BLOCK_PLACEHOLDERS[key] ? BLOCK_PLACEHOLDERS[key]() : match
+  ));
 }
 
 /** Escapa el texto y reemplaza los marcadores; los desconocidos se dejan tal cual. */
@@ -133,12 +159,67 @@ export function fillPlaceholders(text, values) {
   });
 }
 
+/**
+ * Una fila de tabla: al menos un "|" en cada línea del bloque. Se eligió la
+ * forma de Markdown porque las cláusulas se editan en un textarea del panel:
+ * quien redacta un contrato tiene que poder escribir el cronograma de pagos
+ * sin saber HTML.
+ */
+function isTableBlock(block) {
+  const lines = block.split(/\n/).filter((l) => l.trim());
+  return lines.length >= 2 && lines.every((l) => l.includes('|'));
+}
+
+function tableBlock(block, values) {
+  const rows = block.split(/\n/).map((l) => l.trim()).filter(Boolean)
+    // La fila separadora de Markdown (|---|---|) no es contenido: si alguien
+    // la escribe por costumbre, se ignora en vez de imprimirse como celda.
+    .filter((l) => !/^\|?[\s|:-]+\|[\s|:-]*$/.test(l))
+    // Los "|" de los extremos son opcionales (como en Markdown), pero solo se
+    // quitan cuando están en AMBOS lados: una fila con la primera celda vacía
+    // se escribe " | Firma de contrato", y quitarle ese "|" de la izquierda
+    // se comería la celda vacía en vez del delimitador.
+    .map((l) => (l.length > 1 && l.startsWith('|') && l.endsWith('|') ? l.slice(1, -1) : l))
+    .map((l) => l.split('|').map((c) => c.trim()));
+
+  const [head, ...body] = rows;
+  const cells = (row, tag) => row.map((c) => `<${tag}>${c ? fillPlaceholders(c, values) : ''}</${tag}>`).join('');
+  // Una fila más corta que el encabezado se completa con celdas vacías: sin
+  // esto, una fila del cronograma todavía sin llenar rompía la cuadrícula.
+  const padded = (row) => row.concat(Array(Math.max(0, head.length - row.length)).fill(''));
+  return '<table class="c-table">'
+    + `<thead><tr>${cells(head, 'th')}</tr></thead>`
+    + `<tbody>${body.map((r) => `<tr>${cells(padded(r), 'td')}</tr>`).join('')}</tbody>`
+    + '</table>';
+}
+
+/** Bloque de viñetas: todas sus líneas empiezan con "- ". */
+function isListBlock(block) {
+  const lines = block.split(/\n/).filter((l) => l.trim());
+  return lines.length > 0 && lines.every((l) => /^\s*-\s+/.test(l));
+}
+
+function listBlock(block, values) {
+  const items = block.split(/\n/).map((l) => l.trim()).filter(Boolean)
+    .map((l) => `<li>${fillPlaceholders(l.replace(/^-\s+/, ''), values)}</li>`).join('');
+  return `<ul class="c-list">${items}</ul>`;
+}
+
+/**
+ * Cuerpo de una cláusula (o la apertura/cierre) a HTML. Los bloques se
+ * separan por línea en blanco y cada uno se imprime como tabla, lista de
+ * viñetas o párrafo, según su forma.
+ */
 function paragraphs(text, values) {
-  return String(text || '')
+  return expandBlockPlaceholders(text)
     .split(/\n\s*\n/)
     .map((p) => p.trim())
     .filter(Boolean)
-    .map((p) => `<p>${fillPlaceholders(p, values).replace(/\n/g, '<br>')}</p>`)
+    .map((p) => {
+      if (isTableBlock(p)) return tableBlock(p, values);
+      if (isListBlock(p)) return listBlock(p, values);
+      return `<p>${fillPlaceholders(p, values).replace(/\n/g, '<br>')}</p>`;
+    })
     .join('');
 }
 
@@ -193,6 +274,13 @@ export function buildContractDocument(contract) {
   .c-clause { margin-bottom: 12px; }
   .c-clause h3 { font-family: 'Montserrat', sans-serif; font-size: 9.5pt; font-weight: 700; margin-bottom: 5px; text-transform: uppercase; break-after: avoid; }
   .c-clause h3 span { color: #68761f; }
+  .c-list { margin: 0 0 8px 18px; }
+  .c-list li { text-align: justify; margin-bottom: 3px; }
+  /* Las tablas de cronograma y cuentas nunca se parten entre dos hojas. */
+  .c-table { width: 100%; border-collapse: collapse; margin: 6px 0 10px; font-size: 9.5pt; break-inside: avoid; }
+  .c-table th, .c-table td { border: 1px solid #c9c8bd; padding: 5px 8px; text-align: left; vertical-align: top; }
+  .c-table th { background: #f1f0e8; font-family: 'Montserrat', sans-serif; font-size: 8.5pt; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.3px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .c-closing { margin-top: 16px; }
   /* El cierre y las firmas van juntos: las firmas nunca quedan solas en una hoja. */
   .c-signoff { break-inside: avoid; }

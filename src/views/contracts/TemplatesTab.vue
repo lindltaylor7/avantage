@@ -39,6 +39,27 @@
           Los cambios aplican a los contratos que se creen desde ahora; los contratos ya creados conservan su propio texto.
         </p>
 
+        <details v-pre class="ct-help">
+          <summary>Cómo escribir la apertura, el cierre y las cláusulas</summary>
+          <p><b>Datos que se rellenan solos.</b> Escribe el marcador y al generar el documento se reemplaza por el dato del contrato; el que falte sale como una línea para llenar a mano.</p>
+          <ul>
+            <li><code>{{cliente}}</code> <code>{{dni}}</code> <code>{{domicilio}}</code> <code>{{correo}}</code> <code>{{telefono}}</code></li>
+            <li><code>{{universidad}}</code> <code>{{carrera}}</code> <code>{{servicio}}</code> <code>{{monto}}</code></li>
+            <li><code>{{empresa}}</code> <code>{{ruc}}</code> <code>{{domicilio_empresa}}</code> <code>{{representante}}</code></li>
+            <li><code>{{ciudad}}</code> <code>{{fecha}}</code></li>
+            <li><code>{{cuentas_bancarias}}</code> — imprime la tabla completa de cuentas de la empresa.</li>
+          </ul>
+          <p><b>Formato.</b> Separa los bloques con una línea en blanco:</p>
+          <ul>
+            <li>Un bloque con <code>|</code> en todas sus líneas se imprime como <b>tabla</b>; la primera fila es el encabezado. Deja la celda vacía para llenarla a mano.</li>
+            <li>Un bloque cuyas líneas empiezan con <code>-</code> se imprime como <b>lista de viñetas</b>.</li>
+            <li>Lo demás es un párrafo justificado.</li>
+          </ul>
+          <pre>Fecha | Monto en soles
+16/09/2026 | 30% - S/. 2,700
+21/09/2026 | 70% - S/. 6,300</pre>
+        </details>
+
         <div class="ct-grid">
           <div class="form-group">
             <label class="form-label">Nombre del tipo (lo que se ve al elegirlo)</label>
@@ -160,3 +181,13 @@ onMounted(async () => {
   isLoading.value = false;
 });
 </script>
+
+<style scoped>
+.ct-help { margin-bottom: 14px; border: 1px solid var(--border-color); border-radius: 10px; padding: 10px 14px; background: var(--surface-2); }
+.ct-help summary { cursor: pointer; font-weight: 600; font-size: 0.85rem; }
+.ct-help p, .ct-help li { font-size: 0.82rem; line-height: 1.5; }
+.ct-help p { margin: 10px 0 4px; }
+.ct-help ul { margin: 0 0 0 18px; }
+.ct-help code { background: var(--surface-3); padding: 0.05rem 0.3rem; border-radius: 4px; font-size: 0.78rem; }
+.ct-help pre { background: var(--surface-3); padding: 8px 10px; border-radius: 6px; font-size: 0.78rem; overflow-x: auto; margin-top: 8px; }
+</style>

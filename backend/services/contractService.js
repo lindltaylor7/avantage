@@ -13,6 +13,8 @@ const EDITABLE_FIELDS = {
   clientEmail: 'client_email',
   clientPhone: 'client_phone',
   serviceDescription: 'service_description',
+  university: 'university',
+  career: 'career',
   totalAmount: 'total_amount',
   currency: 'currency',
   city: 'city',
@@ -101,6 +103,11 @@ export class ContractService {
         client_email: lead?.email || null,
         client_phone: lead?.phone || null,
         service_description: lead?.topic || null,
+        // La cláusula primera del modelo nombra el reglamento de la
+        // universidad y la carrera del asesorado: se traen del lead para no
+        // escribirlos a mano en el texto de la cláusula.
+        university: lead?.university || null,
+        career: lead?.field_of_study || null,
         total_amount: lead?.total_amount ?? null,
         city: lead?.province || lead?.department || null,
         contract_date: todayIso(),

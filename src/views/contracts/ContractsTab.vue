@@ -95,6 +95,8 @@
               <input v-model="editing.total_amount" type="number" min="0" step="0.01" class="form-input" />
             </div>
           </div>
+          <div class="form-group"><label class="form-label">Universidad</label><input v-model="editing.university" class="form-input" placeholder="Aparece en la cláusula primera" /></div>
+          <div class="form-group"><label class="form-label">Carrera o mención</label><input v-model="editing.career" class="form-input" placeholder="Aparece en la cláusula primera" /></div>
           <div class="form-group ct-wide">
             <label class="form-label">Servicio contratado</label>
             <textarea v-model="editing.service_description" class="form-textarea" rows="2"></textarea>
@@ -137,7 +139,8 @@ const STATUS_LABELS = { borrador: 'Borrador', firmado: 'Firmado', anulado: 'Anul
 const FIELDS = [
   ['title', 'title'], ['status', 'status'], ['client_name', 'clientName'], ['client_dni', 'clientDni'],
   ['client_address', 'clientAddress'], ['client_email', 'clientEmail'], ['client_phone', 'clientPhone'],
-  ['service_description', 'serviceDescription'], ['total_amount', 'totalAmount'], ['currency', 'currency'],
+  ['service_description', 'serviceDescription'], ['university', 'university'], ['career', 'career'],
+  ['total_amount', 'totalAmount'], ['currency', 'currency'],
   ['city', 'city'], ['contract_date', 'contractDate'], ['representative_name', 'representativeName'],
   ['intro', 'intro'], ['closing', 'closing']
 ];
