@@ -214,7 +214,9 @@ export class CampaignService {
       db('whatsapp_messages').whereIn('wa_id', waIds).andWhere('direction', 'outbound')
         .groupBy('wa_id').select('wa_id').min('received_at as firstOut'),
       db('leads').whereIn('phone', waIds)
-        .select('id', 'phone', 'status', 'created_at', 'full_name', 'topic', 'overall_viability_score'),
+        .select('id', 'phone', 'status', 'created_at', 'full_name', 'topic', 'overall_viability_score',
+          // Correo y carrera solo los usa la hoja "Ruta de leads" del Excel.
+          'email', 'field_of_study'),
       db('whatsapp_bot_sessions').whereIn('wa_id', waIds)
         .select('wa_id', 'status', 'started_at', 'updated_at'),
       db('scheduled_meetings').whereIn('wa_id', waIds)
@@ -348,6 +350,77 @@ export class CampaignService {
       adsetId: metaAd?.adsetId || null,
       adsetName: metaAd?.adsetName || null
     };
+  }
+
+  /**
+   * Una fila por lead atribuido, con de dónde llegó y dónde está hoy.
+   *
+   * Dos decisiones que la diferencian del resto del reporte:
+   *
+   *  - El estado que se imprime es la COLUMNA REAL del Kanban (su etiqueta,
+   *    no la clave `col_xxx`), porque es la que el equipo ve y mueve todos los
+   *    días. `crmStage` es una clasificación derivada de cuatro cajones que
+   *    sirve para sumar por anuncio, pero nadie la reconoce en una hoja.
+   *  - Van TODOS los contactos, incluidos los que llegaron por un anuncio que
+   *    no está mapeado a ninguna campaña: esos leads existen y hoy no salían
+   *    en ninguna hoja, que es justo el agujero que tapa esta.
+   */
+  async #buildLeadTrail(contacts, campaigns, campaignByAd) {
+    const columns = await db('funnel_columns').select('key', 'label');
+    const labelByKey = new Map(columns.map((c) => [c.key, c.label]));
+
+    // Las métricas de Meta se parsean una vez por campaña, no una por lead.
+    const metaAdsByCampaign = new Map(
+      campaigns.map((c) => [c.id, parseMetaInsights(c.meta_ads_insights) || []])
+    );
+
+    const STAGE_LABELS = {
+      ganado: 'Ganado',
+      cotizacion: 'Cotización / propuesta',
+      descartado: 'Descartado',
+      seguimiento: 'En seguimiento'
+    };
+
+    return contacts
+      .slice()
+      .sort((x, y) => new Date(y.firstMessageAt) - new Date(x.firstMessageAt))
+      .map((c) => {
+        const campaign = campaignByAd.get(c.sourceId) || null;
+        const ad = this.#resolveContactAd(c, campaign, campaign ? metaAdsByCampaign.get(campaign.id) || [] : []);
+        const lead = c.lead;
+
+        return {
+          leadId: lead?.id || null,
+          name: lead?.full_name || c.contactName || c.waId,
+          phone: c.waId,
+          email: lead?.email || null,
+          career: lead?.field_of_study || null,
+          topic: lead?.topic || null,
+
+          platform: c.platform || null,
+          campaignId: campaign?.id || null,
+          campaignName: campaign?.name || null,
+          adsetName: ad.adsetName || null,
+          adName: ad.adName || null,
+          adHeadline: c.headline || null,
+          adSourceId: ad.adSourceId || null,
+
+          firstMessageAt: c.firstMessageAt,
+          firstResponseMinutes: c.firstResponseMinutes,
+          qualified: c.qualified,
+          viability: c.viability,
+          meetingAt: c.meetingAt,
+
+          // Dónde está hoy: la columna del Kanban y, en paralelo, el cajón
+          // comercial con el que se suman las cifras por anuncio.
+          funnelColumn: lead ? (labelByKey.get(lead.status) || lead.status) : null,
+          commercialStage: STAGE_LABELS[c.crmStage] || c.crmStage,
+
+          quotedValue: c.quotedValue,
+          paidRevenue: c.paidRevenue || 0,
+          billedRevenue: c.billedRevenue || 0
+        };
+      });
   }
 
   #summariseGroup(contacts, campaign) {
@@ -547,7 +620,7 @@ export class CampaignService {
   }
 
   // ──────────────────────────── Rendimiento global ────────────────────────
-  async getPerformance({ from = null, to = null } = {}) {
+  async getPerformance({ from = null, to = null, includeLeadTrail = false } = {}) {
     const [campaigns, attribution] = await Promise.all([
       this.listCampaigns(),
       this.#buildAttribution({ from, to })
@@ -648,9 +721,18 @@ export class CampaignService {
       return acc;
     }, { impressions: 0, clicks: 0, reach: 0, messagingStarted: 0, linkClicks: 0, landingPageViews: 0, hasData: false });
 
+    // La ruta lead a lead solo se arma cuando alguien la pide (hoy, el
+    // exportable a Excel): son todos los contactos del rango, no la muestra
+    // acotada de `sampleContacts`, y engordaría la respuesta que consume la
+    // vista de Campañas en cada refresco.
+    const leadTrail = includeLeadTrail
+      ? await this.#buildLeadTrail(contacts, campaigns, campaignByAd)
+      : undefined;
+
     return {
       generatedAt: new Date().toISOString(),
       range: { from, to },
+      ...(leadTrail ? { leadTrail } : {}),
       kpis: {
         activeCampaigns: campaigns.filter((c) => c.status === 'activa').length,
         totalConversations: contacts.length,
