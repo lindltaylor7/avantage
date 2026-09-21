@@ -1,6 +1,7 @@
+import { fileURLToPath } from 'url';
 import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
-import { buildQuotationDocument, formatQuoteNumber } from './quotationDocument.js';
+import { BRAND_MARK_CID, BRAND_MARK_PATH, buildQuotationDocument, formatQuoteNumber } from './quotationDocument.js';
 dotenv.config();
 
 /**
@@ -191,7 +192,7 @@ export class EmailService {
    * imprimible del Funnel de Ventas).
    */
   buildHtmlQuote({ quote, lead }) {
-    return buildQuotationDocument({ quote, lead, forPrint: false });
+    return buildQuotationDocument({ quote, lead, forPrint: false, forEmail: true });
   }
 
   /**
@@ -210,7 +211,16 @@ export class EmailService {
       from: fromAddress,
       to: recipientEmail,
       subject: `💰 Cotización ${quoteNumber} — Avantage Group`,
-      html: htmlContent
+      html: htmlContent,
+      // El símbolo va adjunto y referenciado por `cid:` desde el HTML: es la
+      // única forma en que Gmail lo muestra (bloquea tanto las imágenes
+      // `data:` como el `<svg>` inline). `cid` lo deja como adjunto embebido,
+      // así que no aparece como archivo suelto en el correo.
+      attachments: [{
+        filename: 'avantage-group.png',
+        path: fileURLToPath(BRAND_MARK_PATH),
+        cid: BRAND_MARK_CID
+      }]
     };
 
     try {

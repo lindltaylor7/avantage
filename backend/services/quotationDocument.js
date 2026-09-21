@@ -11,6 +11,8 @@
  * casi nunca imprimen a sangre completa.
  */
 
+import { readFileSync } from 'fs';
+
 /* Datos fijos de la empresa (tomados de la plantilla oficial de cotización). */
 export const COMPANY = {
   legalName: 'Avantage Group S.A.C.',
@@ -54,6 +56,41 @@ const C = {
   muted: '#5d5e51',
   brick: '#b23a2c'
 };
+
+/**
+ * Símbolo "AG" oficial, embebido como data URI: la cotización se manda por
+ * correo y se imprime desde el navegador, así que no puede referenciar un
+ * archivo servido aparte.
+ *
+ * Es solo el símbolo, sin la palabra "AVANTAGE": el encabezado ya compone el
+ * nombre con texto propio (en blanco sobre el fondo oscuro), y el logo
+ * completo lo duplicaría — además de que su palabra en olivo no se leería
+ * sobre casi negro. El logo entero vive en logo-avantage.png y lo usa el
+ * contrato, que va sobre papel blanco.
+ *
+ * Si el archivo falta, se sigue dibujando la marca vectorial de respaldo.
+ */
+/**
+ * Ruta e identificador del símbolo para el envío por CORREO.
+ *
+ * En el correo no sirve el data URI: Gmail y varios clientes bloquean las
+ * imágenes `data:` (igual que estiraban el `<svg>` inline que había antes, que
+ * tampoco llegaba a verse). Lo que sí renderizan es una imagen adjunta
+ * referenciada por `cid:`, así que el mismo PNG se manda adjunto y el
+ * documento lo apunta por ese identificador. Ver `sendQuoteEmail`.
+ */
+export const BRAND_MARK_CID = 'avantage-mark';
+export const BRAND_MARK_PATH = new URL('../assets/logo-avantage-mark.png', import.meta.url);
+
+const BRAND_MARK = (() => {
+  try {
+    const png = readFileSync(BRAND_MARK_PATH);
+    return `data:image/png;base64,${png.toString('base64')}`;
+  } catch {
+    console.warn('⚠️ [Cotizaciones] No se encontró backend/assets/logo-avantage-mark.png: se usará la marca vectorial de respaldo.');
+    return null;
+  }
+})();
 
 export function esc(value) {
   return String(value ?? '')
@@ -123,12 +160,14 @@ export function agMarkPaths({ mono = false } = {}) {
     <path d="M53 30 L61 30" fill="none" stroke="${arc}" stroke-width="5" stroke-linecap="round"/>`;
 }
 
-function brandLogo({ dark = true } = {}) {
+function brandLogo({ dark = true, markSrc = null } = {}) {
   const wordColor = dark ? '#ffffff' : C.ink;
   const groupColor = dark ? '#cfcfc6' : C.muted;
   return `
     <div class="q-logo">
-      <svg class="q-logo__mark" viewBox="0 0 70 58" role="img" aria-label="Avantage Group">${agMarkPaths()}</svg>
+      ${markSrc
+        ? `<img class="q-logo__mark" src="${markSrc}" alt="Avantage Group">`
+        : `<svg class="q-logo__mark" viewBox="0 0 70 58" role="img" aria-label="Avantage Group">${agMarkPaths()}</svg>`}
       <span class="q-logo__text">
         <span class="q-logo__word" style="color:${wordColor}">AVANTAGE</span>
         <span class="q-logo__group">
@@ -139,7 +178,8 @@ function brandLogo({ dark = true } = {}) {
     </div>`;
 }
 
-function monogram(cls) {
+function monogram(cls, markSrc) {
+  if (markSrc) return `<img class="${cls}" src="${markSrc}" alt="" aria-hidden="true">`;
   return `<svg class="${cls}" viewBox="0 0 70 58" aria-hidden="true">${agMarkPaths({ mono: true })}</svg>`;
 }
 
@@ -149,8 +189,11 @@ function monogram(cls) {
  * @param {object} params.quote  Fila de la tabla `quotes`.
  * @param {object} params.lead   Fila de la tabla `leads` asociada.
  * @param {boolean} [params.forPrint]  Muestra la barra con el botón "Imprimir".
+ * @param {boolean} [params.forEmail]  Apunta el símbolo al adjunto `cid:` en
+ *   vez de al data URI, que los clientes de correo bloquean.
  */
-export function buildQuotationDocument({ quote, lead, forPrint = false }) {
+export function buildQuotationDocument({ quote, lead, forPrint = false, forEmail = false }) {
+  const markSrc = forEmail ? `cid:${BRAND_MARK_CID}` : BRAND_MARK;
   const currency = quote.currency || 'PEN';
   const quantity = Number(quote.quantity || 1);
   const total = Number(quote.amount || 0);
@@ -267,7 +310,7 @@ export function buildQuotationDocument({ quote, lead, forPrint = false }) {
 
   /* ─── Logo ─── */
   .q-logo { display: flex; align-items: center; gap: 13px; }
-  .q-logo__mark { width: 50px; height: 47px; flex: none; }
+  .q-logo__mark { height: 44px; width: auto; flex: none; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .q-logo__text { display: flex; flex-direction: column; gap: 4px; }
   .q-logo__word { font-size: 21px; font-weight: 700; letter-spacing: 5.5px; line-height: 1; }
   .q-logo__group { display: flex; align-items: center; gap: 7px; font-size: 8px; font-weight: 600; letter-spacing: 3.5px; padding-left: 3px; }
@@ -277,7 +320,7 @@ export function buildQuotationDocument({ quote, lead, forPrint = false }) {
   /* ─── Cuerpo ─── */
   .q-body { flex: 1; padding: 26px 30px 22px; position: relative; }
   .q-watermark {
-    position: absolute; right: -14px; top: 40px; width: 230px; height: 214px;
+    position: absolute; right: -14px; top: 40px; width: 230px; height: auto;
     opacity: 0.06; z-index: 0; pointer-events: none;
   }
   .q-body > *:not(.q-watermark) { position: relative; z-index: 1; }
@@ -361,7 +404,7 @@ export function buildQuotationDocument({ quote, lead, forPrint = false }) {
   .q-pay__chip { font-size: 7.5px; font-weight: 800; letter-spacing: 0.5px; color: #fff; padding: 2px 6px; border-radius: 3px; }
   .q-pay__bank span { font-size: 9px; font-weight: 700; color: #fff; }
   .q-pay__line { font-size: 8.5px; color: #cfcfc6; line-height: 1.5; }
-  .q-foot-mark { position: absolute; right: 10px; bottom: -14px; width: 132px; height: 124px; opacity: 0.1; z-index: 0; }
+  .q-foot-mark { position: absolute; right: 10px; bottom: -14px; width: 132px; height: auto; opacity: 0.1; z-index: 0; }
 
   /* ─── Barra de impresión (solo pantalla) ─── */
   .q-printbar { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 16px 12px 4px; text-align: center; }
@@ -397,7 +440,7 @@ ${printBar}
 <div class="q-sheet">
 
   <header class="q-head">
-    <div class="q-head__brand">${brandLogo({ dark: true })}</div>
+    <div class="q-head__brand">${brandLogo({ dark: true, markSrc })}</div>
     <div class="q-head__seam"></div>
     <div class="q-head__meta">
       <div class="q-title">
@@ -413,7 +456,7 @@ ${printBar}
   </header>
 
   <div class="q-body">
-    ${monogram('q-watermark')}
+    ${monogram('q-watermark', markSrc)}
 
     <div class="q-intro">
       <div class="q-client">
@@ -496,7 +539,7 @@ ${printBar}
           <div class="q-pay__line">${esc(m.account)}<br>${esc(m.cci)}</div>
         </div>`).join('')}
     </div>
-    ${monogram('q-foot-mark')}
+    ${monogram('q-foot-mark', markSrc)}
   </footer>
 
 </div>
