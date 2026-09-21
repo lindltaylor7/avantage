@@ -4,7 +4,7 @@ import { WhatsappBotSettingsService } from './whatsappBotSettingsService.js';
 import { buildKnowledgeBlock, meetingDurationLabel } from './whatsappBotPromptDefaults.js';
 import { MIN_BOOKING_LEAD_MINUTES } from './googleCalendarService.js';
 import { normalizeUniversity } from './universityNormalizer.js';
-import { criticalSignal } from './leadSignals.js';
+import { criticalSignal, isTrustDoubt } from './leadSignals.js';
 import { coalesceTimeFragments } from './messageFragments.js';
 import * as whatsappBotCopy from '../copy/whatsappBotCopy.js';
 import { evaluateQualification, normalizeAcademicStatus, normalizeCycle, normalizeThesisSituation } from './leadQualification.js';
@@ -184,6 +184,31 @@ function collapseDuplicatePreposition(text) {
 // Seguimiento por inactividad: si el contacto deja a Avan "en visto" 1 hora,
 // se le manda un recordatorio; si sigue una hora más sin responder, el lead
 // se mueve a "Congelado" en el Setter Funnel y el bot deja de insistir.
+// Silencio mínimo tras un mensaje del CONTACTO que quedó sin respuesta para
+// considerarlo un turno perdido del bot y reintentarlo. Es mucho más corto
+// que el recordatorio de inactividad (una hora) porque esto no es un lead que
+// se tomó su tiempo: es una respuesta que se cayó, y cada minuto que pasa la
+// hace más rara de recibir. El piso son cinco minutos para no pisar un turno
+// que TODAVÍA se está procesando (el LLM más lento no llega ni a un minuto).
+const MISSED_REPLY_RECOVERY_MS = 5 * 60 * 1000;
+
+// Más allá de esto no se reintenta nada: WhatsApp no deja que el negocio
+// escriba fuera de la ventana de 24 h desde el último mensaje del contacto
+// sin una plantilla aprobada, así que el envío fallaría igual. Lo que quede
+// más viejo es trabajo para una persona, no para un reintento automático.
+const MISSED_REPLY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Un wa_id de WhatsApp real es solo dígitos (con o sin "+"). El simulador del
+ * panel usa ids sintéticos ("sim-jc-...", "test-flow-..."), que sí quedan
+ * guardados en la tabla de mensajes porque el motor conversacional necesita
+ * el hilo — pero reintentarles un turno perdido no tiene ningún destinatario
+ * del otro lado: el envío falla contra la API y el lead recuperado no existe.
+ */
+function isRealWaId(waId) {
+  return /^\+?\d{7,20}$/.test(String(waId || '').trim());
+}
+
 const INACTIVITY_NUDGE_MS = 60 * 60 * 1000;
 const INACTIVITY_FREEZE_MS = 60 * 60 * 1000;
 
@@ -1319,6 +1344,15 @@ export class WhatsappBotService {
     // crítica no es excepción — justamente ahí ya hay una persona respondiendo.
     if (session?.bot_enabled && await this._handleCriticalSignal(waId, session, incomingText)) return;
 
+    // Misma idea que la señal crítica, un escalón más abajo: dudar de que la
+    // empresa exista no es una queja (no se escala a una persona de entrada),
+    // pero tampoco puede quedar en manos de lo que improvise el LLM. Va acá,
+    // ANTES del enrutado por estado, para que valga igual en la conversación
+    // libre y en pleno agendamiento — que es justo donde apareció el caso
+    // real ("En tu perfil dice España") y donde el paso pendiente empujaba a
+    // contestar de pasada y volver al horario en la misma burbuja.
+    if (session?.bot_enabled && await this._handleTrustDoubt(waId, session, incomingText)) return;
+
     // El estado pudo cambiar mientras este turno esperaba en la cola
     // serializada (p. ej. un turno anterior ya pasó a ofrecer agendar). En ese
     // caso no se corre otro turno de conversación libre: se redirige el
@@ -1779,6 +1813,48 @@ export class WhatsappBotService {
    *
    * Devuelve true si ya se atendió el mensaje (el turno no debe continuar).
    */
+  /**
+   * El lead pone en duda que la empresa sea real o que esté en Perú
+   * ("¿no están en Perú?", "en tu perfil dice España", "no me da confianza").
+   * Devuelve true si consumió el turno — quien llama no debe seguir.
+   *
+   * Es el mensaje que decide si el lead sigue o se va, así que se responde
+   * con datos verificables y con el turno ENTERO: no se le pega el paso
+   * pendiente detrás. Antes, esta duda caía en el clasificador de preguntas
+   * sueltas del agendamiento y salía como `respuesta + "Volviendo a los
+   * horarios: 1. 4:30..."` en la misma burbuja — el lead leyó que su duda
+   * estorbaba y no volvió a escribir. El horario se vuelve a pedir solo, en
+   * el turno siguiente, por el camino normal de "respondió otra cosa".
+   *
+   * A la segunda duda ya no se insiste con los mismos datos: si después de
+   * ver el RUC y la dirección sigue dudando, lo que falta no es información
+   * sino una persona.
+   */
+  async _handleTrustDoubt(waId, session, incomingText) {
+    if (!isTrustDoubt(incomingText)) return false;
+
+    // Un "1" o un correo suelto nunca son una duda, por más que el texto
+    // rime con el patrón: si el paso actual ya puede leer el mensaje como su
+    // dato, manda el paso.
+    if (isObviousStepAnswer(session.status, incomingText)) return false;
+
+    const answers = typeof session.answers === 'string' ? JSON.parse(session.answers) : (session.answers || {});
+    const asked = Number(answers.__trustDoubts || 0) + 1;
+    answers.__trustDoubts = asked;
+    await this.updateSession(waId, { answers: JSON.stringify(answers) });
+
+    this.logActivity({ type: 'trust_doubt', waId, text: incomingText, attempt: asked });
+
+    if (asked >= 2) {
+      await this.send(waId, whatsappBotCopy.trustDoubtHandoff());
+      await this.handOffToAdvisor(waId, 'El lead sigue dudando de que la empresa sea real después de recibir el RUC y la dirección. Necesita hablar con una persona antes de avanzar.');
+      return true;
+    }
+
+    await this.send(waId, whatsappBotCopy.trustCredentials());
+    return true;
+  }
+
   async _handleCriticalSignal(waId, session, incomingText) {
     const signal = criticalSignal(incomingText);
     if (!signal) return false;
@@ -3353,11 +3429,53 @@ ${numberedList(fullSlotLabels(offer))}
       )
       : new Set();
 
+    // Quién habló ÚLTIMO en cada conversación candidata. Sin este dato el
+    // barrido trataba todo silencio como inactividad del lead y le mandaba
+    // "¿Sigues por ahí?" incluso cuando el que había dejado de responder era
+    // el bot — le reclamaba al contacto un silencio propio (caso real: un
+    // lead contestó "Soy de administracion", no recibió nada, y una hora
+    // después le llegó el recordatorio). Un mensaje saliente también lo
+    // registra el asesor que responde a mano desde WhatsApp Business
+    // (recordOutboundEcho), así que una conversación ya atendida por una
+    // persona tampoco entra por acá.
+    //
+    // Se ordena por `id` (orden de inserción) y no por `received_at`: dos
+    // mensajes del mismo segundo son indistinguibles por fecha, y acá lo que
+    // importa es exactamente cuál fue el último.
+    const lastUnanswered = new Map();
+    if (candidateWaIds.length > 0) {
+      const lastIds = await db('whatsapp_messages')
+        .whereIn('wa_id', candidateWaIds)
+        .groupBy('wa_id')
+        .max('id as last_id');
+      const lastRows = await db('whatsapp_messages')
+        .whereIn('id', lastIds.map((r) => r.last_id))
+        .select('wa_id', 'direction', 'body', 'received_at');
+      for (const row of lastRows) {
+        if (row.direction !== 'inbound') continue;
+        lastUnanswered.set(row.wa_id, { text: row.body || '', at: row.received_at });
+      }
+    }
+
     const limaHour = Number(LIMA_TIME_FORMATTER.format(new Date(now)).slice(0, 2));
     const isQuietHours = limaHour < NUDGE_QUIET_END_HOUR || limaHour >= NUDGE_QUIET_START_HOUR;
 
     for (const session of awaitingReply) {
       if (withUpcomingMeeting.has(session.wa_id)) continue;
+
+      // El último mensaje es del contacto: esto NO es inactividad del lead,
+      // es un turno que el bot perdió. No le corresponde un recordatorio
+      // (sería reclamarle a él), sino reintentar la respuesta que le debemos.
+      const unanswered = isRealWaId(session.wa_id) ? lastUnanswered.get(session.wa_id) : null;
+      if (unanswered) {
+        // El silencio se mide desde el mensaje sin responder y no desde
+        // `updated_at` de la sesión: si el turno se cayó antes de guardar
+        // nada, esa marca quedó vieja y no dice hace cuánto escribió.
+        if (now - new Date(unanswered.at).getTime() < MISSED_REPLY_RECOVERY_MS) continue;
+        if (isQuietHours) continue;
+        await this._recoverMissedReply(session, unanswered.text);
+        continue;
+      }
 
       const silentMs = now - new Date(session.updated_at).getTime();
       if (silentMs < INACTIVITY_NUDGE_MS) continue;
@@ -3399,10 +3517,149 @@ ${numberedList(fullSlotLabels(offer))}
     for (const session of awaitingFreeze) {
       if (withUpcomingMeeting.has(session.wa_id)) continue;
 
+      // Red de seguridad: congelar por inactividad a alguien que escribió y
+      // se quedó esperando es la misma injusticia que mandarle "¿Sigues por
+      // ahí?", y encima silenciosa. En teoría no pasa (clearNudge borra
+      // `nudge_sent_at` apenas el contacto escribe, así que la fila vuelve al
+      // bucle de arriba), pero si alguna carrera lo deja acá, se atiende como
+      // lo que es: un turno perdido.
+      const unanswered = isRealWaId(session.wa_id) ? lastUnanswered.get(session.wa_id) : null;
+      if (unanswered) {
+        if (now - new Date(unanswered.at).getTime() < MISSED_REPLY_RECOVERY_MS) continue;
+        if (isQuietHours) continue;
+        await this._recoverMissedReply(session, unanswered.text);
+        continue;
+      }
+
       const silentSinceNudgeMs = now - new Date(session.nudge_sent_at).getTime();
       if (silentSinceNudgeMs < INACTIVITY_FREEZE_MS) continue;
 
       await this.freezeStaleSession(session);
+    }
+
+    await this._recoverOrphanInbounds(now, isQuietHours);
+  }
+
+  /**
+   * Mensajes entrantes de contactos que NO tienen ninguna sesión del bot.
+   *
+   * Los dos bucles de arriba solo ven conversaciones con sesión, así que el
+   * peor caso de todos se les escapaba: el mensaje que nunca llegó a
+   * procesarse. Pasa porque el buffer de agrupación vive en memoria — si el
+   * proceso se reinicia mientras un mensaje espera ahí, se pierde sin dejar
+   * sesión, sin respuesta y sin recordatorio (el barrido tampoco lo veía),
+   * y nadie se entera. Caso real: un lead mandó el formulario completo a las
+   * 19:12 y no recibió absolutamente nada, ni el saludo ni el recordatorio.
+   *
+   * Sin sesión no hay dónde anotar el intento, así que la reserva es la fila
+   * misma: se inserta la sesión ANTES de responder (con `onConflict ignore`,
+   * que además resuelve la carrera con un mensaje nuevo del contacto), y así
+   * el próximo barrido ya no lo ve como huérfano aunque el turno falle.
+   * `started_at` se deja en NULL a propósito: es lo que marca el primer turno
+   * real, y este contacto todavía no tuvo ninguno.
+   */
+  async _recoverOrphanInbounds(now, isQuietHours) {
+    if (isQuietHours) return;
+
+    const rows = await db('whatsapp_messages')
+      .whereNotNull('wa_id')
+      .where('wa_id', '!=', '')
+      .where('received_at', '>=', new Date(now - MISSED_REPLY_MAX_AGE_MS))
+      .whereNotExists(function () {
+        this.select(db.raw('1'))
+          .from('whatsapp_bot_sessions')
+          .whereRaw('whatsapp_bot_sessions.wa_id = whatsapp_messages.wa_id');
+      })
+      .groupBy('wa_id')
+      .max('id as last_id');
+
+    if (rows.length === 0) return;
+
+    const lastRows = await db('whatsapp_messages')
+      .whereIn('id', rows.map((r) => r.last_id))
+      .select('wa_id', 'direction', 'body', 'received_at');
+
+    for (const row of lastRows) {
+      // Un saliente al final sin sesión es un asesor respondiendo a mano
+      // desde WhatsApp Business: ahí ya hay una persona, el bot no entra.
+      if (row.direction !== 'inbound' || !isRealWaId(row.wa_id)) continue;
+      if (now - new Date(row.received_at).getTime() < MISSED_REPLY_RECOVERY_MS) continue;
+
+      const inserted = await db('whatsapp_bot_sessions')
+        .insert({
+          wa_id: row.wa_id,
+          status: 'active',
+          bot_enabled: true,
+          answers: JSON.stringify({}),
+          missed_reply_at: db.fn.now()
+        })
+        .onConflict('wa_id')
+        .ignore();
+      // Knex devuelve [] (o [0], según el motor) cuando el conflicto se
+      // ignoró: la sesión apareció entre la consulta y el insert, así que de
+      // este contacto se encarga el flujo normal.
+      if (Array.isArray(inserted) ? (inserted.length === 0 || !inserted[0]) : !inserted) continue;
+
+      this.logActivity({ type: 'orphan_inbound_recovered', waId: row.wa_id, text: row.body });
+
+      try {
+        await this.send(row.wa_id, whatsappBotCopy.missedReplyApology());
+        await this.runSerialized(row.wa_id, () => this.runConversationTurn(row.wa_id, row.body || ''));
+      } catch (error) {
+        console.error(`❌ [WhatsApp Bot] Error al recuperar el mensaje sin procesar de ${row.wa_id}:`, error);
+      }
+    }
+  }
+
+  /**
+   * Reintenta un turno que el bot perdió: el contacto escribió, no recibió
+   * nada, y ya pasó el margen de `MISSED_REPLY_RECOVERY_MS`.
+   *
+   * Solo se reintenta UNA vez por conversación. La reserva es la misma que la
+   * del recordatorio (el UPDATE lleva la condición `missed_reply_at IS NULL`,
+   * así que dos barridos solapados no pueden reintentar el mismo turno dos
+   * veces). Si la fila ya estaba reservada, quiere decir que el reintento
+   * anterior tampoco dejó respuesta: ahí se corta y pasa a un asesor, porque
+   * lo que ya falló dos veces solo no se arregla — y el lead lleva rato
+   * esperando algo que nunca llegó.
+   *
+   * La disculpa sale como mensaje aparte y ANTES de reintentar el turno: la
+   * demora es nuestra y se dice así, en vez de preguntarle al contacto si
+   * sigue ahí.
+   */
+  async _recoverMissedReply(session, lastText) {
+    const waId = session.wa_id;
+
+    const claimed = await db('whatsapp_bot_sessions')
+      .where({ id: session.id })
+      .whereNull('missed_reply_at')
+      .update({ missed_reply_at: db.fn.now() });
+
+    if (!claimed) {
+      this.logActivity({ type: 'missed_reply_handoff', waId, text: lastText });
+      try {
+        await this.send(waId, whatsappBotCopy.missedReplyHandoff());
+      } catch (error) {
+        // Que no se pueda mandar el acuse no puede impedir la transferencia:
+        // justamente el problema es que los envíos a este contacto fallan.
+        console.error(`❌ [WhatsApp Bot] Error al avisar del turno perdido a ${waId}:`, error);
+      }
+      await this.handOffToAdvisor(waId, 'El bot dejó un mensaje de este lead sin responder y el reintento automático tampoco salió. Retomar la conversación a mano.');
+      return;
+    }
+
+    this.logActivity({ type: 'missed_reply_recovered', waId, text: lastText });
+
+    try {
+      await this.send(waId, whatsappBotCopy.missedReplyApology());
+      // Se reencola por la cola serializada del contacto, igual que un
+      // mensaje nuevo: si justo ahora entrara otro mensaje suyo, los dos
+      // turnos se ordenan en vez de pisarse.
+      await this.runSerialized(waId, () => this.runConversationTurn(waId, lastText));
+    } catch (error) {
+      // El próximo barrido verá que el último mensaje SIGUE siendo del
+      // contacto y, con la fila ya reservada, lo pasará a un asesor.
+      console.error(`❌ [WhatsApp Bot] Error al reintentar el turno perdido de ${waId}:`, error);
     }
   }
 

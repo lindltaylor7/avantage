@@ -6,6 +6,8 @@
  * exacta importa (precio, handoffs, etc.) — se va completando fase a fase.
  */
 
+import { COMPANY } from '../services/quotationDocument.js';
+
 /**
  * F1 — Primera vez que un lead pregunta por el precio: NO se da un número ni
  * un rango (decisión del equipo comercial: el precio se reserva y el foco
@@ -90,4 +92,65 @@ export function lowCycleRejection() {
 
 export function instituteFieldRejection() {
   return 'Gracias por escribirnos 🙌 En institutos solo podemos evaluar casos de administración, negocios o educación, y por ahora tu especialidad no está dentro de las áreas que atendemos. ¡Te deseamos mucho éxito en tu proceso! 💪';
+}
+
+/**
+ * El lead duda de que la empresa sea real o de que esté en Perú (ver
+ * `isTrustDoubt` en leadSignals.js). Tres decisiones deliberadas acá:
+ *
+ * 1. NO se minimiza la duda. "Sin problema" —lo que el bot contestaba antes—
+ *    le dice a alguien que está evaluando si lo están estafando que su
+ *    pregunta no era importante.
+ * 2. Solo datos verificables, no adjetivos. "Somos una empresa formal" no lo
+ *    puede comprobar nadie; un RUC que se consulta en SUNAT, sí. Salen de
+ *    COMPANY, la misma fuente que firma cotizaciones y contratos, así que no
+ *    pueden contradecir a los documentos reales.
+ * 3. El texto NO trae el cierre pegado. Volver a pedir el horario en la misma
+ *    burbuja es lo que confirma la sospecha de que habla con un vendedor
+ *    automático al que la duda le estorba — quien llama se encarga de que
+ *    este turno se gaste entero en responder.
+ *
+ * Tampoco se inventa por qué el perfil de WhatsApp puede figurar con otro
+ * país: no lo sabemos, y una explicación falsa acá cuesta más que no darla.
+ */
+export function trustCredentials() {
+  return (
+    'Es una duda totalmente válida, y prefiero que lo verifiques tú mismo antes de avanzar 🙌\n\n' +
+    `Somos *${COMPANY.legalName}*, con RUC *${COMPANY.ruc}* — lo puedes consultar en la página de SUNAT.\n` +
+    `📍 Nuestra oficina está en ${COMPANY.address}, ${COMPANY.addressCity}.\n` +
+    `🌐 ${COMPANY.website}\n\n` +
+    'El trabajo se formaliza con un contrato de prestación de servicios. Si quieres revisar algo más antes de seguir, dímelo con confianza.'
+  );
+}
+
+/**
+ * Vuelve a dudar después de que ya se le dieron las credenciales. Insistir
+ * con los mismos datos no va a cerrar una desconfianza que sigue ahí: lo que
+ * la cierra es una persona. Se le pasa a un asesor.
+ */
+export function trustDoubtHandoff() {
+  return 'Entiendo que quieras estar seguro antes de avanzar, y haces bien en preguntarlo 🙌';
+}
+
+/**
+ * El bot dejó un mensaje del contacto sin responder (una caída del LLM, un
+ * envío fallido, un turno que se perdió) y el barrido lo detecta después.
+ *
+ * Va ANTES de la respuesta real, no en lugar de ella: el turno se reintenta
+ * igual. Y la demora se reconoce como propia — el mensaje que salía antes en
+ * esta situación era el recordatorio de inactividad ("¿Sigues por ahí?"), que
+ * le preguntaba al contacto por un silencio que era del bot.
+ */
+export function missedReplyApology() {
+  return 'Perdona la demora 🙏';
+}
+
+/**
+ * Segundo turno perdido con el mismo contacto: el reintento automático
+ * tampoco salió. No se intenta una tercera vez — lo que falla ya no se
+ * arregla solo. Como los demás acuses previos a un handoff, este NO anuncia
+ * la transferencia: eso lo dice `handOffToAdvisor` en el mensaje siguiente.
+ */
+export function missedReplyHandoff() {
+  return 'Perdona la demora, se me quedó tu mensaje sin responder 🙏';
 }

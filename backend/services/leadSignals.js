@@ -101,3 +101,36 @@ export function criticalSignal(text) {
   }
   return null;
 }
+
+/**
+ * Duda sobre la legitimidad de la empresa: "¿no están en Perú?", "en tu
+ * perfil dice España", "¿esto es real?", "no me da confianza", "¿dónde
+ * quedan?".
+ *
+ * NO es una señal crítica y por eso vive fuera de `SIGNAL_TESTS`: escalarla a
+ * una persona sería tratar como incendio lo que casi siempre es una pregunta
+ * razonable, y de paso inundaría al equipo con cada "¿dónde están ubicados?".
+ * Lo que necesita es lo contrario de una evasiva: datos verificables (razón
+ * social, RUC, dirección) en un mensaje que no traiga el cierre pegado
+ * detrás — ver `whatsappBotCopy.trustCredentials()`.
+ *
+ * Caso real: "No está en Perú?" seguido de "En tu perfil dice España". El bot
+ * contestó "Sin problema, somos Avantage Group con oficina en Perú pero
+ * trabajamos con clientes en diferentes países" y, en la MISMA burbuja, le
+ * volvió a pedir que eligiera horario. El lead no volvió a escribir. Quien
+ * pregunta esto está evaluando si lo están estafando: el turno se gasta
+ * entero en responderle, y el horario se vuelve a pedir después.
+ *
+ * "Estafa"/"fraude" no están acá a propósito: eso ya no es una duda sino una
+ * acusación, y `COMPLAINT_RE` lo escala a una persona (que es lo correcto).
+ */
+const TRUST_DOUBT_RE = /no\s+(?:estan?|son)\s+(?:de|en)\s+peru|(?:tu|el|su)\s+perfil\s+dice|(?:numero|prefijo|codigo)\s+(?:es\s+)?(?:de\s+)?(?:otro\s+pais|extranjero|españa|espana|mexico|colombia)|de\s+(?:que|donde)\s+pais\s+(?:son|eres|escriben|me\s+escribes)|donde\s+(?:quedan|estan)\s+(?:ubicad|situad)|donde\s+(?:queda|esta)\s+(?:su|la)\s+oficina|(?:esto|esta\s+empresa|su\s+empresa|ustedes)\s+(?:es|son)\s+real(?:es)?|es\s+(?:esto\s+)?real|son\s+(?:una\s+)?empresa\s+(?:formal|real|legal)|tienen\s+(?:ruc|oficina|local|direccion)|(?:estan|estas)\s+registrad|no\s+(?:me\s+)?(?:da|dan|inspira)\s+confianza|(?:me\s+)?(?:da|genera)\s+desconfianza|no\s+(?:confio|me\s+fio)|(?:son|es|seran)\s+confiables?|como\s+(?:se|puedo\s+saber)\s+(?:que|si)\s+(?:no\s+)?(?:es|son|me)\s+(?:seguro|confiable|estafa|real)|no\s+los?\s+conozco|nunca\s+(?:los\s+|les\s+)?(?:he\s+)?(?:escuchado|oido|visto|vi)\b|tienen\s+(?:pagina|web|sitio|redes)/;
+
+/**
+ * True si el mensaje pone en duda que la empresa sea real o esté en Perú.
+ * Se evalúa antes que el LLM: la respuesta a esto no puede quedar sujeta a lo
+ * que el modelo improvise, porque es el mensaje que decide si el lead sigue.
+ */
+export function isTrustDoubt(text) {
+  return TRUST_DOUBT_RE.test(normalize(text));
+}
