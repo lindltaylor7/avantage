@@ -192,6 +192,23 @@
                 {{ isPublishing ? 'Publicando...' : 'Publicar Actualización' }}
               </button>
             </div>
+
+            <!-- El entregable se sube igual, pero el cliente no lo descarga
+                 hasta que Finanzas verifique la cuota que se elija acá. -->
+            <div v-if="newUpdateFile" class="update-gate">
+              <label class="form-label">Se libera al cliente con…</label>
+              <select v-model="newUpdateIncomeId" class="form-select" :disabled="isLocked">
+                <option value="">Sin condición — descargable apenas se publique</option>
+                <option v-for="p in payments" :key="p.id" :value="p.id" :disabled="p.estado === 'verificado'">
+                  Cuota {{ p.cuota }} · S/ {{ formatMoney(p.monto) }} · vence {{ formatDate(p.due_date) }}
+                  {{ p.estado === 'verificado' ? '(ya verificada)' : '' }}
+                </option>
+              </select>
+              <p class="update-gate-hint">
+                El cliente ve el avance en su portal con el adjunto bloqueado; sube su comprobante
+                y, cuando Finanzas lo verifica, la descarga se habilita sola.
+              </p>
+            </div>
           </form>
         </div>
 
@@ -213,6 +230,11 @@
               >
                 📎 {{ update.attachment_original_name }} ({{ formatFileSize(update.attachment_size) }})
               </button>
+              <p v-if="update.income_id" class="update-gate-state" :class="{ 'is-open': !update.is_locked }">
+                {{ update.is_locked ? '🔒 Bloqueado para el cliente' : '🔓 Liberado al cliente' }}
+                — cuota {{ update.unlock_cuota }} (S/ {{ formatMoney(update.unlock_monto) }}),
+                {{ update.is_locked ? `en estado "${update.unlock_estado}"` : 'verificada por Finanzas' }}.
+              </p>
             </div>
           </div>
         </div>
@@ -249,6 +271,8 @@ const deadlineInput = ref('');
 const collaboratorToAdd = ref('');
 const newUpdateContent = ref('');
 const newUpdateFile = ref(null);
+const newUpdateIncomeId = ref('');
+const payments = ref([]);
 const isPublishing = ref(false);
 const isUploadingVoucher = ref(false);
 
@@ -330,6 +354,14 @@ async function fetchUpdates() {
   updates.value = data.updates || [];
 }
 
+/** Cronograma del proyecto: alimenta el selector "se libera con la cuota…". */
+async function fetchPayments() {
+  const response = await apiFetch(`/api/projects/${props.id}/payments`);
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Error al obtener el cronograma de pagos.');
+  payments.value = data.payments || [];
+}
+
 async function fetchTeamDirectory() {
   const response = await apiFetch('/api/team-directory');
   const data = await response.json();
@@ -340,7 +372,7 @@ async function fetchTeamDirectory() {
 async function loadAll() {
   loadError.value = '';
   try {
-    await Promise.all([fetchProject(), fetchTasks(), fetchUpdates(), fetchTeamDirectory()]);
+    await Promise.all([fetchProject(), fetchTasks(), fetchUpdates(), fetchPayments(), fetchTeamDirectory()]);
   } catch (err) {
     loadError.value = err.message;
   }
@@ -421,6 +453,7 @@ async function publishUpdate() {
     const formData = new FormData();
     formData.append('content', content);
     if (newUpdateFile.value) formData.append('attachment', newUpdateFile.value);
+    if (newUpdateFile.value && newUpdateIncomeId.value) formData.append('incomeId', newUpdateIncomeId.value);
 
     const response = await apiFetch(`/api/projects/${props.id}/updates`, {
       method: 'POST',
@@ -432,6 +465,7 @@ async function publishUpdate() {
     updates.value.unshift(data.update);
     newUpdateContent.value = '';
     newUpdateFile.value = null;
+    newUpdateIncomeId.value = '';
     const fileInput = document.querySelector('.update-file-input');
     if (fileInput) fileInput.value = '';
   } catch (err) {
@@ -455,6 +489,14 @@ async function downloadAttachment(update) {
   } catch (err) {
     alert('No se pudo descargar el adjunto: ' + err.message);
   }
+}
+
+/** Fecha corta de una cuota ("12 oct 2026"); las del backend vienen como YYYY-MM-DD. */
+function formatDate(value) {
+  if (!value) return 'sin fecha';
+  const [y, m, d] = String(value).slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d) return 'sin fecha';
+  return new Date(y, m - 1, d).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
 function formatDateTime(isoStr) {
@@ -807,6 +849,30 @@ onMounted(() => {
   color: var(--text-muted);
   max-width: 260px;
 }
+
+/* Condición de liberación del entregable: el adjunto se sube igual, pero el
+   cliente no lo descarga hasta que Finanzas verifique la cuota elegida. */
+.update-gate {
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--border-color);
+}
+
+.update-gate-hint {
+  margin: 0.4rem 0 0;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.update-gate-state {
+  margin: 0.55rem 0 0;
+  font-size: 0.73rem;
+  line-height: 1.45;
+  color: var(--accent-amber, var(--text-muted));
+}
+
+.update-gate-state.is-open { color: var(--accent-emerald); }
 
 .timeline-list {
   position: relative;

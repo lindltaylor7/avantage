@@ -6,7 +6,7 @@
         <h3 class="win-title">¡Felicitaciones!</h3>
         <p class="win-subtitle">
           Cerraste el trato con <strong>{{ clientName }}</strong>.
-          Registra el monto del primer pago para abrir el proyecto.
+          Registra el primer pago y deja pactadas las cuotas que faltan.
         </p>
       </div>
 
@@ -42,10 +42,24 @@
             </div>
           </div>
           <p class="win-hint">
-            Si el cliente aún no paga el total, registra aquí solo lo que ya pagó — el resto
-            queda como saldo pendiente y Finanzas puede registrar las siguientes cuotas después,
-            sin que se pueda pasar del precio total.
+            Si el cliente aún no paga el total, registra aquí solo lo que ya pagó y programa
+            abajo las cuotas que faltan.
           </p>
+
+          <div class="form-group win-schedule">
+            <label class="form-label">Cronograma de las cuotas que faltan</label>
+            <PaymentScheduleEditor
+              v-model="installments"
+              :total="totalNumber"
+              :base-amount="montoNumber"
+              :offset="1"
+            />
+            <p class="win-hint">
+              Estas cuotas nacen ya registradas en Finanzas y son las que se imprimen en el
+              contrato del cliente: se pueden reprogramar después desde el contrato o desde
+              Finanzas, mientras no se hayan cobrado.
+            </p>
+          </div>
 
           <div class="win-grid">
             <div class="form-group">
@@ -110,6 +124,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
 import { apiFetch } from '../apiClient.js';
+import PaymentScheduleEditor from './PaymentScheduleEditor.vue';
 
 const props = defineProps({ lead: { type: Object, required: true } });
 const emit = defineEmits(['close', 'won']);
@@ -122,9 +137,17 @@ const totalAmount = ref('');
 const banco = ref('BCP');
 const emitir = ref('boleta');
 const vouchers = ref([]);
+const installments = ref([]);
 const isSaving = ref(false);
 const errorMessage = ref('');
 const montoInput = ref(null);
+
+const totalNumber = computed(() => {
+  const value = Number(totalAmount.value);
+  return Number.isFinite(value) && value > 0 ? value : null;
+});
+
+const montoNumber = computed(() => Number(monto.value) || 0);
 
 const clientName = computed(() => {
   const lead = props.lead;
@@ -163,6 +186,25 @@ async function submit() {
     return;
   }
 
+  const schedule = [];
+  for (const [index, row] of installments.value.entries()) {
+    const value = Number(row.monto);
+    if (!Number.isFinite(value) || value <= 0) {
+      errorMessage.value = `La cuota ${index + 2} del cronograma necesita un monto mayor a 0.`;
+      return;
+    }
+    if (!row.dueDate) {
+      errorMessage.value = `La cuota ${index + 2} del cronograma necesita una fecha de vencimiento.`;
+      return;
+    }
+    schedule.push({ monto: value, dueDate: row.dueDate, emitir: emitir.value, banco: banco.value });
+  }
+  const planned = amount + schedule.reduce((sum, row) => sum + row.monto, 0);
+  if (planned > total + 0.01) {
+    errorMessage.value = `El cronograma suma S/ ${planned.toFixed(2)} y el precio total es S/ ${total.toFixed(2)}.`;
+    return;
+  }
+
   isSaving.value = true;
   errorMessage.value = '';
   try {
@@ -171,6 +213,9 @@ async function submit() {
     fd.append('totalAmount', String(total));
     fd.append('banco', banco.value);
     fd.append('emitir', emitir.value);
+    // El cronograma viaja como JSON porque el mismo POST sube los vouchers
+    // (multipart), que no admite objetos anidados.
+    if (schedule.length > 0) fd.append('installments', JSON.stringify(schedule));
     for (const file of vouchers.value) fd.append('receipts', file);
 
     const response = await apiFetch(`/api/leads/${props.lead.id}/win`, { method: 'POST', body: fd });
@@ -235,6 +280,8 @@ async function submit() {
   text-align: center;
   letter-spacing: 0.02em;
 }
+
+.win-schedule { margin-top: 1rem; }
 
 .win-grid {
   display: grid;

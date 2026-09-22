@@ -56,6 +56,10 @@
             <input v-model="form.fecha" type="date" class="form-input" required />
           </div>
           <div class="form-group">
+            <label class="form-label">Vence</label>
+            <input v-model="form.dueDate" type="date" class="form-input" />
+          </div>
+          <div class="form-group">
             <label class="form-label">Mes</label>
             <input :value="mesPreview" type="text" class="form-input" readonly />
           </div>
@@ -279,10 +283,14 @@
                 class="deal-payment-row"
                 :class="row.estado === 'pagado' ? 'ledger-row-in' : 'ledger-row-pending'"
               >
-                <td class="ledger-date">{{ formatDate(row.fecha) }}</td>
+                <td class="ledger-date">
+                  {{ formatDate(row.fecha) }}
+                  <span v-if="isOverdue(row)" class="ledger-overdue" title="La cuota venció y sigue sin cobrarse">vencida</span>
+                </td>
                 <td>
                   <span class="ledger-eyebrow">{{ row.emitir }}</span>
                   <span class="ledger-stack-main">{{ row.cuota }}</span>
+                  <span v-if="row.due_date" class="ledger-eyebrow">vence {{ formatDate(row.due_date) }}</span>
                 </td>
                 <td class="ledger-num">
                   <span class="ledger-amount-cur">S/</span>
@@ -677,6 +685,7 @@ const totals = computed(() => {
 function emptyForm() {
   return {
     fecha: new Date().toISOString().slice(0, 10),
+    dueDate: new Date().toISOString().slice(0, 10),
     leadId: null,
     cuota: "1era",
     emitir: "factura",
@@ -695,6 +704,13 @@ const mesPreview = computed(() => {
 });
 
 const itfPreview = computed(() => calcItf(form.monto));
+
+/** Cuota pactada cuya fecha ya pasó y que todavía nadie cobró. */
+function isOverdue(row) {
+  if (row.estado === "verificado") return false;
+  const due = dayOnly(row.due_date || "");
+  return Boolean(due) && due < new Date().toISOString().slice(0, 10);
+}
 
 function onFileChange(event) {
   pendingFiles = Array.from(event.target.files || []).slice(0, MAX_RECEIPTS);
@@ -737,6 +753,7 @@ function startEdit(row) {
   resetForm();
   Object.assign(form, {
     fecha: dayOnly(row.fecha),
+    dueDate: dayOnly(row.due_date || row.fecha),
     leadId: row.lead_id ?? null,
     cuota: row.cuota || "1era",
     emitir: row.emitir || "factura",

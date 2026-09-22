@@ -61,6 +61,35 @@ test('buildContractDocument incluye las cláusulas numeradas y marca el borrador
   assert.match(html, /18 de se(p)?tiembre de 2026/);
 });
 
+test('{{cronograma_pagos}} imprime las cuotas pactadas como tabla', () => {
+  const html = buildContractDocument({
+    id: 8,
+    title: 'CONTRATO',
+    status: 'firmado',
+    currency: 'PEN',
+    installments: [
+      { cuota: '1era', monto: '1000.00', due_date: '2026-09-22' },
+      { cuota: '2da', monto: '2000.00', due_date: '2026-12-01' }
+    ],
+    clauses: [{ title: 'CONTRAPRESTACIÓN', body: 'Se pagará así:\n\n{{cronograma_pagos}}' }]
+  });
+  assert.match(html, /<th>Vencimiento<\/th>/);
+  assert.match(html, /<td>1era<\/td>/);
+  assert.match(html, /22 de se(p)?tiembre de 2026/);
+  assert.match(html, /S\/ 2,000\.00/);
+});
+
+test('{{cronograma_pagos}} deja la fila a convenir cuando no hay cuotas pactadas', () => {
+  const html = buildContractDocument({
+    id: 9,
+    title: 'CONTRATO',
+    status: 'borrador',
+    installments: [],
+    clauses: [{ title: 'CONTRAPRESTACIÓN', body: '{{cronograma_pagos}}' }]
+  });
+  assert.match(html, /A convenir entre las partes/);
+});
+
 test('buildContractDocument incluye la firma del locador salvo en contratos anulados', () => {
   const base = { id: 1, title: 'CONTRATO', clauses: [] };
   assert.match(buildContractDocument({ ...base, status: 'borrador' }), /<img src="data:image\/png;base64,/);

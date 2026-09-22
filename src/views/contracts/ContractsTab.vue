@@ -103,6 +103,22 @@
           </div>
         </div>
 
+        <h3 class="ct-section-title">
+          Cronograma de pagos
+          <span v-if="!editing.lead_id" class="ct-section-note">— disponible solo en contratos asociados a un cliente del funnel</span>
+        </h3>
+        <PaymentScheduleEditor
+          v-if="editing.lead_id"
+          v-model="installments"
+          :total="totalNumber"
+          :currency="editing.currency"
+        />
+        <p v-if="editing.lead_id" class="ct-schedule-note">
+          Son las mismas cuotas que Finanzas cobra y que el cliente ve en su portal: lo que se
+          pacte acá se aplica al guardar. Una cuota ya cobrada queda bloqueada.
+          Escribe <code v-pre>{{cronograma_pagos}}</code> en una cláusula para imprimir esta tabla.
+        </p>
+
         <details class="ct-details">
           <summary>Apertura y cierre del contrato</summary>
           <div class="form-group">
@@ -132,6 +148,7 @@ import { computed, onActivated, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { apiFetch } from '../../apiClient.js';
 import ClauseEditor from '../../components/ClauseEditor.vue';
+import PaymentScheduleEditor from '../../components/PaymentScheduleEditor.vue';
 import { contractNumber, request, stripKeys, withKeys } from './contractsApi.js';
 
 const STATUS_LABELS = { borrador: 'Borrador', firmado: 'Firmado', anulado: 'Anulado' };
@@ -150,6 +167,7 @@ const contracts = ref([]);
 const clientLeads = ref([]);
 const templates = ref([]);
 const editing = ref(null);
+const installments = ref([]);
 const savedSnapshot = ref('');
 const search = ref('');
 const newContract = ref({ leadId: route.query.leadId ? Number(route.query.leadId) : '', templateId: '' });
@@ -158,8 +176,26 @@ const isCreating = ref(false);
 const isSaving = ref(false);
 const errorMessage = ref('');
 
-const snapshot = (c) => JSON.stringify([FIELDS.map(([col]) => c[col] ?? ''), stripKeys(c.clauses)]);
+const snapshot = (c) => JSON.stringify([FIELDS.map(([col]) => c[col] ?? ''), stripKeys(c.clauses), schedulePayload()]);
 const isDirty = computed(() => !!editing.value && snapshot(editing.value) !== savedSnapshot.value);
+
+const totalNumber = computed(() => {
+  const value = Number(editing.value?.total_amount);
+  return Number.isFinite(value) && value > 0 ? value : null;
+});
+
+/**
+ * Las cuotas se mandan como las espera la API: `id` para actualizar la cuota
+ * existente, sin `id` para crear una nueva. Las bloqueadas (ya cobradas) viajan
+ * igual, para que el backend sepa que NO se están quitando del cronograma.
+ */
+function schedulePayload() {
+  return installments.value.map((row) => ({
+    id: row.id || undefined,
+    monto: Number(row.monto) || 0,
+    dueDate: row.dueDate
+  }));
+}
 
 const filteredContracts = computed(() => {
   const q = search.value.trim().toLowerCase();
@@ -183,6 +219,15 @@ async function run(task) {
 
 function load(contract) {
   editing.value = { ...contract, clauses: withKeys(contract.clauses) };
+  installments.value = (contract.installments || []).map((row) => ({
+    id: row.id,
+    monto: String(row.monto),
+    dueDate: (row.due_date || row.fecha || '').slice(0, 10),
+    // Una cuota con comprobante o verificada ya no se reprograma desde acá:
+    // el dinero entró y el asiento tiene que seguir cuadrando con el banco.
+    locked: row.estado !== 'pendiente' || (row.receipts || []).length > 0,
+    estado: row.estado
+  }));
   savedSnapshot.value = snapshot(editing.value);
 }
 
@@ -221,6 +266,7 @@ async function save() {
   const ok = await run(async () => {
     const payload = Object.fromEntries(FIELDS.map(([col, field]) => [field, editing.value[col]]));
     payload.clauses = stripKeys(editing.value.clauses);
+    if (editing.value.lead_id) payload.installments = schedulePayload();
     load(await request(`/api/contracts/${editing.value.id}`, { method: 'PUT', body: JSON.stringify(payload) }));
     await refreshList();
     return true;

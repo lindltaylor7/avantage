@@ -428,6 +428,51 @@ export class EmailService {
     }
   }
 
+  /**
+   * Aviso al cliente de que Finanzas verificó su pago y los entregables que
+   * dependían de esa cuota ya se pueden descargar del portal. Se manda al
+   * verificar, no al subir el comprobante: hasta el visto bueno el documento
+   * sigue retenido y avisar antes solo genera un reclamo.
+   */
+  async sendDeliverablesUnlockedEmail(recipientEmail, { name, projectTopic, cuota, monto, documents, portalUrl }) {
+    await this.initPromise;
+
+    const fromAddress = process.env.SMTP_FROM || '"Avantage Group" <tesis@avantagegroup.pe>';
+    const greeting = name ? `Hola ${name},` : 'Hola,';
+    const list = (documents || []).map((d) => `• ${d}`).join('\n');
+    const amount = `S/ ${Number(monto || 0).toFixed(2)}`;
+    const bodyText = `${greeting}\n\nConfirmamos tu pago de la cuota ${cuota} (${amount}) de "${projectTopic}".\n\n` +
+      `Ya puedes descargar desde tu portal:\n${list}\n\n${portalUrl}\n\nAvantage Group`;
+
+    const mailOptions = {
+      from: fromAddress,
+      to: recipientEmail,
+      subject: `✅ Pago confirmado — ya puedes descargar tu avance`,
+      text: bodyText,
+      html: `
+        <div style="font-family: 'Segoe UI', Tahoma, sans-serif; font-size: 15px; color: #0F172A; line-height: 1.6; max-width: 480px;">
+          <p>${greeting}</p>
+          <p>Confirmamos tu pago de la <strong>cuota ${cuota}</strong> (${amount}) de <strong>${projectTopic}</strong>.</p>
+          <p>Ya puedes descargar desde tu portal:</p>
+          <ul>${(documents || []).map((d) => `<li>${d}</li>`).join('')}</ul>
+          <p style="text-align: center; margin: 28px 0;">
+            <a href="${portalUrl}" style="display: inline-block; background: #105EFF; color: #FFFFFF; text-decoration: none; padding: 14px 28px; border-radius: 10px; font-weight: 700;">Ir a mi portal</a>
+          </p>
+          <p>Avantage Group</p>
+        </div>
+      `
+    };
+
+    try {
+      if (!this.transporter) throw new Error('El servidor de correo no está disponible.');
+      const info = await this.transporter.sendMail(mailOptions);
+      return { success: true, messageId: info.messageId, recipient: recipientEmail, previewUrl: nodemailer.getTestMessageUrl(info) || null };
+    } catch (error) {
+      console.error('Error al avisar al cliente de los entregables liberados:', error);
+      return { success: false, error: error.message, recipient: recipientEmail };
+    }
+  }
+
   /** Correo con el link para restablecer la contraseña del portal de clientes. */
   async sendClientPortalResetEmail(recipientEmail, { name, resetUrl }) {
     await this.initPromise;

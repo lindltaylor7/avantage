@@ -54,6 +54,39 @@ timestamp. Cada uno exporta `up()` (aplicar cambio) y `down()` (revertirlo).
 | `20260806000000_alter_projects_lead_id_nullable.js` | `projects.lead_id` pasa a ser opcional, para poder crear proyectos manualmente sin que provengan de un lead ganado. |
 | `20260807000000_alter_leads_add_prospect_fields.js` | Agrega a `leads` los campos detallados de prospecto: datos personales, académicos, ubicación, origen y asesor asignado. |
 | `20260814000000_create_funnel_columns_table.js` | Crea la tabla `funnel_columns`: las etapas (columnas) del Kanban de Leads, antes almacenadas solo en `localStorage` del navegador. Cada fila tiene `key`, `label`, `icon`, `color`, `final` y `position` (orden de despliegue). |
+| `20261015000000_payment_schedule_and_gated_deliverables.js` | Agrega `finance_income.due_date` (la fecha **pactada** de la cuota, distinta de `fecha`, el día en que el dinero entró) y `project_updates.income_id` (la cuota que libera el adjunto de ese avance). Con las dos, el cronograma de pagos que se acuerda al ganar el lead **son** las cuotas de Finanzas, y un entregable puede quedar retenido en el portal del cliente hasta que Finanzas verifique el pago. |
+
+### Cronograma de pagos y entregables bloqueados
+
+El plan de cobro no vive en una tabla propia: **las cuotas del cronograma son las filas de
+`finance_income` del lead**, ordenadas por `due_date`. Así no hay dos verdades sobre cuánto debe
+el cliente, y el mismo plan se edita desde tres sitios sin copiar datos:
+
+1. **Modal de "lead ganado"** (`WinDealModal.vue` → `POST /api/leads/:id/win`): el vendedor
+   registra el primer pago y pacta las cuotas que faltan (monto + vencimiento).
+2. **Contrato** (`ContractsTab.vue` → `PUT /api/contracts/:id`, campo `installments`): se
+   reprograma el mismo plan; el marcador `{{cronograma_pagos}}` imprime la tabla en el documento.
+3. **Finanzas** (pestaña INGRESOS): campo "Vence" en el formulario del ingreso.
+
+Una cuota ya cobrada (`estado` distinto de `pendiente`, o con comprobantes subidos) queda
+bloqueada: no se puede borrar del cronograma ni cambiarle el monto, porque el asiento tiene que
+seguir cuadrando con el banco. La suma del plan nunca puede superar `leads.total_amount`.
+
+El ciclo completo de un entregable retenido:
+
+```
+avance subido con income_id  →  el cliente lo ve en su portal con el adjunto 🔒
+        ↓
+cliente sube su comprobante  →  la cuota pasa a "pagado" (en revisión)
+        ↓
+Finanzas verifica (finance.verify)  →  is_locked pasa a false solo, se habilita la descarga
+                                        y sale el aviso por correo al cliente
+```
+
+`project_updates.is_locked` no se guarda: se deriva del `estado` del ingreso asociado en cada
+lectura (`projectUpdateService`), igual que `projects.is_locked` se deriva del pago inicial. El
+bloqueo se aplica también en la descarga (`GET /api/portal/projects/:id/updates/:updateId/attachment`
+responde 403), no solo en la pantalla.
 
 ## 3. Seeds (datos iniciales de roles, permisos, columnas del funnel y leads de prueba)
 

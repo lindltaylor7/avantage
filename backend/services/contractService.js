@@ -47,6 +47,16 @@ export function cleanClauses(clauses) {
 }
 
 export class ContractService {
+  /**
+   * `financeLedgerService` se inyecta porque el cronograma de pagos del
+   * contrato NO es una copia: son las cuotas reales del lead en Finanzas. Lo
+   * que se pacta acá es lo que se cobra allá, sin sincronizaciones que se
+   * puedan desfasar.
+   */
+  constructor({ financeLedgerService } = {}) {
+    this.financeLedgerService = financeLedgerService;
+  }
+
   async list({ leadId } = {}) {
     const query = db('contracts')
       .leftJoin('leads', 'contracts.lead_id', 'leads.id')
@@ -72,6 +82,9 @@ export class ContractService {
     const contract = await db('contracts').where({ id }).first();
     if (!contract) return null;
     contract.clauses = await db('contract_clauses').where({ contract_id: id }).orderBy('position');
+    contract.installments = contract.lead_id && this.financeLedgerService
+      ? await this.financeLedgerService.listScheduleByLead(contract.lead_id)
+      : [];
     return withIsoDate(contract);
   }
 
@@ -134,6 +147,21 @@ export class ContractService {
       throw Object.assign(new Error('Estado de contrato no válido.'), { status: 400 });
     }
     if (payload.title === null) delete payload.title;
+
+    // El monto total y el cronograma viven en el lead / en Finanzas, no en el
+    // contrato: se guardan primero, y si algo no cuadra (una cuota ya cobrada
+    // que se intenta borrar, un plan que supera el precio) la operación corta
+    // antes de tocar el contrato.
+    const contract = await db('contracts').where({ id }).first();
+    if (!contract) return null;
+    if (contract.lead_id && this.financeLedgerService) {
+      if (payload.total_amount !== undefined) {
+        await this.financeLedgerService.setLeadTotalAmount(contract.lead_id, payload.total_amount);
+      }
+      if (Array.isArray(data.installments)) {
+        await this.financeLedgerService.replaceScheduleForLead(contract.lead_id, data.installments);
+      }
+    }
 
     const updated = await db.transaction(async (trx) => {
       const count = await trx('contracts').where({ id }).update({ ...payload, updated_at: trx.fn.now() });

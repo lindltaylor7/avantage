@@ -5,6 +5,9 @@
 .ct-sidebar, .ct-editor { padding: 20px; }
 .ct-panel-title, .ct-section-title { font-size: 0.95rem; font-weight: 600; color: var(--text-main); margin: 0 0 12px; }
 .ct-section-title { margin-top: 20px; }
+.ct-section-note { font-weight: 400; font-size: 0.75rem; color: var(--text-muted); }
+.ct-schedule-note { margin: 8px 0 0; font-size: 0.75rem; line-height: 1.5; color: var(--text-muted); }
+.ct-schedule-note code { font-family: var(--font-mono); font-size: 0.72rem; }
 .ct-full { width: 100%; }
 .ct-new { padding-bottom: 18px; border-bottom: 1px solid var(--border-color); margin-bottom: 18px; }
 .ct-list-head { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }

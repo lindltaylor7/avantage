@@ -8,7 +8,21 @@ const MESES = [
   'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'
 ];
 
-export const CUOTAS = ['1era', '2da', '3era'];
+/**
+ * Ordinales admitidos para una cuota. Se ampliaron más allá de las tres
+ * originales porque el cronograma que se pacta al cerrar la venta puede
+ * partirse en tantos pagos como acuerden las partes (mensualidades de una
+ * tesis larga, por ejemplo).
+ */
+export const CUOTAS = [
+  '1era', '2da', '3era', '4ta', '5ta', '6ta',
+  '7ma', '8va', '9na', '10ma', '11va', '12va'
+];
+
+/** El ordinal que le toca a la cuota n.º `index + 1` del cronograma. */
+export function cuotaLabel(index) {
+  return CUOTAS[index] || `${index + 1}va`;
+}
 export const EMITIR_OPCIONES = ['factura', 'boleta', 'nrus', 'rxh', 'c. interno'];
 export const BANCOS = ['BCP', 'Interbank', 'Efectivo'];
 export const MONEDAS = ['soles', 'dolares'];
@@ -28,7 +42,24 @@ function calcItf(monto) {
 }
 
 function dayOnly(fecha) {
+  if (fecha instanceof Date) return isoDay(fecha);
   return String(fecha).slice(0, 10);
+}
+
+/**
+ * mysql2 devuelve las columnas DATE como un Date a medianoche LOCAL. Pasarlo
+ * por JSON (UTC) corre el día hacia atrás, y quien lo lea del lado del
+ * servidor recibe un "Mon Sep 22 2026..." que no es una fecha ISO. Las fechas
+ * del cronograma se entregan siempre como "YYYY-MM-DD".
+ */
+function isoDay(value) {
+  if (!value) return null;
+  if (!(value instanceof Date)) return String(value).slice(0, 10);
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+}
+
+function withIsoDates(row) {
+  return { ...row, fecha: isoDay(row.fecha), due_date: isoDay(row.due_date) };
 }
 
 function mesEnLetras(fecha) {
@@ -240,7 +271,7 @@ export class FinanceLedgerService {
    * alta y la edición para que ambas apliquen las mismas reglas (mes e ITF
    * siempre derivados de la fecha y el monto).
    */
-  #normalizeIncome({ fecha, leadId, cuota, emitir, monto, banco, estado, tributario }) {
+  #normalizeIncome({ fecha, dueDate, leadId, cuota, emitir, monto, banco, estado, tributario }) {
     if (!fecha) throw new Error('La fecha es obligatoria.');
     if (!CUOTAS.includes(cuota)) throw new Error('La cuota debe ser 1era, 2da o 3era.');
     if (!EMITIR_OPCIONES.includes(emitir)) throw new Error('El campo "emitir" no es válido.');
@@ -254,6 +285,8 @@ export class FinanceLedgerService {
     return {
       mes: mesEnLetras(day),
       fecha: day,
+      // Vencimiento pactado; si no se indica, la cuota vence el día que se asienta.
+      due_date: dueDate ? dayOnly(dueDate) : day,
       lead_id: leadId || null,
       cuota,
       emitir,
@@ -331,6 +364,140 @@ export class FinanceLedgerService {
     }
     await db('finance_income').where({ id }).update(values);
     return this.getIncomeById(id);
+  }
+
+  /**
+   * Cronograma de pagos de un lead: las cuotas pactadas, en orden de
+   * vencimiento. Es lo mismo que sus ingresos de Finanzas — el plan no vive en
+   * otra tabla — pero leído como plan: primero lo que vence antes.
+   */
+  async listScheduleByLead(leadId) {
+    if (!leadId) return [];
+    const rows = await db('finance_income')
+      .where({ lead_id: leadId })
+      .select('*')
+      .orderBy('due_date', 'asc')
+      .orderBy('id', 'asc');
+    return (await attachReceipts(rows, 'finance_income_receipts', 'income_id')).map(withIsoDates);
+  }
+
+  /**
+   * Una cuota ya cobrada (con comprobante subido o verificada por Finanzas) no
+   * se puede borrar ni cambiarle el monto desde el cronograma: el dinero ya
+   * entró y el asiento tiene que seguir cuadrando con el banco. Solo las
+   * cuotas todavía `pendiente` y sin comprobante son editables.
+   */
+  static #isSettled(row) {
+    return row.estado !== 'pendiente' || Number(row.receipt_count) > 0;
+  }
+
+  /**
+   * Reemplaza el cronograma de pagos de un lead por la lista recibida. Es el
+   * método que comparten el cierre de venta (modal "lead ganado") y el
+   * contrato: en los dos lados se edita el MISMO plan, así que lo que se pacta
+   * en el contrato es exactamente lo que Finanzas va a cobrar, sin copiar
+   * datos de un módulo a otro.
+   *
+   * Cada entrada es `{ id?, monto, dueDate, emitir?, banco? }`: con `id` se
+   * actualiza la cuota existente, sin `id` se crea una nueva, y las cuotas que
+   * ya no aparecen en la lista se eliminan (si todavía nadie las cobró). El
+   * ordinal (`cuota`) no se manda: se renumera solo por fecha de vencimiento.
+   */
+  async replaceScheduleForLead(leadId, installments, { createdBy = null } = {}) {
+    if (!leadId) throw new Error('El cronograma necesita un lead asociado.');
+    const lead = await db('leads').where({ id: leadId }).first();
+    if (!lead) throw new Error('Lead no encontrado.');
+
+    const entries = (Array.isArray(installments) ? installments : []).map((item, index) => {
+      const monto = Number(item.monto);
+      if (!Number.isFinite(monto) || monto <= 0) {
+        throw new Error(`La cuota ${index + 1} debe tener un monto mayor a 0.`);
+      }
+      if (!item.dueDate) throw new Error(`La cuota ${index + 1} necesita una fecha de vencimiento.`);
+      return {
+        id: item.id ? Number(item.id) : null,
+        monto: Math.round(monto * 100) / 100,
+        dueDate: dayOnly(item.dueDate),
+        emitir: EMITIR_OPCIONES.includes(item.emitir) ? item.emitir : null,
+        banco: BANCOS.includes(item.banco) ? item.banco : null
+      };
+    });
+
+    if (lead.total_amount != null && entries.length > 0) {
+      const planned = entries.reduce((sum, e) => sum + e.monto, 0);
+      const total = Number(lead.total_amount);
+      if (planned > total + 0.01) {
+        throw new Error(
+          `El cronograma suma S/ ${planned.toFixed(2)} y el precio total del cierre es S/ ${total.toFixed(2)}.`
+        );
+      }
+    }
+
+    const current = await db('finance_income')
+      .where({ lead_id: leadId })
+      .select('finance_income.*')
+      .select(db.raw('(SELECT COUNT(*) FROM finance_income_receipts WHERE income_id = finance_income.id) as receipt_count'));
+    const byId = new Map(current.map((row) => [row.id, row]));
+
+    // Todo lo que rompe reglas se detecta ANTES de escribir nada: un
+    // cronograma se guarda entero o no se guarda.
+    const keptIds = new Set(entries.map((e) => e.id).filter(Boolean));
+    for (const row of current) {
+      if (keptIds.has(row.id)) continue;
+      if (FinanceLedgerService.#isSettled(row)) {
+        throw new Error(`La cuota ${row.cuota} (S/ ${Number(row.monto).toFixed(2)}) ya se cobró: no se puede quitar del cronograma.`);
+      }
+    }
+    for (const entry of entries) {
+      if (!entry.id) continue;
+      const row = byId.get(entry.id);
+      if (!row) throw new Error('Una de las cuotas del cronograma ya no existe.');
+      if (FinanceLedgerService.#isSettled(row) && Math.abs(Number(row.monto) - entry.monto) > 0.01) {
+        throw new Error(`La cuota ${row.cuota} ya se cobró: su monto no se puede cambiar desde el cronograma.`);
+      }
+    }
+
+    const order = [...entries].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+    const ordinalOf = new Map(order.map((entry, index) => [entry, cuotaLabel(index)]));
+    const code = await this.#codeForIncome(leadId, order[0]?.dueDate || dayOnly(new Date().toISOString()));
+
+    for (const row of current) {
+      if (!keptIds.has(row.id)) await this.deleteIncome(row.id);
+    }
+
+    for (const entry of order) {
+      const existing = entry.id ? byId.get(entry.id) : null;
+      if (existing) {
+        const settled = FinanceLedgerService.#isSettled(existing);
+        await db('finance_income').where({ id: existing.id }).update({
+          cuota: ordinalOf.get(entry),
+          due_date: entry.dueDate,
+          // Una cuota cobrada conserva el día en que entró el dinero; una
+          // pendiente se asienta el día que se pactó hasta que se pague.
+          ...(settled ? {} : { fecha: entry.dueDate, mes: mesEnLetras(entry.dueDate), monto: entry.monto, itf: calcItf(entry.monto) }),
+          ...(entry.emitir ? { emitir: entry.emitir } : {}),
+          ...(entry.banco ? { banco: entry.banco } : {})
+        });
+      } else {
+        await db('finance_income').insert({
+          code,
+          mes: mesEnLetras(entry.dueDate),
+          fecha: entry.dueDate,
+          due_date: entry.dueDate,
+          lead_id: leadId,
+          cuota: ordinalOf.get(entry),
+          emitir: entry.emitir || 'boleta',
+          monto: entry.monto,
+          itf: calcItf(entry.monto),
+          banco: entry.banco || 'BCP',
+          estado: 'pendiente',
+          is_initial_payment: false,
+          created_by: createdBy
+        });
+      }
+    }
+
+    return this.listScheduleByLead(leadId);
   }
 
   /**

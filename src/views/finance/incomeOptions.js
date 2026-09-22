@@ -4,7 +4,21 @@
  * backend (`backend/services/financeLedgerService.js`): si allá cambia la
  * lista, aquí el formulario dejaría de validar igual.
  */
-export const CUOTAS = ["1era", "2da", "3era"];
+/**
+ * Ordinales de cuota. La lista crece más allá de las tres originales porque el
+ * cronograma que se pacta al cerrar la venta puede partirse en tantos pagos
+ * como acuerden las partes.
+ */
+export const CUOTAS = [
+  "1era", "2da", "3era", "4ta", "5ta", "6ta",
+  "7ma", "8va", "9na", "10ma", "11va", "12va",
+];
+
+/** El ordinal que le toca a la cuota n.º `index + 1` del cronograma. */
+export function cuotaLabel(index) {
+  return CUOTAS[index] || `${index + 1}va`;
+}
+
 export const EMITIR_OPCIONES = ["factura", "boleta", "nrus", "rxh", "c. interno"];
 export const BANCOS = ["BCP", "Interbank", "Efectivo"];
 

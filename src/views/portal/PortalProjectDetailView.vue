@@ -52,13 +52,30 @@
             <span class="portal-timeline-date">{{ formatDateTime(update.created_at) }}</span>
             <p class="portal-timeline-content">{{ update.content }}</p>
             <button
-              v-if="update.attachment_filename"
+              v-if="update.attachment_filename && !update.is_locked"
               type="button"
               class="portal-timeline-attachment"
               @click="openUpdateAttachment(update)"
             >
               📎 {{ update.attachment_original_name || 'Adjunto' }}
             </button>
+
+            <!-- El documento ya está entregado, pero se habilita recién cuando
+                 confirmamos el pago de la cuota con la que se liberó. -->
+            <div v-else-if="update.attachment_filename" class="portal-timeline-locked">
+              <span class="portal-locked-file">🔒 {{ update.attachment_original_name || 'Documento' }}</span>
+              <p class="portal-locked-text">
+                Se habilita al confirmar el pago de la <strong>cuota {{ update.unlock_cuota }}</strong>
+                (S/ {{ Number(update.unlock_monto || 0).toFixed(2) }}).
+                <template v-if="update.unlock_estado === 'pagado'">
+                  Ya recibimos tu comprobante: lo estamos revisando.
+                </template>
+                <template v-else>
+                  Sube tu comprobante en la pestaña "Pagos".
+                </template>
+              </p>
+              <button type="button" class="portal-locked-cta" @click="activeTab = 'pagos'">Ir a Pagos →</button>
+            </div>
           </li>
         </ol>
       </section>
@@ -66,6 +83,10 @@
       <!-- Pagos -->
       <section v-else class="portal-tab-panel">
         <h2 class="portal-panel-title">Pagos</h2>
+        <p v-if="payments.length > 0" class="portal-payment-summary">
+          Pagado y verificado <strong>S/ {{ paidTotal.toFixed(2) }}</strong>
+          de S/ {{ plannedTotal.toFixed(2) }} en {{ payments.length }} cuota(s).
+        </p>
         <p v-if="payments.length === 0" class="portal-panel-empty">Todavía no hay cuotas registradas para tu proyecto.</p>
         <div v-else class="portal-payment-list">
           <div v-for="payment in payments" :key="payment.id" class="portal-payment-card">
@@ -74,6 +95,10 @@
               <span class="portal-payment-chip" :class="paymentChipClass(payment.estado)">{{ paymentEstadoLabel(payment.estado) }}</span>
             </div>
             <div class="portal-payment-monto">S/ {{ Number(payment.monto).toFixed(2) }}</div>
+            <div class="portal-payment-due" :class="{ 'is-overdue': isOverdue(payment) }">
+              {{ payment.estado === 'verificado' ? 'Pagada' : 'Vence' }} el {{ formatDate(payment.due_date || payment.fecha) }}
+              <span v-if="isOverdue(payment)">· vencida</span>
+            </div>
 
             <div v-if="payment.receipts?.length" class="portal-receipt-list">
               <button
@@ -153,6 +178,26 @@ const statusChipClass = computed(() => {
 function formatDateTime(value) {
   return new Date(value).toLocaleString('es-PE', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
+
+/** Las fechas del cronograma llegan como "YYYY-MM-DD": se arman en local. */
+function formatDate(value) {
+  if (!value) return 'fecha por definir';
+  const [y, m, d] = String(value).slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d) return 'fecha por definir';
+  return new Date(y, m - 1, d).toLocaleDateString('es-PE', { day: '2-digit', month: 'long', year: 'numeric' });
+}
+
+function isOverdue(payment) {
+  if (payment.estado === 'verificado') return false;
+  const due = String(payment.due_date || payment.fecha || '').slice(0, 10);
+  return Boolean(due) && due < new Date().toISOString().slice(0, 10);
+}
+
+const plannedTotal = computed(() => payments.value.reduce((sum, p) => sum + Number(p.monto || 0), 0));
+
+const paidTotal = computed(() => payments.value
+  .filter((p) => p.estado === 'verificado')
+  .reduce((sum, p) => sum + Number(p.monto || 0), 0));
 
 function paymentEstadoLabel(estado) {
   if (estado === 'verificado') return 'Verificado';
@@ -259,6 +304,56 @@ onMounted(loadProject);
 
 .portal-state-msg.is-error {
   color: var(--accent-rose);
+}
+
+/* Entregable retenido: se ve que existe y qué lo libera, pero no se descarga. */
+.portal-timeline-locked {
+  margin-top: 0.6rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--surface-3);
+}
+
+.portal-locked-file {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  color: var(--text-sub);
+}
+
+.portal-locked-text {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.portal-locked-cta {
+  margin-top: 0.5rem;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--primary);
+  cursor: pointer;
+}
+
+.portal-payment-summary {
+  margin: 0 0 0.9rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.portal-payment-due {
+  margin-top: 0.2rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.portal-payment-due.is-overdue {
+  color: var(--accent-rose);
+  font-weight: 600;
 }
 
 .portal-detail-header {

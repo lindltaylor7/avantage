@@ -108,7 +108,6 @@ const clientAccountService = new ClientAccountService();
 const projectService = new ProjectService({ clientAccountService, emailService });
 const taskService = new TaskService();
 const quoteService = new QuoteService();
-const contractService = new ContractService();
 const contractTemplateService = new ContractTemplateService();
 const campaignService = new CampaignService();
 const metaAdsService = new MetaAdsService();
@@ -128,6 +127,8 @@ const scheduledMeetingService = new ScheduledMeetingService();
 const notificationService = new NotificationService();
 const financeService = new FinanceService();
 const financeLedgerService = new FinanceLedgerService();
+// El cronograma de pagos del contrato son las cuotas reales de Finanzas.
+const contractService = new ContractService({ financeLedgerService });
 const whatsappBotService = new WhatsappBotService({ ollamaService, emailService, leadService, whatsappMessageService, settingsService: whatsappBotSettingsService, googleCalendarService, scheduledMeetingService, notificationService });
 const whatsappWebhookService = new WhatsappWebhookService({ botService: whatsappBotService });
 const ycloudWebhookService = new YCloudWebhookService({ botService: whatsappBotService });
@@ -323,7 +324,7 @@ app.get('/api/portal/projects/:id', requireClientAuth, async (req, res) => {
     const [tasks, updates, payments] = await Promise.all([
       taskService.getTasksByProject(project.id),
       projectUpdateService.getUpdatesByProject(project.id),
-      financeLedgerService.listIncomeByLead(project.lead_id)
+      financeLedgerService.listScheduleByLead(project.lead_id)
     ]);
 
     res.json({ project, tasks, updates, payments });
@@ -341,6 +342,16 @@ app.get('/api/portal/projects/:id/updates/:updateId/attachment', requireClientAu
     const update = await projectUpdateService.getUpdateById(req.params.updateId);
     if (!update || update.project_id !== project.id || !update.attachment_filename) {
       return res.status(404).json({ error: 'Adjunto no encontrado.' });
+    }
+    // El bloqueo también se aplica acá, no solo en la pantalla: el cliente ve
+    // que el entregable existe, pero el archivo no sale del servidor hasta
+    // que Finanzas verifique la cuota con la que se libera.
+    if (update.is_locked) {
+      return res.status(403).json({
+        error: `Este documento se habilita cuando confirmemos el pago de la cuota ${update.unlock_cuota} ` +
+          `(S/ ${Number(update.unlock_monto || 0).toFixed(2)}). Sube tu comprobante en la pestaña "Pagos".`,
+        locked: true
+      });
     }
     const filePath = path.join(uploadDir, update.attachment_filename);
     res.download(filePath, update.attachment_original_name || update.attachment_filename);
@@ -722,9 +733,9 @@ app.get('/api/finance/income', requireAuth, requirePermission('finance.view'), a
 
 app.post('/api/finance/income', requireAuth, requirePermission('finance.view'), async (req, res) => {
   try {
-    const { fecha, leadId, cuota, emitir, monto, banco, estado, tributario } = req.body || {};
+    const { fecha, dueDate, leadId, cuota, emitir, monto, banco, estado, tributario } = req.body || {};
     const record = await financeLedgerService.createIncome({
-      fecha, leadId, cuota, emitir, monto, banco, estado, tributario, createdBy: req.user.id
+      fecha, dueDate, leadId, cuota, emitir, monto, banco, estado, tributario, createdBy: req.user.id
     });
     res.status(201).json({ income: record });
   } catch (error) {
@@ -735,9 +746,9 @@ app.post('/api/finance/income', requireAuth, requirePermission('finance.view'), 
 
 app.put('/api/finance/income/:id', requireAuth, requirePermission('finance.view'), async (req, res) => {
   try {
-    const { fecha, leadId, cuota, emitir, monto, banco, estado, tributario } = req.body || {};
+    const { fecha, dueDate, leadId, cuota, emitir, monto, banco, estado, tributario } = req.body || {};
     const record = await financeLedgerService.updateIncome(req.params.id, {
-      fecha, leadId, cuota, emitir, monto, banco, estado, tributario
+      fecha, dueDate, leadId, cuota, emitir, monto, banco, estado, tributario
     });
     if (!record) return res.status(404).json({ error: 'Ingreso no encontrado.' });
     res.json({ income: record });
@@ -779,12 +790,58 @@ app.patch('/api/finance/income/:id/verificacion', requireAuth, requirePermission
       console.log(`💰 [Finanzas] Ingreso ${income.code} ${verified ? 'verificado' : 'sin verificar'}` +
         (project ? ` · proyecto #${project.id} → ${project.status}` : ''));
     }
+
+    // Verificar la cuota es lo que libera los entregables atados a ella. El
+    // aviso al cliente es un efecto secundario: si el correo falla, la
+    // verificación ya quedó hecha y el documento ya está descargable.
+    if (verified) notifyUnlockedDeliverables(income).catch(() => {});
+
     res.json({ income, project });
   } catch (error) {
     console.error('❌ Error al verificar el ingreso:', error);
     res.status(400).json({ error: error.message || 'Error al verificar el ingreso.' });
   }
 });
+
+/**
+ * Avisa al cliente (correo + notificación interna) de que los avances que
+ * esperaban esta cuota ya se pueden descargar de su portal. No lanza: es un
+ * aviso, no parte de la verificación.
+ */
+async function notifyUnlockedDeliverables(income) {
+  try {
+    const project = income.lead_id ? await db('projects').where({ lead_id: income.lead_id }).first() : null;
+    if (!project) return;
+
+    const updates = await db('project_updates')
+      .where({ project_id: project.id, income_id: income.id })
+      .whereNotNull('attachment_filename')
+      .select('attachment_original_name', 'content');
+    if (updates.length === 0) return;
+
+    const documents = updates.map((u) => u.attachment_original_name || u.content.slice(0, 60));
+
+    await notificationService.create({
+      type: 'deliverables_unlocked',
+      title: `${project.topic}: entregables liberados`,
+      body: `La cuota ${income.cuota} (S/ ${Number(income.monto).toFixed(2)}) quedó verificada; ${documents.length} documento(s) ya son descargables por el cliente.`,
+      link: `/admin/projects/${project.id}`
+    });
+
+    if (project.client_email) {
+      await emailService.sendDeliverablesUnlockedEmail(project.client_email, {
+        name: income.lead_name,
+        projectTopic: project.topic,
+        cuota: income.cuota,
+        monto: income.monto,
+        documents,
+        portalUrl: `${(process.env.APP_BASE_URL || '').replace(/\/$/, '')}/portal/proyectos/${project.id}`
+      });
+    }
+  } catch (error) {
+    console.error('❌ Error al avisar de los entregables liberados:', error.message);
+  }
+}
 
 app.delete('/api/finance/income/:id', requireAuth, requirePermission('finance.view'), async (req, res) => {
   try {
@@ -1362,6 +1419,22 @@ app.patch('/api/leads/:id/status', requireAuth, requirePermission('leads.view'),
  * Banco y tipo de comprobante tienen valor por defecto y Finanzas los puede
  * corregir después desde la tabla de ingresos.
  */
+/**
+ * Las cuotas del cronograma llegan como JSON dentro de un `multipart/form-data`
+ * (el mismo POST sube los vouchers), así que hay que parsearlas a mano.
+ * Un cronograma mal formado no puede tumbar el cierre de la venta: se ignora
+ * y el lead se gana igual con su primer pago.
+ */
+function parseInstallments(raw) {
+  if (!raw) return [];
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 app.post('/api/leads/:id/win', requireAuth, requirePermission('leads.view'), uploadFinanceReceipt, async (req, res) => {
   const vouchers = req.receipts || [];
   try {
@@ -1386,8 +1459,10 @@ app.post('/api/leads/:id/win', requireAuth, requirePermission('leads.view'), upl
     const updatedLead = await leadService.updateLeadStatus(lead.id, FUNNEL_FINAL_STATUS);
     const created = await projectService.createProjectFromLead(updatedLead);
 
+    const today = new Date().toISOString().slice(0, 10);
     const income = await financeLedgerService.createIncome({
-      fecha: new Date().toISOString().slice(0, 10),
+      fecha: today,
+      dueDate: today,
       leadId: lead.id,
       cuota: '1era',
       emitir: emitir || 'boleta',
@@ -1405,12 +1480,27 @@ app.post('/api/leads/:id/win', requireAuth, requirePermission('leads.view'), upl
       withVoucher = await financeLedgerService.getIncomeById(income.id);
     }
 
+    // Las cuotas que faltan por cobrar quedan pactadas desde el minuto cero,
+    // cada una con su vencimiento: es el cronograma que después se imprime en
+    // el contrato y que el cliente ve en su portal. El primer pago ya creado
+    // entra en la lista para que no se le renumere ni se le duplique.
+    let schedule = [withVoucher];
+    const installments = parseInstallments(req.body?.installments);
+    if (installments.length > 0) {
+      schedule = await financeLedgerService.replaceScheduleForLead(
+        lead.id,
+        [{ id: withVoucher.id, monto: withVoucher.monto, dueDate: today, emitir: withVoucher.emitir, banco: withVoucher.banco }, ...installments],
+        { createdBy: req.user.id }
+      );
+    }
+
     // Se relee el proyecto ya con su pago inicial: el bloqueo se deriva del
     // ingreso, que no existía cuando se creó el proyecto unas líneas antes.
     const project = await projectService.getProjectById(created.id);
 
-    console.log(`🏆 [Ventas] Lead #${lead.id} ganado · proyecto #${project.id} · ingreso ${withVoucher.code} (${withVoucher.estado})`);
-    res.status(201).json({ lead: updatedLead, project, income: withVoucher });
+    console.log(`🏆 [Ventas] Lead #${lead.id} ganado · proyecto #${project.id} · ingreso ${withVoucher.code} (${withVoucher.estado})` +
+      ` · cronograma de ${schedule.length} cuota(s)`);
+    res.status(201).json({ lead: updatedLead, project, income: withVoucher, schedule });
   } catch (error) {
     vouchers.forEach((f) => financeLedgerService.discardUploadedFile(f));
     console.error('❌ Error al registrar el cierre de venta:', error);
@@ -2789,7 +2879,11 @@ async function guardProjectManageable(projectId, res) {
       res.status(404).json({ error: 'Proyecto no encontrado.' });
       return false;
     }
-    return true;
+    // Devuelve el proyecto (no `true`) para que quien lo necesite —atar un
+    // avance a una cuota del cliente— no lo tenga que volver a leer. Los
+    // callers que solo cortan con `if (!await guard(...)) return;` siguen
+    // funcionando igual: un proyecto es un valor verdadero.
+    return project;
   } catch (error) {
     if (error.code === 'PROJECT_LOCKED') {
       res.status(409).json({ error: error.message, projectLocked: true });
@@ -2994,21 +3088,77 @@ app.get('/api/projects/:id/updates', requireAuth, requirePermission('projects.vi
  */
 app.post('/api/projects/:id/updates', requireAuth, requirePermission('projects.view'), uploadProjectUpdateAttachment, async (req, res) => {
   try {
-    const { content } = req.body;
+    const { content, incomeId } = req.body;
     if (!content || !content.trim()) {
       return res.status(400).json({ error: 'El contenido de la actualización es requerido.' });
     }
-    if (!await guardProjectManageable(req.params.id, res)) return;
+    const project = await guardProjectManageable(req.params.id, res);
+    if (!project) return;
+
+    // Si el avance se entrega contra una cuota, tiene que ser una cuota DE
+    // ESTE cliente: de lo contrario el adjunto se liberaría con el pago de
+    // otro proyecto.
+    let unlockIncomeId = null;
+    if (incomeId) {
+      const income = await financeLedgerService.getIncomeById(incomeId);
+      if (!income || income.lead_id !== project.lead_id) {
+        return res.status(400).json({ error: 'La cuota indicada no pertenece a este proyecto.' });
+      }
+      unlockIncomeId = income.id;
+    }
+
     const update = await projectUpdateService.createUpdate({
       projectId: req.params.id,
       authorId: req.user.id,
       content: content.trim(),
-      attachment: req.file || null
+      attachment: req.file || null,
+      incomeId: unlockIncomeId
     });
     res.json({ update });
   } catch (error) {
     console.error('❌ Error al publicar la actualización:', error);
     res.status(500).json({ error: 'Error al publicar la actualización.', details: error.message });
+  }
+});
+
+/**
+ * Cronograma de pagos del proyecto: alimenta el selector "se libera con la
+ * cuota…" del formulario de avances y la vista de cobros del proyecto.
+ */
+app.get('/api/projects/:id/payments', requireAuth, requirePermission('projects.view'), async (req, res) => {
+  try {
+    const project = await projectService.getProjectById(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Proyecto no encontrado.' });
+    const payments = await financeLedgerService.listScheduleByLead(project.lead_id);
+    res.json({ payments });
+  } catch (error) {
+    console.error('❌ Error al obtener el cronograma del proyecto:', error);
+    res.status(500).json({ error: 'Error al obtener el cronograma del proyecto.', details: error.message });
+  }
+});
+
+/**
+ * Ata (o desata, mandando `incomeId: null`) un avance ya publicado a la cuota
+ * que libera su adjunto, sin tener que volver a subir el archivo.
+ */
+app.patch('/api/project-updates/:id/unlock-income', requireAuth, requirePermission('projects.view'), async (req, res) => {
+  try {
+    const update = await projectUpdateService.getUpdateById(req.params.id);
+    if (!update) return res.status(404).json({ error: 'Actualización no encontrada.' });
+    if (!await guardProjectManageable(update.project_id, res)) return;
+
+    const { incomeId } = req.body || {};
+    if (incomeId) {
+      const project = await projectService.getProjectById(update.project_id);
+      const income = await financeLedgerService.getIncomeById(incomeId);
+      if (!income || income.lead_id !== project.lead_id) {
+        return res.status(400).json({ error: 'La cuota indicada no pertenece a este proyecto.' });
+      }
+    }
+    res.json({ update: await projectUpdateService.setUnlockIncome(req.params.id, incomeId || null) });
+  } catch (error) {
+    console.error('❌ Error al atar el avance a una cuota:', error);
+    res.status(400).json({ error: error.message || 'Error al atar el avance a una cuota.' });
   }
 });
 

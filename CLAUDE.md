@@ -99,6 +99,16 @@ antes de tocar el arranque de producción.
 - Los **proyectos** tienen tareas (`tasks`, N:1) cuyo `% avance = completadas / total`, colaboradores
   (N:N vía `project_collaborators`), un líder (`leader_id` → `users`) y una línea de tiempo de
   hitos con adjuntos opcionales (`project_updates`).
+- El **cronograma de pagos** no tiene tabla propia: son las filas de `finance_income` del lead,
+  ordenadas por `due_date` (la fecha *pactada*, distinta de `fecha`, el día en que entró el dinero).
+  El mismo plan se edita desde el modal de "lead ganado", desde el contrato (campo `installments`
+  del `PUT /api/contracts/:id`, que imprime la tabla con el marcador `{{cronograma_pagos}}`) y desde
+  Finanzas — `financeLedgerService.replaceScheduleForLead()` es el único camino, y rechaza quitar o
+  cambiar el monto de una cuota ya cobrada, o pasarse de `leads.total_amount`.
+- Un hito de la línea de tiempo puede atarse a una cuota (`project_updates.income_id`): el cliente
+  lo ve en su portal con el adjunto **bloqueado** hasta que Finanzas verifique ese pago. Como
+  `projects.is_locked`, el `is_locked` del hito se deriva del estado del ingreso en cada lectura —
+  nunca se guarda— y la descarga del portal lo verifica también en el servidor (403).
 - **RBAC**: `roles` ↔ `permissions` (N:N vía `role_permissions`) ↔ `users` (N:1 vía `role_id`). Los
   permisos son "herramientas" habilitables (`leads.view`, `projects.view`, `roles.manage`,
   `finance.view`, ...); se resuelven una vez en el login y se embeben en el JWT.

@@ -161,12 +161,30 @@ const BLOCK_PLACEHOLDERS = {
   cuentas_bancarias: () => [
     'Banco | Moneda | Titular y número de cuenta',
     ...PAYMENT_METHODS.map((m) => `${m.bank} | Soles | ${COMPANY.legalName} ${m.account}${m.cci ? ` — ${m.cci}` : ''}`)
-  ].join('\n')
+  ].join('\n'),
+
+  /**
+   * El cronograma que se imprime es el mismo que Finanzas va a cobrar (las
+   * cuotas del lead), no una tabla escrita a mano en la cláusula: si alguien
+   * reprograma un pago, el contrato reimpreso ya sale con la fecha nueva.
+   */
+  cronograma_pagos: (contract) => {
+    const rows = contract?.installments || [];
+    const symbol = contract?.currency === 'USD' ? 'US$' : 'S/';
+    if (rows.length === 0) return 'Cuota | Vencimiento | Monto\n | A convenir entre las partes | ';
+    return [
+      'Cuota | Vencimiento | Monto',
+      ...rows.map((r) => {
+        const amount = Number(r.monto).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        return `${r.cuota} | ${formatLongDate(r.due_date || r.fecha) || 'Por definir'} | ${symbol} ${amount}`;
+      })
+    ].join('\n');
+  }
 };
 
-function expandBlockPlaceholders(text) {
+function expandBlockPlaceholders(text, contract) {
   return String(text || '').replace(/\{\{\s*([a-z_]+)\s*\}\}/g, (match, key) => (
-    BLOCK_PLACEHOLDERS[key] ? BLOCK_PLACEHOLDERS[key]() : match
+    BLOCK_PLACEHOLDERS[key] ? BLOCK_PLACEHOLDERS[key](contract) : match
   ));
 }
 
@@ -230,8 +248,8 @@ function listBlock(block, values) {
  * separan por línea en blanco y cada uno se imprime como tabla, lista de
  * viñetas o párrafo, según su forma.
  */
-function paragraphs(text, values) {
-  return expandBlockPlaceholders(text)
+function paragraphs(text, values, contract) {
+  return expandBlockPlaceholders(text, contract)
     .split(/\n\s*\n/)
     .map((p) => p.trim())
     .filter(Boolean)
@@ -259,7 +277,7 @@ export function buildContractDocument(contract) {
   const clauses = (contract.clauses || []).map((clause, i) => `
     <section class="c-clause">
       <h3><span>${clauseOrdinal(i + 1)}:</span> ${esc(clause.title)}</h3>
-      ${paragraphs(clause.body, values)}
+      ${paragraphs(clause.body, values, contract)}
     </section>`).join('');
 
   return `<!DOCTYPE html>
@@ -353,10 +371,10 @@ export function buildContractDocument(contract) {
     </header>
 
     <h1>${esc(contract.title || 'CONTRATO')}</h1>
-    ${contract.intro ? `<div class="c-intro">${paragraphs(contract.intro, values)}</div>` : ''}
+    ${contract.intro ? `<div class="c-intro">${paragraphs(contract.intro, values, contract)}</div>` : ''}
     ${clauses}
     <div class="c-signoff">
-      ${contract.closing ? `<div class="c-closing">${paragraphs(contract.closing, values)}</div>` : ''}
+      ${contract.closing ? `<div class="c-closing">${paragraphs(contract.closing, values, contract)}</div>` : ''}
       <div class="c-signatures">
         <div class="c-sign"><div class="c-sign-area">${showSignature ? `<img src="${LESSOR_SIGNATURE}" alt="Firma y sello de EL LOCADOR">` : ''}</div><i></i><b>EL LOCADOR</b>${lessorCaption}</div>
         <div class="c-sign"><div class="c-sign-area"></div><i></i><b>EL CLIENTE</b>${esc(contract.client_name || BLANK)}<br>DNI ${esc(contract.client_dni || BLANK)}</div>
