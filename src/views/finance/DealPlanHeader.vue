@@ -1,12 +1,24 @@
 <template>
-  <div class="deal-plan">
-    <div class="deal-id">
-      <span class="deal-code" title="Código del cliente: lo comparten todas sus cuotas">
+  <div class="deal-plan" :class="{ 'is-collapsed': collapsed }">
+    <!-- Plegado, el cierre se lee de un vistazo: nombre, precio y barra. Los
+         detalles y las acciones aparecen al abrirlo. -->
+    <button
+      type="button"
+      class="deal-toggle"
+      :aria-expanded="!collapsed"
+      :title="collapsed ? 'Ver las cuotas de este cierre' : 'Ocultar las cuotas'"
+      @click="emit('toggle')"
+    >
+      <span class="deal-caret" :class="{ 'is-open': !collapsed }">▸</span>
+    </button>
+
+    <div class="deal-id" @click="emit('toggle')">
+      <span v-if="!collapsed" class="deal-code" title="Código del cliente: lo comparten todas sus cuotas">
         {{ group.code }}
       </span>
       <span class="deal-name">{{ group.leadName }}</span>
       <span class="deal-meta">
-        <span v-if="group.leadDni">DNI {{ group.leadDni }}</span>
+        <span v-if="group.leadDni && !collapsed">DNI {{ group.leadDni }}</span>
         <span>{{ group.payments.length }} {{ group.payments.length === 1 ? "cuota" : "cuotas" }}</span>
       </span>
     </div>
@@ -30,7 +42,13 @@
         <span class="deal-total-label">Precio total</span>
         <strong v-if="group.total != null" class="deal-total-value">S/ {{ formatAmount(group.total) }}</strong>
         <span v-else class="deal-total-value is-empty">sin definir</span>
-        <button type="button" class="deal-edit-btn" title="Editar el precio total del cierre" @click="startEditTotal">
+        <button
+          v-if="!collapsed"
+          type="button"
+          class="deal-edit-btn"
+          title="Editar el precio total del cierre"
+          @click="startEditTotal"
+        >
           ✎
         </button>
       </template>
@@ -42,7 +60,7 @@
         <span class="deal-bar-seg is-porverificar" :style="{ width: segWidth(group.porVerificar) }"></span>
         <span class="deal-bar-seg is-pendiente" :style="{ width: segWidth(group.pendiente) }"></span>
       </div>
-      <p class="deal-caption">
+      <p v-if="!collapsed" class="deal-caption">
         <strong>{{ pctCubierto }}%</strong> cubierto ·
         <i class="dot is-verificado"></i> verificado S/ {{ formatAmount(group.verificado) }} ·
         <i class="dot is-porverificar"></i> por verificar S/ {{ formatAmount(group.porVerificar) }} ·
@@ -50,12 +68,12 @@
         <i class="dot is-saldo"></i> sin registrar S/ {{ formatAmount(group.saldo) }}
       </p>
     </div>
-    <p v-else-if="group.leadId" class="deal-caption deal-no-total">
+    <p v-else-if="group.leadId && !collapsed" class="deal-caption deal-no-total">
       Sin precio total del cierre: regístralo con ✎ para ver cuánto falta por cobrar.
     </p>
 
     <button
-      v-if="group.leadId"
+      v-if="group.leadId && !collapsed"
       type="button"
       class="deal-add-toggle"
       :class="{ 'is-open': isAdding }"
@@ -124,9 +142,11 @@ import { BANCOS, CUOTAS, EMITIR_OPCIONES, calcItf } from "./incomeOptions.js";
 const props = defineProps({
   /** Cierre (lead) con su plan de cobro y las cuotas que se están listando. */
   group: { type: Object, required: true },
+  /** Plegado: solo se muestran nombre, precio total y barra de avance. */
+  collapsed: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(["saved"]);
+const emit = defineEmits(["saved", "toggle"]);
 
 const errorMessage = ref("");
 const isAdding = ref(false);
@@ -234,7 +254,29 @@ async function addPayment() {
   gap: 0.5rem 1.2rem;
 }
 
-.deal-id { display: flex; flex-direction: column; gap: 0.1rem; min-width: 150px; }
+.deal-plan.is-collapsed { gap: 0.5rem 1rem; }
+
+.deal-toggle {
+  flex-shrink: 0;
+  padding: 0.2rem 0.35rem;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  line-height: 1;
+}
+
+.deal-toggle:hover { color: var(--text-main); }
+
+.deal-caret {
+  display: inline-block;
+  font-size: 0.7rem;
+  transition: transform 0.15s ease;
+}
+
+.deal-caret.is-open { transform: rotate(90deg); }
+
+.deal-id { display: flex; flex-direction: column; gap: 0.1rem; min-width: 150px; cursor: pointer; }
 
 .deal-code {
   font-family: var(--font-mono);

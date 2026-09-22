@@ -224,6 +224,12 @@
         </div>
       </dl>
 
+      <div v-if="paged.length > 0" class="ledger-collapse-bar">
+        <button type="button" class="ledger-collapse-btn" @click="toggleAll">
+          {{ allExpanded ? "⌃ Contraer todos" : "⌄ Expandir todos" }}
+        </button>
+      </div>
+
       <div v-if="paged.length === 0" class="empty-state">
         <p class="empty-state-title">Ningún cierre coincide</p>
         <p class="empty-state-text">
@@ -271,14 +277,19 @@
               </tr>
             </thead>
             <tbody v-for="group in paged" :key="group.key" class="deal-group">
-              <tr class="deal-head-row">
+              <tr class="deal-head-row" :class="{ 'is-collapsed': !isExpanded(group) }">
                 <td class="deal-head-cell" :colspan="8">
-                  <DealPlanHeader :group="group" @saved="onPlanSaved" />
+                  <DealPlanHeader
+                    :group="group"
+                    :collapsed="!isExpanded(group)"
+                    @saved="onPlanSaved"
+                    @toggle="toggleGroup(group)"
+                  />
                 </td>
                 <td class="ledger-col-actions"></td>
               </tr>
               <tr
-                v-for="row in group.payments"
+                v-for="row in (isExpanded(group) ? group.payments : [])"
                 :key="row.id"
                 class="deal-payment-row"
                 :class="row.estado === 'pagado' ? 'ledger-row-in' : 'ledger-row-pending'"
@@ -631,7 +642,7 @@ function groupByLead(payments) {
 
 const {
   search, estado: estadoFilter, banco: bancoFilter, sort, page, pageSize,
-  grouped, paged, totalPages, range, toggleSort, sortCaret, clearFilters
+  grouped, paged, totalPages, range, isFiltered, toggleSort, sortCaret, clearFilters
 } = useLedgerTable(rows, {
   searchText: (row) => [row.code, row.lead_name, row.lead_dni, row.cuota, row.emitir, row.tributario, row.banco]
     .filter(Boolean).join(" "),
@@ -643,6 +654,34 @@ const {
   defaultSort: { key: "fecha", dir: "desc" },
   groupBy: groupByLead,
 });
+
+/**
+ * Cierres abiertos. Por defecto están todos plegados —la lista se lee como un
+ * índice de clientes— y las cuotas aparecen al hacer clic. Con una búsqueda o
+ * un filtro activo se abren solos: lo que se está buscando es una cuota, y
+ * esconderla detrás de un clic haría parecer que el filtro no encontró nada.
+ */
+const expandedKeys = ref(new Set());
+
+const allExpanded = computed(() =>
+  paged.value.length > 0 && paged.value.every((group) => isExpanded(group)));
+
+function isExpanded(group) {
+  return isFiltered.value || expandedKeys.value.has(group.key);
+}
+
+function toggleGroup(group) {
+  const next = new Set(expandedKeys.value);
+  if (next.has(group.key)) next.delete(group.key);
+  else next.add(group.key);
+  expandedKeys.value = next;
+}
+
+function toggleAll() {
+  expandedKeys.value = allExpanded.value
+    ? new Set()
+    : new Set(paged.value.map((group) => group.key));
+}
 
 /** La cabecera del cierre agregó un pago o cambió el total: releer ambas cosas. */
 async function onPlanSaved(event) {
@@ -1036,6 +1075,38 @@ onBeforeUnmount(releaseUrls);
 .ledger-tab :deep(.ledger-table) tbody.deal-group:first-of-type > tr.deal-head-row > td {
   border-top: none;
 }
+
+/* Plegado, el bloque es una fila más de la lista: menos alto y sin el relleno
+   de una cabecera de sección. */
+.ledger-tab :deep(.ledger-table) tbody.deal-group > tr.deal-head-row.is-collapsed > td {
+  padding: 0.5rem 1.05rem;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ledger-tab :deep(.ledger-table) tbody.deal-group > tr.deal-head-row.is-collapsed:hover > td {
+  background: var(--surface-1);
+}
+
+/* Barra de "expandir / contraer todos", sobre la tabla. */
+.ledger-collapse-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.4rem;
+}
+
+.ledger-collapse-btn {
+  border: none;
+  background: none;
+  padding: 0.2rem 0.3rem;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.ledger-collapse-btn:hover { color: var(--text-main); }
 
 /* Las cuotas van sangradas para que se lean como parte de su cierre. */
 .ledger-tab :deep(.ledger-table) tr.deal-payment-row > td:first-child {

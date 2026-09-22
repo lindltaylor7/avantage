@@ -214,29 +214,44 @@ export class EmailService {
    * El símbolo viaja adjunto por `cid:` porque los clientes de correo
    * bloquean las imágenes `data:`.
    */
-  async sendPaymentReceiptEmail(recipientEmail, { income, message }) {
+  /**
+   * Comprobante de pago al cliente.
+   *
+   * `includeDocument` decide si va el comprobante que arma el sistema: cuando
+   * Finanzas manda la boleta o factura real (adjunta en `attachments`), el
+   * documento generado sobra y duplicar constancias del mismo pago confunde
+   * al cliente. Con `false` el correo es la nota más los adjuntos.
+   */
+  async sendPaymentReceiptEmail(recipientEmail, { income, message, includeDocument = true, attachments = [] }) {
     await this.initPromise;
 
     const fromAddress = process.env.SMTP_FROM || '"Avantage Group" <tesis@avantagegroup.pe>';
     const number = formatReceiptNumber(income);
-    const document = buildPaymentReceiptDocument({ income, forEmail: true });
+    const document = includeDocument ? buildPaymentReceiptDocument({ income, forEmail: true }) : '';
     // La nota del asesor va ANTES del comprobante: es lo que el cliente lee
     // primero, y el documento queda como constancia debajo.
     const note = (message || '').trim();
-    const htmlContent = note
-      ? `<p style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5">${escapeHtml(note).replace(/\n/g, '<br>')}</p>${document}`
-      : document;
+    const noteHtml = note
+      ? `<p style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5">${escapeHtml(note).replace(/\n/g, '<br>')}</p>`
+      : '';
+    const htmlContent = `${noteHtml}${document}` ||
+      `<p style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5">Adjuntamos el comprobante de tu pago ${escapeHtml(number)}.</p>`;
 
     const mailOptions = {
       from: fromAddress,
       to: recipientEmail,
       subject: `🧾 Comprobante de pago ${number} — Avantage Group`,
       html: htmlContent,
-      attachments: [{
-        filename: 'avantage-group.png',
-        path: fileURLToPath(BRAND_MARK_PATH),
-        cid: BRAND_MARK_CID
-      }]
+      attachments: [
+        // El logo va embebido por CID y solo lo referencia el documento
+        // generado: sin él sería un adjunto fantasma en el correo.
+        ...(includeDocument ? [{
+          filename: 'avantage-group.png',
+          path: fileURLToPath(BRAND_MARK_PATH),
+          cid: BRAND_MARK_CID
+        }] : []),
+        ...attachments
+      ]
     };
 
     try {

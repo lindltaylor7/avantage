@@ -143,4 +143,36 @@ export function uploadFinanceFile(req, res, next) {
   });
 }
 
+/** Máximo de archivos que se pueden adjuntar a un correo saliente. */
+export const MAX_EMAIL_ATTACHMENTS = 5;
+
+/**
+ * Adjuntos de un correo saliente. Van a memoria, NO a disco: se mandan en el
+ * mismo request y no son un registro del sistema, así que guardarlos dejaría
+ * archivos huérfanos en `uploads/` que nadie vuelve a mirar.
+ */
+const emailAttachmentUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: MAX_EMAIL_ATTACHMENTS }
+}).array('attachments', MAX_EMAIL_ATTACHMENTS);
+
+/**
+ * Middleware para rutas que mandan un correo con adjuntos libres (campo
+ * "attachments"). Deja la lista en `req.attachments`, ya en la forma que
+ * espera nodemailer.
+ */
+export function uploadEmailAttachments(req, res, next) {
+  emailAttachmentUpload(req, res, (err) => {
+    if (err) {
+      return res.status(400).json({ error: 'Error al subir el archivo adjunto: ' + err.message });
+    }
+    req.attachments = (req.files || []).map((file) => ({
+      filename: file.originalname,
+      content: file.buffer,
+      contentType: file.mimetype || 'application/octet-stream'
+    }));
+    next();
+  });
+}
+
 export { financeReceiptDir, socialPostImageDir, whatsappMediaDir, campaignAdImageDir };

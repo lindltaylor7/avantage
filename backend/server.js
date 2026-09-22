@@ -44,7 +44,7 @@ import { FinanceLedgerService } from './services/financeLedgerService.js';
 import { ClientAccountService } from './services/clientAccountService.js';
 import { signToken, requireAuth, requirePermission, signGoogleOAuthState, verifyGoogleOAuthState, signClientToken, requireClientAuth } from './middleware/auth.js';
 
-import { uploadProjectUpdateAttachment, uploadDir, uploadFinanceReceipt, uploadFinanceFile, financeReceiptDir, whatsappMediaDir, campaignAdImageDir } from './middleware/upload.js';
+import { uploadProjectUpdateAttachment, uploadDir, uploadFinanceReceipt, uploadFinanceFile, uploadEmailAttachments, financeReceiptDir, whatsappMediaDir, campaignAdImageDir } from './middleware/upload.js';
 import { db } from './db/connection.js';
 
 // Estado del funnel Kanban que marca el fin del proceso comercial: al llegar
@@ -981,21 +981,42 @@ app.get('/api/finance/income/:id/receipt', requireAuth, requirePermission('finan
 });
 
 /** Manda ese mismo comprobante al correo del cliente. */
-app.post('/api/finance/income/:id/receipt/send', requireAuth, requirePermission('finance.view'), async (req, res) => {
+app.post('/api/finance/income/:id/receipt/send', requireAuth, requirePermission('finance.view'), uploadEmailAttachments, async (req, res) => {
   try {
     const { to, message } = req.body || {};
+    const attachments = req.attachments || [];
+    // Por defecto va el comprobante que arma el sistema, como siempre; se
+    // desactiva cuando Finanzas manda la boleta o factura real adjunta.
+    const includeDocument = req.body?.includeDocument !== 'false' && req.body?.includeDocument !== false;
+
     const income = await financeLedgerService.getIncomeById(req.params.id);
-    if (!assertVerifiedIncome(income, res)) return;
+    // La verificación se exige solo para el comprobante generado: es el que
+    // certifica el pago. Mandar la boleta que ya emitió Finanzas, o cualquier
+    // otro archivo, no depende de ese visto bueno.
+    if (includeDocument) {
+      if (!assertVerifiedIncome(income, res)) return;
+    } else if (!income) {
+      return res.status(404).json({ error: 'Ingreso no encontrado.' });
+    }
+
+    if (!includeDocument && attachments.length === 0 && !(message || '').trim()) {
+      return res.status(400).json({
+        error: 'Sin el comprobante generado, adjunta al menos un archivo o escribe un mensaje.'
+      });
+    }
 
     const recipient = (to || '').trim() || income.lead_email;
     if (!recipient) {
       return res.status(400).json({ error: 'No hay un correo de destino (el lead no tiene correo registrado).' });
     }
 
-    const result = await emailService.sendPaymentReceiptEmail(recipient, { income, message });
+    const result = await emailService.sendPaymentReceiptEmail(recipient, {
+      income, message, includeDocument, attachments
+    });
     if (!result.success) return res.status(502).json({ error: result.error || 'No se pudo enviar el correo.' });
 
-    console.log(`🧾 [Finanzas] Comprobante del ingreso ${income.code} enviado a ${recipient}`);
+    console.log(`🧾 [Finanzas] Comprobante del ingreso ${income.code} enviado a ${recipient}` +
+      ` (documento generado: ${includeDocument ? 'sí' : 'no'}, ${attachments.length} adjunto(s))`);
     res.json({ result: { ...result, channel: 'email' } });
   } catch (error) {
     console.error('❌ Error al enviar el comprobante de pago:', error);
