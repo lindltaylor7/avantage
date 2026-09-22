@@ -42,6 +42,7 @@
             <th>Avance</th>
             <th>Fecha Límite</th>
             <th>Creado</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -53,7 +54,6 @@
               <!-- Bloqueado hasta que Finanzas verifique el primer pago -->
               <div v-if="project.is_locked" class="locked-note" :title="lockedTitle(project)">
                 🔒 Esperando la verificación del primer pago
-                (S/ {{ formatMoney(project.initial_payment?.monto) }})
               </div>
             </td>
             <td>
@@ -90,6 +90,9 @@
               <span v-if="isOverdue(project)">⚠️</span>
             </td>
             <td style="white-space: nowrap; color: var(--text-muted); font-size: 0.8rem;">{{ formatDate(project.created_at) }}</td>
+            <td>
+              <button class="btn-secondary row-edit-btn" title="Editar o eliminar el proyecto" @click="openEditModal(project)">✏️</button>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -137,22 +140,13 @@
             <div class="form-group">
               <label class="form-label">Nivel académico</label>
               <select v-model="newProject.academicLevel" class="form-select" required>
-                <option value="Pregrado (Bachiller/Título)">Pregrado (Bachiller / Título)</option>
-                <option value="Posgrado (Maestría)">Posgrado (Maestría)</option>
-                <option value="Posgrado (Doctorado)">Posgrado (Doctorado)</option>
+                <option v-for="level in ACADEMIC_LEVELS" :key="level" :value="level">{{ level }}</option>
               </select>
             </div>
             <div class="form-group">
               <label class="form-label">Carrera / Campo de estudio</label>
               <select v-model="newProject.fieldOfStudy" class="form-select" required>
-                <option value="Ingeniería de Sistemas y Computación">Ingeniería de Sistemas y Computación</option>
-                <option value="Ingeniería Agrónoma y Agroindustrial">Ingeniería Agrónoma y Agroindustrial</option>
-                <option value="Ciencias de la Salud y Medicina">Ciencias de la Salud y Medicina</option>
-                <option value="Administración, Negocios y Finanzas">Administración, Negocios y Finanzas</option>
-                <option value="Derecho y Ciencias Políticas">Derecho y Ciencias Políticas</option>
-                <option value="Educación y Psicología">Educación y Psicología</option>
-                <option value="Ingeniería de Minas y Geología">Ingeniería de Minas y Geología</option>
-                <option value="Ingeniería Ambiental y Ecología">Ingeniería Ambiental y Ecología</option>
+                <option v-for="field in FIELDS_OF_STUDY" :key="field" :value="field">{{ field }}</option>
               </select>
             </div>
             <div class="form-group">
@@ -169,6 +163,68 @@
         </div>
       </div>
     </div>
+
+    <!-- Modal: Editar / Eliminar Proyecto -->
+    <div v-if="editing" class="modal-overlay" @click.self="closeEditModal">
+      <div class="modal-content" style="max-width: 520px;">
+        <div class="modal-header">
+          <h3 style="font-family: var(--font-heading); font-size: 1.05rem; color: var(--text-main); margin: 0;">
+            ✏️ Editar Proyecto
+          </h3>
+          <button class="btn-secondary" style="padding: 0.3rem 0.75rem;" @click="closeEditModal">✕ Cerrar</button>
+        </div>
+        <div class="modal-body">
+          <form @submit.prevent="saveProject">
+            <div class="form-group">
+              <label class="form-label">Proyecto / Tema</label>
+              <input v-model="editing.topic" type="text" class="form-input" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Correo del cliente</label>
+              <input v-model="editing.clientEmail" type="email" class="form-input" required />
+              <p class="form-hint">
+                Es la identidad del cliente en el portal: si lo cambias, se le manda la invitación al correo nuevo.
+              </p>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Celular del cliente</label>
+              <input v-model="editing.clientPhone" type="text" class="form-input" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Nivel académico</label>
+              <select v-model="editing.academicLevel" class="form-select">
+                <option v-for="level in ACADEMIC_LEVELS" :key="level" :value="level">{{ level }}</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Carrera / Campo de estudio</label>
+              <select v-model="editing.fieldOfStudy" class="form-select">
+                <option v-for="field in FIELDS_OF_STUDY" :key="field" :value="field">{{ field }}</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Fecha límite (opcional)</label>
+              <input v-model="editing.deadline" type="date" class="form-input" />
+            </div>
+
+            <div v-if="editError" style="color: var(--accent-rose); font-size: 0.82rem; margin-bottom: 1rem;">{{ editError }}</div>
+
+            <div style="display: flex; gap: 0.6rem;">
+              <button type="submit" class="btn-primary" :disabled="isSaving || isDeleting">
+                {{ isSaving ? 'Guardando...' : 'Guardar cambios' }}
+              </button>
+              <button type="button" class="btn-danger" :disabled="isSaving || isDeleting" @click="deleteProject">
+                {{ isDeleting ? 'Eliminando...' : '🗑️ Eliminar' }}
+              </button>
+            </div>
+            <p class="form-hint" style="margin-top: 0.75rem;">
+              Eliminar borra también sus tareas, su equipo y su línea de tiempo. Los ingresos del cliente
+              siguen registrados en Finanzas.
+            </p>
+          </form>
+        </div>
+      </div>
+    </div>
   </main>
 </template>
 
@@ -178,11 +234,29 @@ import { apiFetch } from '../apiClient.js';
 
 const STATUSES = ['Creado', 'Activo', 'Iniciado', 'En Desarrollo', 'Entregado', 'Cancelado'];
 
+const ACADEMIC_LEVELS = ['Pregrado (Bachiller/Título)', 'Posgrado (Maestría)', 'Posgrado (Doctorado)'];
+
+const FIELDS_OF_STUDY = [
+  'Ingeniería de Sistemas y Computación',
+  'Ingeniería Agrónoma y Agroindustrial',
+  'Ciencias de la Salud y Medicina',
+  'Administración, Negocios y Finanzas',
+  'Derecho y Ciencias Políticas',
+  'Educación y Psicología',
+  'Ingeniería de Minas y Geología',
+  'Ingeniería Ambiental y Ecología'
+];
+
 const projects = ref([]);
 const isLoading = ref(false);
 const loadError = ref('');
 
 const showCreateModal = ref(false);
+// Proyecto que se está editando en el modal (null = modal cerrado).
+const editing = ref(null);
+const editError = ref('');
+const isSaving = ref(false);
+const isDeleting = ref(false);
 const isCreating = ref(false);
 const createError = ref('');
 const newProject = reactive({
@@ -252,10 +326,6 @@ function lockedTitle(project) {
     `el primer pago (${project.initial_payment?.code || 'ingreso'}).`;
 }
 
-function formatMoney(value) {
-  return Number(value || 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
 function progressColor(percentage) {
   if (percentage >= 100) return '#2F7D5A';
   if (percentage >= 50) return '#56624A';
@@ -304,12 +374,112 @@ async function createProject() {
   }
 }
 
+/** Abre el modal con una copia editable: cancelar no debe tocar la tabla. */
+function openEditModal(project) {
+  editError.value = '';
+  editing.value = {
+    id: project.id,
+    topic: project.topic || '',
+    clientEmail: project.client_email || '',
+    clientPhone: project.client_phone || '',
+    academicLevel: project.academic_level || ACADEMIC_LEVELS[0],
+    fieldOfStudy: project.field_of_study || FIELDS_OF_STUDY[0],
+    deadline: project.deadline ? String(project.deadline).slice(0, 10) : ''
+  };
+}
+
+function closeEditModal() {
+  editing.value = null;
+}
+
+async function saveProject() {
+  isSaving.value = true;
+  editError.value = '';
+  try {
+    const response = await apiFetch(`/api/projects/${editing.value.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...editing.value, deadline: editing.value.deadline || null })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Error al guardar el proyecto.');
+
+    const index = projects.value.findIndex((p) => p.id === data.project.id);
+    if (index !== -1) projects.value[index] = { ...projects.value[index], ...data.project };
+    closeEditModal();
+  } catch (err) {
+    editError.value = err.message;
+  } finally {
+    isSaving.value = false;
+  }
+}
+
+async function deleteProject() {
+  const confirmed = window.confirm(
+    `¿Eliminar el proyecto "${editing.value.topic}"?
+
+` +
+    'Se borran sus tareas, su equipo y su línea de tiempo (incluidos los adjuntos). ' +
+    'Los ingresos del cliente siguen en Finanzas. Esta acción no se puede deshacer.'
+  );
+  if (!confirmed) return;
+
+  isDeleting.value = true;
+  editError.value = '';
+  try {
+    const response = await apiFetch(`/api/projects/${editing.value.id}`, { method: 'DELETE' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Error al eliminar el proyecto.');
+
+    projects.value = projects.value.filter((p) => p.id !== editing.value.id);
+    closeEditModal();
+  } catch (err) {
+    editError.value = err.message;
+  } finally {
+    isDeleting.value = false;
+  }
+}
+
 onMounted(() => {
   fetchProjects();
 });
 </script>
 
 <style scoped>
+.row-edit-btn {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.btn-danger {
+  background: rgba(200, 85, 50, 0.12);
+  border: 1px solid rgba(200, 85, 50, 0.4);
+  color: var(--accent-rose);
+  border-radius: 10px;
+  padding: 0.6rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: rgba(200, 85, 50, 0.2);
+}
+
+.btn-danger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.form-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-top: 0.35rem;
+}
+
 .status-summary-chip {
   display: flex;
   align-items: center;

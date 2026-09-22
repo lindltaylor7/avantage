@@ -28,8 +28,7 @@
         <div class="locked-banner-text">
           <h4>⚠️ Esperando la verificación del primer pago</h4>
           <p>
-            El pago de <strong>S/ {{ formatMoney(project.initial_payment?.monto) }}</strong>
-            ({{ project.initial_payment?.code }}) está en estado
+            El primer pago ({{ project.initial_payment?.code }}) está en estado
             <strong>{{ project.initial_payment?.estado }}</strong>. Hasta que Finanzas lo
             verifique, este proyecto es de solo lectura: no se pueden crear tareas, asignar
             equipo ni publicar avances.
@@ -109,7 +108,12 @@
       <div v-if="activeTab === 'tasks'">
         <!-- Agregar tarea (todo) -->
         <div class="glass-panel" style="padding: 1.25rem 1.5rem; margin-bottom: 1.5rem;">
-          <h3 style="font-size: 0.95rem; color: var(--accent-cyan); margin-bottom: 0.75rem;">📝 Agregar Tarea</h3>
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem;">
+            <h3 style="font-size: 0.95rem; color: var(--accent-cyan);">📝 Agregar Tarea</h3>
+            <button type="button" class="btn-secondary" style="padding: 0.35rem 0.8rem; font-size: 0.8rem;" @click="openTemplates">
+              📋 Plantillas
+            </button>
+          </div>
           <form style="display: flex; gap: 0.6rem;" @submit.prevent="addTask">
             <input
               v-model="newTaskTitle"
@@ -123,6 +127,34 @@
               Agregar
             </button>
           </form>
+        </div>
+
+        <!-- Un proyecto sin tareas arranca con la plantilla que le toca (la de
+             su universidad, si hay): se ven las tareas antes de importarlas. -->
+        <div v-if="suggestedTemplate" class="template-suggestion">
+          <div class="template-suggestion-main">
+            <h4>
+              📋 {{ suggestedTemplate.name }}
+              <span v-if="suggestedTemplate.university" class="template-chip">{{ suggestedTemplate.university }}</span>
+            </h4>
+            <p class="template-suggestion-hint">
+              Este proyecto todavía no tiene tareas. La plantilla
+              {{ suggestedTemplate.university ? `de ${suggestedTemplate.university}` : 'general' }}
+              trae {{ suggestedTemplate.items.length }}:
+            </p>
+            <ul class="template-preview">
+              <li v-for="item in suggestedTemplate.items.slice(0, 6)" :key="item.id">{{ item.title }}</li>
+              <li v-if="suggestedTemplate.items.length > 6" class="is-more">
+                + {{ suggestedTemplate.items.length - 6 }} más…
+              </li>
+            </ul>
+          </div>
+          <div class="template-suggestion-actions">
+            <button class="btn-primary" style="width: auto; padding: 0.5rem 1.1rem;" :disabled="isLocked || isImporting" @click="importTemplate(suggestedTemplate)">
+              {{ isImporting ? 'Importando...' : 'Usar estas tareas' }}
+            </button>
+            <button class="btn-secondary" style="padding: 0.5rem 1.1rem;" @click="openTemplates">Ver otras</button>
+          </div>
         </div>
 
         <!-- Kanban de Tareas -->
@@ -200,7 +232,7 @@
               <select v-model="newUpdateIncomeId" class="form-select" :disabled="isLocked">
                 <option value="">Sin condición — descargable apenas se publique</option>
                 <option v-for="p in payments" :key="p.id" :value="p.id" :disabled="p.estado === 'verificado'">
-                  Cuota {{ p.cuota }} · S/ {{ formatMoney(p.monto) }} · vence {{ formatDate(p.due_date) }}
+                  Cuota {{ p.cuota }} · vence {{ formatDate(p.due_date) }}
                   {{ p.estado === 'verificado' ? '(ya verificada)' : '' }}
                 </option>
               </select>
@@ -232,7 +264,7 @@
               </button>
               <p v-if="update.income_id" class="update-gate-state" :class="{ 'is-open': !update.is_locked }">
                 {{ update.is_locked ? '🔒 Bloqueado para el cliente' : '🔓 Liberado al cliente' }}
-                — cuota {{ update.unlock_cuota }} (S/ {{ formatMoney(update.unlock_monto) }}),
+                — cuota {{ update.unlock_cuota }},
                 {{ update.is_locked ? `en estado "${update.unlock_estado}"` : 'verificada por Finanzas' }}.
               </p>
             </div>
@@ -243,11 +275,87 @@
         </div>
       </div>
     </div>
+    <!-- Modal: plantillas de tareas -->
+    <div v-if="showTemplates" class="modal-overlay" @click.self="showTemplates = false">
+      <div class="modal-content" style="max-width: 640px;">
+        <div class="modal-header">
+          <h3 style="font-family: var(--font-heading); font-size: 1.05rem; color: var(--text-main); margin: 0;">
+            📋 Plantillas de tareas
+          </h3>
+          <button class="btn-secondary" style="padding: 0.3rem 0.75rem;" @click="showTemplates = false">✕ Cerrar</button>
+        </div>
+        <div class="modal-body">
+          <div class="template-filters">
+            <input v-model="templateSearch" type="text" class="form-input" placeholder="🔎 Buscar por nombre..." />
+            <select v-model="templateUniversity" class="form-select">
+              <option value="">Todas las universidades</option>
+              <option v-for="uni in templateUniversities" :key="uni" :value="uni">{{ uni }}</option>
+            </select>
+          </div>
+
+          <p v-if="templateError" style="color: var(--accent-rose); font-size: 0.82rem;">{{ templateError }}</p>
+
+          <div v-if="filteredTemplates.length > 0" class="template-list">
+            <div v-for="template in filteredTemplates" :key="template.id" class="template-card">
+              <div class="template-card-main">
+                <h4>
+                  {{ template.name }}
+                  <span v-if="template.university" class="template-chip">{{ template.university }}</span>
+                </h4>
+                <p class="template-card-meta">
+                  {{ template.items.length }} tarea(s) · usada {{ template.times_used }} vez(ces)
+                  <template v-if="template.created_by_name">· {{ template.created_by_name }}</template>
+                </p>
+                <ul class="template-preview">
+                  <li v-for="item in template.items.slice(0, 4)" :key="item.id">{{ item.title }}</li>
+                  <li v-if="template.items.length > 4" class="is-more">+ {{ template.items.length - 4 }} más…</li>
+                </ul>
+              </div>
+              <div class="template-card-actions">
+                <button class="btn-primary" style="width: auto; padding: 0.4rem 0.9rem; font-size: 0.8rem;" :disabled="isLocked || isImporting" @click="importTemplate(template)">
+                  Importar
+                </button>
+                <button class="template-delete-btn" title="Eliminar plantilla" @click="deleteTemplate(template)">🗑️</button>
+              </div>
+            </div>
+          </div>
+          <p v-else class="template-empty">
+            {{ templates.length === 0
+              ? 'Todavía no hay plantillas guardadas. Arma las tareas de un proyecto y guárdalas acá abajo.'
+              : 'Ninguna plantilla coincide con la búsqueda.' }}
+          </p>
+
+          <!-- Guardar las tareas de este proyecto como plantilla nueva -->
+          <div class="template-save">
+            <h4>💾 Guardar las tareas de este proyecto</h4>
+            <p class="template-save-hint">
+              Se guardan las {{ tasks.length }} tarea(s) actuales con su orden. La universidad es opcional:
+              sin ella queda como plantilla general.
+            </p>
+            <div class="template-save-fields">
+              <input v-model="newTemplate.name" type="text" class="form-input" placeholder="Nombre (ej: Tesis pregrado — UNCP)" />
+              <input v-model="newTemplate.university" type="text" class="form-input" list="template-universities" placeholder="Universidad (opcional)" />
+              <datalist id="template-universities">
+                <option v-for="uni in templateUniversities" :key="uni" :value="uni"></option>
+              </datalist>
+            </div>
+            <button
+              class="btn-secondary"
+              style="margin-top: 0.6rem;"
+              :disabled="tasks.length === 0 || !newTemplate.name.trim() || isSavingTemplate"
+              @click="saveCurrentAsTemplate"
+            >
+              {{ isSavingTemplate ? 'Guardando...' : `Guardar ${tasks.length} tarea(s) como plantilla` }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   </main>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted } from 'vue';
 import { apiFetch } from '../apiClient.js';
 
 const props = defineProps({ id: { type: String, required: true } });
@@ -276,16 +384,23 @@ const payments = ref([]);
 const isPublishing = ref(false);
 const isUploadingVoucher = ref(false);
 
+// Plantillas de tareas: conjuntos guardados que se importan al proyecto.
+const templates = ref([]);
+const templateUniversities = ref([]);
+const showTemplates = ref(false);
+const templateSearch = ref('');
+const templateUniversity = ref('');
+const templateError = ref('');
+const isImporting = ref(false);
+const isSavingTemplate = ref(false);
+const newTemplate = reactive({ name: '', university: '' });
+
 /**
  * El proyecto está a la espera de que Finanzas verifique su primer pago. Lo
  * decide el backend (`is_locked`), que además rechaza cualquier cambio: aquí
  * solo se refleja en la UI para no ofrecer botones que van a fallar.
  */
 const isLocked = computed(() => Boolean(project.value?.is_locked));
-
-function formatMoney(value) {
-  return Number(value || 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
 
 /** Atajo para que el responsable del proyecto adjunte el voucher del primer pago. */
 async function uploadVoucher(event) {
@@ -362,6 +477,14 @@ async function fetchPayments() {
   payments.value = data.payments || [];
 }
 
+async function fetchTemplates() {
+  const response = await apiFetch('/api/task-templates');
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Error al obtener las plantillas de tareas.');
+  templates.value = data.templates || [];
+  templateUniversities.value = data.universities || [];
+}
+
 async function fetchTeamDirectory() {
   const response = await apiFetch('/api/team-directory');
   const data = await response.json();
@@ -372,7 +495,7 @@ async function fetchTeamDirectory() {
 async function loadAll() {
   loadError.value = '';
   try {
-    await Promise.all([fetchProject(), fetchTasks(), fetchUpdates(), fetchPayments(), fetchTeamDirectory()]);
+    await Promise.all([fetchProject(), fetchTasks(), fetchUpdates(), fetchPayments(), fetchTeamDirectory(), fetchTemplates()]);
   } catch (err) {
     loadError.value = err.message;
   }
@@ -598,12 +721,266 @@ function progressColor(percentage) {
   return 'var(--surface-4)';
 }
 
+// ----------------------------------------------------- PLANTILLAS DE TAREAS
+
+/** Búsqueda por nombre y universidad sobre las plantillas ya cargadas. */
+const filteredTemplates = computed(() => {
+  const term = templateSearch.value.trim().toLowerCase();
+  const uni = templateUniversity.value;
+  return templates.value.filter((template) => {
+    if (uni && template.university !== uni) return false;
+    return !term || template.name.toLowerCase().includes(term);
+  });
+});
+
+/**
+ * Plantilla que se ofrece por defecto en un proyecto sin tareas: la de su
+ * universidad si existe, si no la general, y como último recurso la más usada.
+ * El backend ya devuelve la lista ordenada por uso.
+ */
+const suggestedTemplate = computed(() => {
+  if (tasks.value.length > 0 || templates.value.length === 0) return null;
+  const university = String(project.value?.university || '').trim().toLowerCase();
+  if (university) {
+    const match = templates.value.find((t) => String(t.university || '').trim().toLowerCase() === university);
+    if (match) return match;
+  }
+  return templates.value.find((t) => !t.university) || templates.value[0];
+});
+
+function openTemplates() {
+  templateError.value = '';
+  // Se entra filtrando por la universidad del proyecto: es lo que se busca
+  // el 90% de las veces.
+  const university = String(project.value?.university || '').trim();
+  templateUniversity.value = templateUniversities.value.includes(university) ? university : '';
+  newTemplate.university = university;
+  showTemplates.value = true;
+}
+
+async function importTemplate(template) {
+  isImporting.value = true;
+  templateError.value = '';
+  try {
+    const response = await apiFetch(`/api/projects/${props.id}/tasks/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ templateId: template.id })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No se pudo importar la plantilla.');
+    tasks.value = data.tasks || [];
+    showTemplates.value = false;
+    await fetchTemplates();
+  } catch (err) {
+    templateError.value = err.message;
+    if (!showTemplates.value) alert(err.message);
+  } finally {
+    isImporting.value = false;
+  }
+}
+
+async function saveCurrentAsTemplate() {
+  isSavingTemplate.value = true;
+  templateError.value = '';
+  try {
+    const response = await apiFetch('/api/task-templates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        projectId: props.id,
+        name: newTemplate.name,
+        university: newTemplate.university || null,
+        academicLevel: project.value?.academic_level || null
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No se pudo guardar la plantilla.');
+    newTemplate.name = '';
+    await fetchTemplates();
+  } catch (err) {
+    templateError.value = err.message;
+  } finally {
+    isSavingTemplate.value = false;
+  }
+}
+
+async function deleteTemplate(template) {
+  if (!window.confirm(`¿Eliminar la plantilla "${template.name}"? Los proyectos que ya la usaron no se tocan.`)) return;
+  templateError.value = '';
+  try {
+    const response = await apiFetch(`/api/task-templates/${template.id}`, { method: 'DELETE' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No se pudo eliminar la plantilla.');
+    await fetchTemplates();
+  } catch (err) {
+    templateError.value = err.message;
+  }
+}
+
 onMounted(() => {
   loadAll();
 });
 </script>
 
 <style scoped>
+/* ------------------------------------------------- Plantillas de tareas */
+.template-suggestion {
+  display: flex;
+  gap: 1.25rem;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  padding: 1.1rem 1.4rem;
+  margin-bottom: 1.5rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: 14px;
+  background: var(--surface-1);
+}
+
+.template-suggestion-main h4,
+.template-card-main h4 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.92rem;
+  color: var(--text-main);
+  margin-bottom: 0.3rem;
+}
+
+.template-suggestion-hint,
+.template-card-meta {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+}
+
+.template-chip {
+  padding: 0.15rem 0.55rem;
+  border-radius: 9999px;
+  background: var(--surface-3);
+  border: 1px solid var(--border-color);
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-sub);
+}
+
+.template-preview {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.template-preview li {
+  font-size: 0.8rem;
+  color: var(--text-sub);
+  padding-left: 0.9rem;
+  position: relative;
+}
+
+.template-preview li::before {
+  content: '·';
+  position: absolute;
+  left: 0.2rem;
+  color: var(--text-muted);
+}
+
+.template-preview li.is-more {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.template-suggestion-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-self: center;
+}
+
+.template-filters {
+  display: grid;
+  grid-template-columns: 1fr minmax(0, 220px);
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.template-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.template-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--surface-1);
+}
+
+.template-card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: stretch;
+}
+
+.template-delete-btn {
+  background: none;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 0.3rem 0.5rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.template-delete-btn:hover {
+  border-color: var(--accent-rose);
+}
+
+.template-empty {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  padding: 1rem 0;
+}
+
+.template-save {
+  margin-top: 1.25rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.template-save h4 {
+  font-size: 0.9rem;
+  color: var(--text-main);
+  margin-bottom: 0.3rem;
+}
+
+.template-save-hint {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-bottom: 0.6rem;
+}
+
+.template-save-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+}
+
+@media (max-width: 640px) {
+  .template-filters,
+  .template-save-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
 .status-pill {
   display: inline-block;
   padding: 0.2rem 0.6rem;

@@ -10,6 +10,7 @@ import { LeadService } from './services/leadService.js';
 import { FunnelColumnService } from './services/funnelColumnService.js';
 import { ProjectService } from './services/projectService.js';
 import { TaskService } from './services/taskService.js';
+import { TaskTemplateService } from './services/taskTemplateService.js';
 import { QuoteService } from './services/quoteService.js';
 import { ContractService } from './services/contractService.js';
 import { ContractTemplateService } from './services/contractTemplateService.js';
@@ -108,6 +109,7 @@ const funnelColumnService = new FunnelColumnService();
 const clientAccountService = new ClientAccountService();
 const projectService = new ProjectService({ clientAccountService, emailService });
 const taskService = new TaskService();
+const taskTemplateService = new TaskTemplateService();
 const quoteService = new QuoteService();
 const contractTemplateService = new ContractTemplateService();
 const campaignService = new CampaignService();
@@ -882,7 +884,9 @@ async function notifyUnlockedDeliverables(income) {
     await notificationService.create({
       type: 'deliverables_unlocked',
       title: `${project.topic}: entregables liberados`,
-      body: `La cuota ${income.cuota} (S/ ${Number(income.monto).toFixed(2)}) quedó verificada; ${documents.length} documento(s) ya son descargables por el cliente.`,
+      // Sin el monto: es un aviso del módulo de proyectos, donde no se
+      // muestran importes (el detalle del cobro está en Finanzas).
+      body: `La cuota ${income.cuota} quedó verificada; ${documents.length} documento(s) ya son descargables por el cliente.`,
       link: `/admin/projects/${project.id}`
     });
 
@@ -2947,6 +2951,41 @@ app.post('/api/projects', requireAuth, requirePermission('projects.view'), async
 });
 
 /**
+ * Editar los datos de un proyecto (tema, cliente, nivel, carrera, plazo).
+ *
+ * A propósito no pasa por `guardProjectManageable`: el bloqueo por pago sin
+ * verificar impide trabajar el proyecto, no corregir los datos con los que se
+ * creó (un correo mal escrito, por ejemplo, hay que poder arreglarlo antes).
+ */
+app.put('/api/projects/:id', requireAuth, requirePermission('projects.view'), async (req, res) => {
+  try {
+    const project = await projectService.updateProject(req.params.id, req.body || {});
+    if (!project) return res.status(404).json({ error: 'Proyecto no encontrado.' });
+    res.json({ project });
+  } catch (error) {
+    console.error('❌ Error al editar el proyecto:', error);
+    res.status(400).json({ error: error.message || 'Error al editar el proyecto.' });
+  }
+});
+
+/**
+ * Eliminar un proyecto con sus tareas, colaboradores y línea de tiempo. Los
+ * ingresos del lead siguen intactos en Finanzas: el dinero no se borra junto
+ * con el proyecto.
+ */
+app.delete('/api/projects/:id', requireAuth, requirePermission('projects.view'), async (req, res) => {
+  try {
+    const project = await projectService.deleteProject(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Proyecto no encontrado.' });
+    console.log(`🗑️ [Proyectos] Proyecto #${project.id} eliminado por ${req.user.email}`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error al eliminar el proyecto:', error);
+    res.status(500).json({ error: 'Error al eliminar el proyecto.', details: error.message });
+  }
+});
+
+/**
  * Envuelve una ruta que modifica un proyecto: si su primer pago todavía no lo
  * verificó Finanzas, el proyecto es de solo lectura y se responde 409 con el
  * motivo, en vez de dejar que el cambio entre por la API sin pasar por la UI.
@@ -3105,6 +3144,80 @@ app.post('/api/projects/:id/tasks', requireAuth, requirePermission('projects.vie
   } catch (error) {
     console.error('❌ Error al crear la tarea:', error);
     res.status(500).json({ error: 'Error al crear la tarea.', details: error.message });
+  }
+});
+
+/**
+ * Importar al proyecto las tareas de una plantilla guardada.
+ */
+app.post('/api/projects/:id/tasks/import', requireAuth, requirePermission('projects.view'), async (req, res) => {
+  try {
+    const { templateId } = req.body || {};
+    if (!templateId) return res.status(400).json({ error: 'Indica la plantilla a importar.' });
+    if (!await guardProjectManageable(req.params.id, res)) return;
+
+    const result = await taskTemplateService.applyToProject(templateId, req.params.id);
+    res.json(result);
+  } catch (error) {
+    console.error('❌ Error al importar la plantilla de tareas:', error);
+    res.status(400).json({ error: error.message || 'Error al importar la plantilla.' });
+  }
+});
+
+// =====================================================================
+// PLANTILLAS DE TAREAS (/api/task-templates)
+// =====================================================================
+// Conjuntos de tareas guardados con nombre (y universidad, cuando el esquema
+// es propio de una) para no volver a tipear la misma lista en cada proyecto.
+
+app.get('/api/task-templates', requireAuth, requirePermission('projects.view'), async (req, res) => {
+  try {
+    const [templates, universities] = await Promise.all([
+      taskTemplateService.listTemplates({ search: req.query.search, university: req.query.university }),
+      taskTemplateService.listUniversities()
+    ]);
+    res.json({ templates, universities });
+  } catch (error) {
+    console.error('❌ Error al obtener las plantillas de tareas:', error);
+    res.status(500).json({ error: 'Error al obtener las plantillas.', details: error.message });
+  }
+});
+
+/**
+ * Crea una plantilla, ya sea con la lista de tareas que mande la pantalla o
+ * copiando las que ya tiene un proyecto (`projectId`).
+ */
+app.post('/api/task-templates', requireAuth, requirePermission('projects.view'), async (req, res) => {
+  try {
+    const { name, university, academicLevel, items, projectId } = req.body || {};
+    const template = projectId
+      ? await taskTemplateService.createTemplateFromProject(projectId, { name, university, academicLevel, createdBy: req.user.id })
+      : await taskTemplateService.createTemplate({ name, university, academicLevel, items, createdBy: req.user.id });
+    res.status(201).json({ template });
+  } catch (error) {
+    console.error('❌ Error al crear la plantilla de tareas:', error);
+    res.status(400).json({ error: error.message || 'Error al crear la plantilla.' });
+  }
+});
+
+app.put('/api/task-templates/:id', requireAuth, requirePermission('projects.view'), async (req, res) => {
+  try {
+    const template = await taskTemplateService.updateTemplate(req.params.id, req.body || {});
+    if (!template) return res.status(404).json({ error: 'Plantilla no encontrada.' });
+    res.json({ template });
+  } catch (error) {
+    console.error('❌ Error al editar la plantilla de tareas:', error);
+    res.status(400).json({ error: error.message || 'Error al editar la plantilla.' });
+  }
+});
+
+app.delete('/api/task-templates/:id', requireAuth, requirePermission('projects.view'), async (req, res) => {
+  try {
+    await taskTemplateService.deleteTemplate(req.params.id);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error al eliminar la plantilla de tareas:', error);
+    res.status(500).json({ error: 'Error al eliminar la plantilla.', details: error.message });
   }
 });
 

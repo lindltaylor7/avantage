@@ -55,6 +55,7 @@ timestamp. Cada uno exporta `up()` (aplicar cambio) y `down()` (revertirlo).
 | `20260807000000_alter_leads_add_prospect_fields.js` | Agrega a `leads` los campos detallados de prospecto: datos personales, académicos, ubicación, origen y asesor asignado. |
 | `20260814000000_create_funnel_columns_table.js` | Crea la tabla `funnel_columns`: las etapas (columnas) del Kanban de Leads, antes almacenadas solo en `localStorage` del navegador. Cada fila tiene `key`, `label`, `icon`, `color`, `final` y `position` (orden de despliegue). |
 | `20261015000000_payment_schedule_and_gated_deliverables.js` | Agrega `finance_income.due_date` (la fecha **pactada** de la cuota, distinta de `fecha`, el día en que el dinero entró) y `project_updates.income_id` (la cuota que libera el adjunto de ese avance). Con las dos, el cronograma de pagos que se acuerda al ganar el lead **son** las cuotas de Finanzas, y un entregable puede quedar retenido en el portal del cliente hasta que Finanzas verifique el pago. |
+| `20261016000000_create_task_templates.js` | Crea `task_templates` (conjuntos de tareas guardados con nombre y, opcionalmente, la universidad a la que pertenecen) y `task_template_items` (las tareas de cada plantilla, en orden). Al importar una plantilla las tareas se **copian** a `tasks`: editar después la plantilla no altera los proyectos que ya la usaron. |
 
 ### Cronograma de pagos y entregables bloqueados
 

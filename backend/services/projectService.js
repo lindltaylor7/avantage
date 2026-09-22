@@ -1,4 +1,7 @@
+import fs from 'fs';
+import path from 'path';
 import { db } from '../db/connection.js';
+import { uploadDir as projectUploadDir } from '../middleware/upload.js';
 
 /**
  * Estado con el que nace un proyecto recién ganado, todavía sin el primer pago
@@ -146,9 +149,13 @@ export class ProjectService {
   async getProjectById(id) {
     const [row] = await db('projects')
       .leftJoin('users as leader', 'leader.id', 'projects.leader_id')
+      // La universidad vive en el lead, no en el proyecto: se trae de ahí para
+      // poder sugerir la plantilla de tareas que le corresponde.
+      .leftJoin('leads as lead', 'lead.id', 'projects.lead_id')
       .select(
         'projects.*',
         db.raw('MAX(leader.name) as leader_name'),
+        db.raw('MAX(lead.university) as university'),
         db.raw('COUNT(tasks.id) as total_tasks'),
         db.raw("SUM(CASE WHEN tasks.status = 'completado' THEN 1 ELSE 0 END) as completed_tasks")
       )
@@ -172,10 +179,11 @@ export class ProjectService {
     const project = await this.getProjectById(id);
     if (!project) return null;
     if (project.is_locked) {
-      const monto = Number(project.initial_payment?.monto || 0).toFixed(2);
+      // Sin el monto a propósito: en el módulo de proyectos no se muestran
+      // importes — el dinero se consulta en Finanzas, con su propio permiso.
       const error = new Error(
-        `Este proyecto está a la espera de que Finanzas verifique el primer pago (S/ ${monto}). ` +
-        'Hasta entonces solo se puede consultar.'
+        `Este proyecto está a la espera de que Finanzas verifique el primer pago ` +
+        `(${project.initial_payment?.code || 'ingreso'}). Hasta entonces solo se puede consultar.`
       );
       error.code = 'PROJECT_LOCKED';
       throw error;
@@ -199,6 +207,70 @@ export class ProjectService {
 
     await db('projects').where({ id: project.id }).update({ status: to });
     return this.getProjectById(project.id);
+  }
+
+  /**
+   * Edita los datos del proyecto (tema, cliente, nivel, carrera, plazo).
+   *
+   * No pasa por la puerta del pago verificado: el bloqueo existe para que no
+   * se trabaje un proyecto todavía sin cobrar, no para impedir corregir el
+   * correo o el celular con el que se creó. Solo se tocan los campos que
+   * llegan, para que la pantalla pueda mandar un formulario parcial.
+   */
+  async updateProject(id, { topic, clientEmail, clientPhone, academicLevel, fieldOfStudy, deadline }) {
+    const project = await db('projects').where({ id }).first();
+    if (!project) return null;
+
+    const changes = {};
+    if (topic !== undefined) {
+      const clean = String(topic).trim();
+      if (!clean) throw new Error('El tema/nombre del proyecto es requerido.');
+      changes.topic = clean;
+    }
+    if (clientEmail !== undefined) {
+      const clean = String(clientEmail).trim();
+      if (!clean.includes('@')) throw new Error('Proporcione un correo de cliente válido.');
+      changes.client_email = clean;
+    }
+    if (clientPhone !== undefined) changes.client_phone = String(clientPhone).trim() || null;
+    if (academicLevel !== undefined) changes.academic_level = String(academicLevel).trim() || null;
+    if (fieldOfStudy !== undefined) changes.field_of_study = String(fieldOfStudy).trim() || null;
+    if (deadline !== undefined) changes.deadline = deadline || null;
+
+    if (Object.keys(changes).length > 0) await db('projects').where({ id }).update(changes);
+
+    // El correo del cliente es su identidad en el portal: si cambia, hay que
+    // darle de alta la cuenta nueva o nunca vería este proyecto.
+    if (changes.client_email && changes.client_email !== project.client_email) {
+      await this.#inviteClientToPortal(changes.client_email, null);
+    }
+    return this.getProjectById(id);
+  }
+
+  /**
+   * Borra el proyecto y todo lo que cuelga de él (tareas, colaboradores y
+   * línea de tiempo caen por CASCADE en la base). Los adjuntos de los hitos se
+   * borran del disco acá, porque de esos la base no sabe nada.
+   *
+   * Lo que NO se toca es el dinero: los ingresos del lead siguen en Finanzas,
+   * que es donde tienen que cuadrar con el banco aunque el proyecto se haya
+   * creado por error.
+   */
+  async deleteProject(id) {
+    const project = await db('projects').where({ id }).first();
+    if (!project) return null;
+
+    const attachments = await db('project_updates')
+      .where({ project_id: id })
+      .whereNotNull('attachment_filename')
+      .select('attachment_filename');
+
+    await db('projects').where({ id }).del();
+
+    for (const { attachment_filename: filename } of attachments) {
+      fs.unlink(path.join(projectUploadDir, filename), () => {});
+    }
+    return project;
   }
 
   async updateProjectStatus(id, status) {

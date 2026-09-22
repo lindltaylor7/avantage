@@ -96,6 +96,14 @@ antes de tocar el arranque de producción.
 - El **Kanban de Leads** (`SetterFunnelView.vue` / `LeadsView.vue`) tiene columnas configurables
   (`funnel_columns`, con `key`, `label`, `final`, `position`). Cuando un lead llega a la columna
   marcada `final` (`ganado`), se genera automáticamente un `project` asociado (1:1 vía `lead_id`).
+- En el módulo de **proyectos no se muestran importes** (ni en la lista, ni en el detalle, ni en sus
+  notificaciones): el dinero se consulta en Finanzas, que tiene su propio permiso. Los avisos de
+  bloqueo se refieren al pago por su código (`finance_income.code`), nunca por su monto.
+- Las **plantillas de tareas** (`task_templates` + `task_template_items`, `taskTemplateService.js`)
+  guardan un conjunto de tareas con nombre y, opcionalmente, la universidad a la que pertenece. Un
+  proyecto sin tareas sugiere por defecto la plantilla de su universidad (la del lead), o la
+  general. Importar **copia** las tareas al proyecto y saltea las que ya existen con el mismo
+  título, así que reimportar no duplica nada.
 - Los **proyectos** tienen tareas (`tasks`, N:1) cuyo `% avance = completadas / total`, colaboradores
   (N:N vía `project_collaborators`), un líder (`leader_id` → `users`) y una línea de tiempo de
   hitos con adjuntos opcionales (`project_updates`).
