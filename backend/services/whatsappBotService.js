@@ -395,14 +395,75 @@ function mapAcademicLevel(value) {
 const FORM_LEVEL_LABEL_RE = /sacando|nivel\s+acad[eé]mico|grado\s+acad[eé]mico/i;
 const FORM_UNIVERSITY_LABEL_RE = /universidad/i;
 const FORM_FIELD_LABEL_RE = /carrera/i;
-// "¿En qué punto estás (con tu tesis)?" — pregunta de avance del formulario.
-const FORM_PROGRESS_LABEL_RE = /en\s+qu[eé]\s+punto|qu[eé]\s+tan\s+avanzado|avance\s+(?:de\s+)?(?:tu\s+)?tesis|estado\s+de\s+(?:tu\s+)?tesis/i;
+// "¿En qué punto estás (con tu tesis)?" / "¿En qué etapa de tu tesis estás?"
+// — pregunta de avance del formulario.
+const FORM_PROGRESS_LABEL_RE = /en\s+qu[eé]\s+punto|en\s+qu[eé]\s+etapa|etapa\s+(?:de\s+)?(?:tu\s+)?tesis|qu[eé]\s+tan\s+avanzado|avance\s+(?:de\s+)?(?:tu\s+)?tesis|estado\s+de\s+(?:tu\s+)?tesis/i;
+// "¿Qué necesitas resolver?" — el servicio que el lead viene buscando.
+const FORM_NEED_LABEL_RE = /qu[eé]\s+necesitas|necesitas\s+resolver|qu[eé]\s+servicio|en\s+qu[eé]\s+te\s+(?:podemos\s+)?ayudamos?/i;
 // Mismas frases que el prompt del LLM ya trata como "no tiene tema, empieza
 // de cero" cuando la persona las escribe directamente en el chat (ver
 // ollamaService.js): si el formulario la responde así de entrada, es la
 // misma señal y evita la pregunta redundante "¿ya tienes un tema en mente?"
 // seguida, turnos después, de la misma respuesta escrita a mano.
-const FORM_NO_PROGRESS_VALUE_RE = /todav[ií]a\s*no\s*empiez\w*|a[uú]n\s*no\s*empiez\w*|no\s*he\s*empezado|sin\s*empezar|desde\s*cero|sin\s*avance|no\s*tengo\s*avance/i;
+// "Aún no tengo tema" es una de las opciones del formulario actual y decía
+// exactamente lo mismo que las de abajo, pero no matcheaba: el lead que la
+// elegía quedaba sin `problem`, igual que el que ya tenía la tesis terminada.
+const FORM_NO_PROGRESS_VALUE_RE = /todav[ií]a\s*no\s*empiez\w*|a[uú]n\s*no\s*empiez\w*|no\s*he\s*empezado|sin\s*empezar|desde\s*cero|sin\s*avance|no\s*tengo\s*avance|no\s*tengo\s*tema|sin\s*tema/i;
+
+/**
+ * Etapa de la tesis declarada en el formulario -> valor canónico. Es lo que
+ * decide con qué se le ofrece ayudar al lead al proponerle la reunión: no es
+ * lo mismo alguien que no tiene tema que alguien con la tesis casi terminada,
+ * y hasta ahora a los dos se les decía "para ayudarte a definir tu tema".
+ */
+function mapThesisStage(value) {
+  const v = normalize(String(value || ''));
+  if (FORM_NO_PROGRESS_VALUE_RE.test(v)) return 'sin_tema';
+  if (/casi\s*termin|terminad|sustenta|por\s*termin|finaliz/.test(v)) return 'final';
+  if (/cap[ií]tul/.test(v)) return 'capitulos';
+  if (/proyecto|plan\s*de\s*tesis|anteproyecto/.test(v)) return 'proyecto';
+  return null;
+}
+
+/** "¿Qué necesitas resolver?" -> valor canónico, o null si no se reconoce. */
+function mapLeadNeed(value) {
+  const v = normalize(String(value || ''));
+  if (/correccion|observacion|levantamiento/.test(v)) return 'correcciones';
+  if (/acompanamiento\s*completo|completo|de\s*principio\s*a\s*fin/.test(v)) return 'acompanamiento';
+  if (/por\s*etapas|asesoria\s*por\s*etapas/.test(v)) return 'por_etapas';
+  return null;
+}
+
+// Cómo se escriben esos valores canónicos en la ficha del lead, para que el
+// asesor llegue a la reunión sabiendo lo mismo que el bot.
+const STAGE_LABELS = {
+  sin_tema: 'Sin tema definido',
+  proyecto: 'Proyecto / plan de tesis',
+  capitulos: 'Capítulos en desarrollo',
+  final: 'Tesis casi terminada'
+};
+const NEED_LABELS = {
+  correcciones: 'Correcciones / levantamiento de observaciones',
+  acompanamiento: 'Acompañamiento completo',
+  por_etapas: 'Asesoría por etapas'
+};
+
+/**
+ * Con qué se le ofrece ayudar en la reunión, según lo que el lead YA declaró
+ * en el formulario. El levantamiento de observaciones manda sobre la etapa:
+ * es lo más concreto que puede pedir alguien, y lo pide igual con la tesis a
+ * medias que casi terminada.
+ */
+export function schedulingPurpose({ stage = null, need = null, hasTopic = false } = {}) {
+  if (need === 'correcciones') return 'ayudarte con el levantamiento de observaciones';
+  switch (stage) {
+    case 'sin_tema': return 'ayudarte a definir tu tema';
+    case 'proyecto': return 'revisar tu proyecto de tesis';
+    case 'capitulos': return 'revisar el avance de tus capítulos';
+    case 'final': return 'ayudarte a cerrar tu tesis';
+    default: return hasTopic ? 'revisar tu tema' : 'ayudarte a definir tu tema';
+  }
+}
 // El formulario de Click-to-WhatsApp de Meta agrega el teléfono que la
 // persona ya tiene registrado en Facebook/Instagram ("Phone number: +51...").
 // Si no se guarda, el bot se lo vuelve a pedir en el paso de agendar aunque
@@ -419,8 +480,13 @@ export function extractLeadFormFields(text) {
       fields.university = value;
     } else if (!fields.field && FORM_FIELD_LABEL_RE.test(label)) {
       fields.field = value;
-    } else if (!fields.problem && FORM_PROGRESS_LABEL_RE.test(label) && FORM_NO_PROGRESS_VALUE_RE.test(value)) {
-      fields.problem = 'Sin tema definido (desde cero)';
+    } else if (!fields.stage && FORM_PROGRESS_LABEL_RE.test(label)) {
+      const stage = mapThesisStage(value);
+      if (stage) fields.stage = stage;
+      if (!fields.problem && stage === 'sin_tema') fields.problem = 'Sin tema definido (desde cero)';
+    } else if (!fields.need && FORM_NEED_LABEL_RE.test(label)) {
+      const need = mapLeadNeed(value);
+      if (need) fields.need = need;
     } else if (!fields.phone && FORM_PHONE_LABEL_RE.test(label) && looksLikePhone(value)) {
       fields.phone = digitsOnly(value);
     }
@@ -437,12 +503,41 @@ export function extractLeadFormFields(text) {
  */
 export function isAdFormMessage(text) {
   const fields = extractLeadFormFields(text);
-  return !!(fields.level || fields.university || fields.field || fields.problem);
+  return !!(fields.level || fields.university || fields.field || fields.problem || fields.stage || fields.need);
 }
 
 /** Interpreta la elección de modalidad de llamada: 'phone' | 'meet' | null. */
 // El lead pide llamada telefónica en vez de Google Meet (texto ya normalizado).
-const PHONE_MODE_RE = /\b(llamad[ao]s?|llamenme|llamame|me llamen|me pueden llamar|por telefono|telefonica(mente)?|por celular)\b/;
+// El sustantivo SOLO también cuenta ("Telefono", "Celular"): pedir la llamada
+// así es lo más natural del mundo cuando la pregunta en pantalla es "¿por Meet
+// o por teléfono?", y exigir "por telefono" o "telefonica" dejaba fuera
+// justamente esa respuesta. Caso real: un lead contestó "Telefono" al menú de
+// horarios, el mensaje no matcheó, se trató como una duda cualquiera (se le
+// contestó "puede ser telefónica o por Meet" y se le repitió la lista), eligió
+// un horario y se le confirmó una reunión por Google Meet con el descuento de
+// Meet. Tuvo que reclamar ("Pedí por teléfono") y terminó transferido.
+const PHONE_MODE_RE = /\b(telefono|telefonica(mente)?|telefonico|llamad[ao]s?|llamenme|llamame|me llamen|me pueden llamar|celular)\b/;
+
+// ...salvo que en el mismo mensaje nombre el Meet. "No puedo por llamada,
+// mejor meet" tiene las dos modalidades y la que vale es la que eligió, no la
+// que descartó — sin esto, ampliar la expresión de arriba lo pasaría a
+// telefónica por haber escrito la palabra "llamada".
+const MEET_MODE_RE = /\b(meet|videollamada|video llamada|videoconferencia|virtual|zoom)\b/;
+
+/**
+ * ¿El contacto está pidiendo que la reunión sea por llamada telefónica (en vez
+ * de por Google Meet, que es la modalidad por defecto)?
+ */
+export function asksForPhoneCall(text) {
+  const n = normalize(text || '');
+  return PHONE_MODE_RE.test(n) && !MEET_MODE_RE.test(n);
+}
+
+// ¿Queda algo parecido a un día o a una hora en el mensaje? Sirve para no
+// mandar a interpretar como fecha un "telefono" pelado (texto normalizado).
+// Los números de más de dos cifras no cuentan: en un "llámenme al 999888777"
+// el número es el teléfono, no la hora.
+const WHEN_HINT_RE = /(?<!\d)\d{1,2}(?!\d)|\b(hoy|manana|pasado|lunes|martes|miercoles|jueves|viernes|sabado|domingo|tarde|noche|temprano|mediodia|madrugada)\b/;
 
 function parseCallMode(text) {
   const n = normalize(text || '');
@@ -1424,6 +1519,11 @@ export class WhatsappBotService {
         if (formFields.field) answers.field = formFields.field;
         if (formFields.problem) answers.problem = formFields.problem;
         if (formFields.phone) answers.phone = formFields.phone;
+        // Etapa de la tesis y servicio que busca: se guardan para no ofrecerle
+        // a todo el mundo lo mismo al proponerle la reunión (ver
+        // schedulingPurpose) y para que el asesor los vea en la ficha del lead.
+        if (formFields.stage) answers.stage = formFields.stage;
+        if (formFields.need) answers.need = formFields.need;
         await this.updateSession(waId, { answers: JSON.stringify(answers) });
 
         this.logActivity({ type: 'ad_form_lead_fast_track', waId, formFields });
@@ -1694,6 +1794,8 @@ export class WhatsappBotService {
     const additionalNotes = `Problema: ${problem} | Ámbito: ${location}` +
       (answers.field ? ` | Carrera: ${answers.field}` : '') +
       (university ? ` | Universidad: ${university}` : '') +
+      (STAGE_LABELS[answers.stage] ? ` | Etapa: ${STAGE_LABELS[answers.stage]}` : '') +
+      (NEED_LABELS[answers.need] ? ` | Necesita: ${NEED_LABELS[answers.need]}` : '') +
       ' | Origen: WhatsApp (Avan, bot automático)';
 
     // Antes había aquí un mensaje intro largo ("¡Genial! Con lo que me
@@ -1992,8 +2094,13 @@ export class WhatsappBotService {
       // con un placeholder, para no perderlo insistiendo), decírselo así se
       // lee como que nadie escuchó "no tengo tema" — de ahí salía el reclamo
       // repetido en plena elección de modalidad.
+      //
+      // Y al revés: ofrecerle "definir tu tema" a quien acaba de declarar en
+      // el formulario que tiene la tesis casi terminada, o que lo que quiere
+      // es levantar observaciones, se lee igual de mal. La etapa y el servicio
+      // que ya dijo mandan sobre el texto genérico.
       const hasTopic = !!answers.problem && !/sin tema definido/i.test(answers.problem);
-      const purpose = hasTopic ? 'revisar tu tema' : 'ayudarte a definir tu tema';
+      const purpose = schedulingPurpose({ stage: answers.stage, need: answers.need, hasTopic });
       await this.send(
         waId,
         `${opener}Coordinemos una reunión por Google Meet con nuestro asesor para ${purpose} 🙌 ` +
@@ -2087,9 +2194,11 @@ export class WhatsappBotService {
 
     // Casos que la máquina de estados ya resuelve bien por sí sola: no se
     // gasta una llamada al LLM en ellos.
-    // Pedir llamada en vez de Google Meet mientras elige horario tampoco es
-    // una duda suelta: lo resuelve el paso de horario (_switchToPhoneIfAsked).
-    const asksPhoneCall = session.status === 'scheduling_time' && PHONE_MODE_RE.test(normalize(trimmed));
+    // Pedir llamada en vez de Google Meet mientras elige día u horario tampoco
+    // es una duda suelta: lo resuelve el paso correspondiente
+    // (_switchToPhoneIfAsked). Mandarlo al clasificador de dudas es lo que
+    // hacía que la modalidad se perdiera: contestaba la pregunta sin cambiarla.
+    const asksPhoneCall = ['scheduling_time', 'scheduling_date'].includes(session.status) && asksForPhoneCall(trimmed);
     if (!scheduling || this._isSchedulingRefusal(trimmed) || isObviousStepAnswer(session.status, trimmed) || asksPhoneCall) {
       return this.dispatchByStatus(waId, text);
     }
@@ -2873,6 +2982,11 @@ ${numberedList(fullSlotLabels(offer))}
       return;
     }
 
+    // Pedir la llamada telefónica mientras elige el día es tan válido como
+    // pedirla al elegir la hora: si solo se atiende en el paso de horario, el
+    // que la pide antes se queda con la modalidad por defecto (Meet).
+    if (await this._switchToPhoneIfAsked(waId, answers, scheduling, trimmed)) return;
+
     const todayIso = limaTodayIso();
 
     // Días con espacio real. Se recalculan siempre (pudo cambiar la agenda) y
@@ -3086,12 +3200,26 @@ ${numberedList(fullSlotLabels(offer))}
    * Devuelve true si ya respondió.
    */
   async _switchToPhoneIfAsked(waId, answers, scheduling, text) {
-    if (scheduling.mode === 'phone' || !PHONE_MODE_RE.test(normalize(text))) return false;
+    if (scheduling.mode === 'phone' || !asksForPhoneCall(text)) return false;
 
     scheduling.mode = 'phone';
     scheduling.discount = 0;
     if (!scheduling.phone && waIdIsPhone(waId)) scheduling.phone = digitsOnly(waId);
     this.logActivity({ type: 'switched_to_phone', waId, text });
+
+    // Todavía no hay horarios sobre la mesa (pidió la llamada mientras se le
+    // preguntaba el día): se confirma la modalidad y se vuelve a proponer la
+    // agenda, en vez de mandarle una lista vacía. Si además dijo cuándo
+    // ("llámenme mañana"), el mensaje se guarda como `when` para que
+    // promptForDate lo tenga en cuenta y no le pregunte lo que ya dijo.
+    if (!scheduling.slots?.length) {
+      if (WHEN_HINT_RE.test(normalize(text).replace(PHONE_MODE_RE, ' '))) scheduling.when = text;
+      await this.updateSession(waId, { answers: JSON.stringify(answers) });
+      await this.send(waId, 'Listo, será por llamada telefónica 📞');
+      await this.promptForDate(waId);
+      return true;
+    }
+
     await this.updateSession(waId, { answers: JSON.stringify(answers) });
 
     // También eligió horario en el mismo mensaje: que siga el flujo normal.

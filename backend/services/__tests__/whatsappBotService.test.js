@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractLeadFormFields, detectRedundantAsk, daysMatchingPreferredTime, spreadSlotsAcrossDays } from '../whatsappBotService.js';
+import { extractLeadFormFields, detectRedundantAsk, daysMatchingPreferredTime, spreadSlotsAcrossDays, schedulingPurpose, asksForPhoneCall } from '../whatsappBotService.js';
 
 // Mensaje real (anonimizado) de un lead de Meta Ads con formulario propio:
 // llega como líneas "¿Pregunta?: Respuesta" que el LLM de conversación a
@@ -57,6 +57,75 @@ test('extractLeadFormFields lee "sin tema" de la pregunta de avance del formular
 test('extractLeadFormFields no marca "sin tema" cuando la persona SÍ tiene avance', () => {
   const fields = extractLeadFormFields('¿En qué punto estás?: Ya tengo avance, voy por el capítulo 2');
   assert.equal(fields.problem, undefined);
+});
+
+// Formulario vigente (anonimizado): pregunta la etapa con otra redacción
+// ("¿En qué etapa de tu tesis estás?") y agrega el servicio que busca. Ambas
+// respuestas se guardaban en la nada: el lead con la tesis casi terminada
+// recibía el mismo "coordinemos una reunión para ayudarte a definir tu tema"
+// que el que no tenía tema.
+const META_AD_FORM_ALMOST_DONE = `¡Hola! Completé el formulario y me gustaría obtener más información sobre tu negocio.
+
+¿Qué necesitas resolver?: Correcciones / levantamiento de observaciones
+Full name: Lucia Ramos
+¿En qué etapa de tu tesis estás?: Tesis casi terminada
+Phone number: +51999710647
+Carrera: Educación ambiental
+¿Para cuándo necesitas avanzar?: Lo antes posible`;
+
+test('extractLeadFormFields lee la etapa de la tesis del formulario', () => {
+  assert.equal(extractLeadFormFields(META_AD_FORM_ALMOST_DONE).stage, 'final');
+  assert.equal(extractLeadFormFields('¿En qué etapa de tu tesis estás?: Proyecto / plan de tesis').stage, 'proyecto');
+  assert.equal(extractLeadFormFields('¿En qué etapa de tu tesis estás?: Capítulos en desarrollo').stage, 'capitulos');
+});
+
+// "Aún no tengo tema" es la opción del formulario para el que empieza de
+// cero, y no matcheaba con ninguna de las frases que sí se reconocían.
+test('extractLeadFormFields reconoce "Aún no tengo tema" como empezar de cero', () => {
+  const fields = extractLeadFormFields('¿En qué etapa de tu tesis estás?: Aún no tengo tema');
+  assert.equal(fields.stage, 'sin_tema');
+  assert.equal(fields.problem, 'Sin tema definido (desde cero)');
+});
+
+test('extractLeadFormFields lee qué servicio necesita el lead', () => {
+  assert.equal(extractLeadFormFields(META_AD_FORM_ALMOST_DONE).need, 'correcciones');
+  assert.equal(extractLeadFormFields('¿Qué necesitas resolver?: Acompañamiento completo').need, 'acompanamiento');
+  assert.equal(extractLeadFormFields('¿Qué necesitas resolver?: Asesoría por etapas').need, 'por_etapas');
+});
+
+// El mensaje con el que se le propone la reunión sale de lo que el lead ya
+// declaró, no de un texto fijo.
+test('schedulingPurpose usa la etapa declarada en el formulario', () => {
+  assert.equal(schedulingPurpose({ stage: 'sin_tema' }), 'ayudarte a definir tu tema');
+  assert.equal(schedulingPurpose({ stage: 'proyecto' }), 'revisar tu proyecto de tesis');
+  assert.equal(schedulingPurpose({ stage: 'capitulos' }), 'revisar el avance de tus capítulos');
+  assert.equal(schedulingPurpose({ stage: 'final' }), 'ayudarte a cerrar tu tesis');
+});
+
+test('schedulingPurpose: levantar observaciones manda sobre la etapa', () => {
+  assert.equal(schedulingPurpose({ stage: 'final', need: 'correcciones' }), 'ayudarte con el levantamiento de observaciones');
+});
+
+test('schedulingPurpose sin datos del formulario mantiene el texto de siempre', () => {
+  assert.equal(schedulingPurpose({ hasTopic: true }), 'revisar tu tema');
+  assert.equal(schedulingPurpose({}), 'ayudarte a definir tu tema');
+});
+
+// Caso real: el lead respondió "Telefono" al menú de horarios y la
+// modalidad no cambió — se le confirmó una reunión por Google Meet y tuvo
+// que reclamar ("Pedí por teléfono").
+test('asksForPhoneCall reconoce el sustantivo suelto', () => {
+  assert.equal(asksForPhoneCall('Telefono'), true);
+  assert.equal(asksForPhoneCall('Celular'), true);
+  assert.equal(asksForPhoneCall('mejor por teléfono porfa'), true);
+  assert.equal(asksForPhoneCall('llámenme mejor'), true);
+});
+
+test('asksForPhoneCall no cambia la modalidad si el lead nombra el Meet', () => {
+  assert.equal(asksForPhoneCall('no puedo por llamada, mejor por meet'), false);
+  assert.equal(asksForPhoneCall('prefiero videollamada'), false);
+  assert.equal(asksForPhoneCall('2'), false);
+  assert.equal(asksForPhoneCall(''), false);
 });
 
 // F1/F4 — Red de seguridad: si el tema ya se dio por resuelto (sea porque la
