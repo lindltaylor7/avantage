@@ -42,6 +42,7 @@ import { NotificationService } from './services/notificationService.js';
 import { FinanceService } from './services/financeService.js';
 import { FinanceLedgerService } from './services/financeLedgerService.js';
 import { ClientAccountService } from './services/clientAccountService.js';
+import { buildAttachmentPreview, readImagePreviewBytes, resolveAttachmentKind } from './services/attachmentPreviewService.js';
 import { signToken, requireAuth, requirePermission, signGoogleOAuthState, verifyGoogleOAuthState, signClientToken, requireClientAuth } from './middleware/auth.js';
 
 import { uploadProjectUpdateAttachment, uploadDir, uploadFinanceReceipt, uploadFinanceFile, uploadEmailAttachments, financeReceiptDir, whatsappMediaDir, campaignAdImageDir } from './middleware/upload.js';
@@ -334,15 +335,72 @@ app.get('/api/portal/projects/:id', requireClientAuth, async (req, res) => {
   }
 });
 
+/**
+ * Igual que `loadOwnedProject`, pero para el avance: confirma que la
+ * actualización sea de un proyecto del cliente y que tenga adjunto. Deja la
+ * respuesta 404 lista y devuelve null si no.
+ */
+async function loadOwnedUpdateAttachment(req, res) {
+  const project = await loadOwnedProject(req, res);
+  if (!project) return null;
+
+  const update = await projectUpdateService.getUpdateById(req.params.updateId);
+  if (!update || update.project_id !== project.id || !update.attachment_filename) {
+    res.status(404).json({ error: 'Adjunto no encontrado.' });
+    return null;
+  }
+  return update;
+}
+
+/**
+ * Vista previa parcial del entregable. Se sirve esté bloqueado o no: es
+ * justamente lo que el cliente puede mirar antes de pagar, para saber que el
+ * avance existe y de qué va. El archivo completo sigue saliendo solo por
+ * /attachment, y solo cuando Finanzas verificó la cuota.
+ */
+app.get('/api/portal/projects/:id/updates/:updateId/preview', requireClientAuth, async (req, res) => {
+  try {
+    const update = await loadOwnedUpdateAttachment(req, res);
+    if (!update) return;
+
+    const preview = await buildAttachmentPreview({
+      filePath: path.join(uploadDir, update.attachment_filename),
+      mimeType: update.attachment_mime_type,
+      originalName: update.attachment_original_name
+    });
+    res.json({ preview });
+  } catch (error) {
+    console.error('❌ Error al armar la vista previa del adjunto:', error);
+    res.status(500).json({ error: 'Error al generar la vista previa.', details: error.message });
+  }
+});
+
+/**
+ * Los primeros bytes de un adjunto que es imagen: el navegador dibuja la
+ * franja de arriba y nada más. El resto del archivo no se manda, así que no
+ * hay forma de reconstruir la imagen completa desde el portal.
+ */
+app.get('/api/portal/projects/:id/updates/:updateId/preview/image', requireClientAuth, async (req, res) => {
+  try {
+    const update = await loadOwnedUpdateAttachment(req, res);
+    if (!update) return;
+
+    const kind = resolveAttachmentKind(update.attachment_mime_type, update.attachment_original_name);
+    if (kind !== 'image') return res.status(404).json({ error: 'Este adjunto no es una imagen.' });
+
+    const bytes = await readImagePreviewBytes(path.join(uploadDir, update.attachment_filename));
+    res.type(update.attachment_mime_type || 'image/jpeg').send(bytes);
+  } catch (error) {
+    console.error('❌ Error al servir la vista previa de la imagen:', error);
+    res.status(500).json({ error: 'Error al generar la vista previa.', details: error.message });
+  }
+});
+
 app.get('/api/portal/projects/:id/updates/:updateId/attachment', requireClientAuth, async (req, res) => {
   try {
-    const project = await loadOwnedProject(req, res);
-    if (!project) return;
+    const update = await loadOwnedUpdateAttachment(req, res);
+    if (!update) return;
 
-    const update = await projectUpdateService.getUpdateById(req.params.updateId);
-    if (!update || update.project_id !== project.id || !update.attachment_filename) {
-      return res.status(404).json({ error: 'Adjunto no encontrado.' });
-    }
     // El bloqueo también se aplica acá, no solo en la pantalla: el cliente ve
     // que el entregable existe, pero el archivo no sale del servidor hasta
     // que Finanzas verifique la cuota con la que se libera.

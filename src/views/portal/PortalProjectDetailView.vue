@@ -61,7 +61,9 @@
             </button>
 
             <!-- El documento ya está entregado, pero se habilita recién cuando
-                 confirmamos el pago de la cuota con la que se liberó. -->
+                 confirmamos el pago de la cuota con la que se liberó. Mientras
+                 tanto el cliente puede mirar un adelanto parcial del contenido
+                 y subir ahí mismo el comprobante de esa cuota. -->
             <div v-else-if="update.attachment_filename" class="portal-timeline-locked">
               <span class="portal-locked-file">🔒 {{ update.attachment_original_name || 'Documento' }}</span>
               <p class="portal-locked-text">
@@ -71,10 +73,66 @@
                   Ya recibimos tu comprobante: lo estamos revisando.
                 </template>
                 <template v-else>
-                  Sube tu comprobante en la pestaña "Pagos".
+                  Sube tu comprobante acá abajo y lo liberamos apenas Finanzas lo verifique.
                 </template>
               </p>
-              <button type="button" class="portal-locked-cta" @click="activeTab = 'pagos'">Ir a Pagos →</button>
+
+              <button type="button" class="portal-preview-toggle" @click="togglePreview(update)">
+                {{ previewState(update.id).open ? '✕ Ocultar vista previa' : '👁 Ver un adelanto' }}
+              </button>
+
+              <div v-if="previewState(update.id).open" class="portal-preview">
+                <p v-if="previewState(update.id).isLoading" class="portal-preview-msg">Preparando el adelanto…</p>
+                <p v-else-if="previewState(update.id).error" class="portal-preview-msg">{{ previewState(update.id).error }}</p>
+
+                <template v-else-if="previewState(update.id).data?.kind === 'text'">
+                  <div class="portal-preview-paper">
+                    <p class="portal-preview-text">{{ previewState(update.id).data.excerpt }}</p>
+                    <div v-if="previewState(update.id).data.truncated" class="portal-preview-fade"></div>
+                  </div>
+                  <p class="portal-preview-foot">
+                    Adelanto de {{ previewState(update.id).data.excerpt.length }} de
+                    {{ previewState(update.id).data.chars }} caracteres
+                    <template v-if="previewState(update.id).data.pages">· {{ previewState(update.id).data.pages }} página(s)</template>
+                  </p>
+                </template>
+
+                <template v-else-if="previewState(update.id).data?.kind === 'image' && previewState(update.id).imageUrl">
+                  <div class="portal-preview-paper is-image">
+                    <img :src="previewState(update.id).imageUrl" alt="Adelanto del entregable" class="portal-preview-img" />
+                    <div class="portal-preview-fade"></div>
+                  </div>
+                  <p class="portal-preview-foot">Adelanto parcial de la imagen.</p>
+                </template>
+
+                <p v-else class="portal-preview-msg">
+                  {{ previewState(update.id).data?.reason || 'No pudimos generar un adelanto de este archivo.' }}
+                </p>
+              </div>
+
+              <!-- La cuota que libera este avance, para pagarla sin cambiar de pestaña. -->
+              <div v-if="unlockPayment(update)" class="portal-locked-pay">
+                <label
+                  v-if="unlockPayment(update).estado === 'pendiente'"
+                  class="btn-primary portal-upload-btn"
+                  :class="{ 'is-disabled': uploadingId === unlockPayment(update).id }"
+                >
+                  {{ uploadingId === unlockPayment(update).id ? 'Subiendo…' : '📤 Subir comprobante de esta cuota' }}
+                  <input
+                    type="file"
+                    accept="image/*,application/pdf"
+                    capture="environment"
+                    hidden
+                    :disabled="uploadingId === unlockPayment(update).id"
+                    @change="(event) => handleUpload(unlockPayment(update), event)"
+                  />
+                </label>
+                <p v-else class="portal-locked-text">Tu comprobante está en revisión por Finanzas.</p>
+                <p v-if="uploadErrors[unlockPayment(update).id]" class="portal-upload-error">
+                  {{ uploadErrors[unlockPayment(update).id] }}
+                </p>
+              </div>
+              <button type="button" class="portal-locked-cta" @click="activeTab = 'pagos'">Ver todo el cronograma →</button>
             </div>
           </li>
         </ol>
@@ -138,7 +196,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { clientApiFetch } from '../../clientApiClient.js';
 import ProjectProgressStem from '../../components/ProjectProgressStem.vue';
@@ -154,6 +212,8 @@ const errorMessage = ref('');
 const activeTab = ref('resumen');
 const uploadingId = ref(null);
 const uploadErrors = reactive({});
+// Adelanto parcial de cada entregable retenido, indexado por id de avance.
+const previews = reactive({});
 
 const tabs = [
   { key: 'resumen', label: 'Resumen' },
@@ -222,10 +282,63 @@ async function loadProject() {
     tasks.value = data.tasks || [];
     updates.value = data.updates || [];
     payments.value = data.payments || [];
+    updates.value.forEach((update) => {
+      if (update.attachment_filename) {
+        previews[update.id] = { open: false, isLoading: false, error: '', data: null, imageUrl: '' };
+      }
+    });
   } catch (err) {
     errorMessage.value = err.message;
   } finally {
     isLoading.value = false;
+  }
+}
+
+/**
+ * Estado del adelanto de un avance. Las entradas se crean al cargar la línea
+ * de tiempo (no al renderizar) para no escribir en un reactive durante el
+ * render de la propia lista.
+ */
+function previewState(updateId) {
+  return previews[updateId] || { open: false, isLoading: false, error: '', data: null, imageUrl: '' };
+}
+
+/** La cuota que libera este entregable, tomada del cronograma ya cargado. */
+function unlockPayment(update) {
+  return payments.value.find((payment) => payment.id === update.income_id) || null;
+}
+
+/**
+ * Pide el adelanto del entregable. El extracto lo arma el servidor: acá nunca
+ * llega el archivo completo, ni siquiera oculto tras un estilo.
+ */
+async function togglePreview(update) {
+  const state = previewState(update.id);
+  if (state.open) {
+    state.open = false;
+    return;
+  }
+
+  state.open = true;
+  if (state.data || state.isLoading) return;
+
+  state.isLoading = true;
+  state.error = '';
+  try {
+    const response = await clientApiFetch(`/api/portal/projects/${project.value.id}/updates/${update.id}/preview`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No se pudo preparar el adelanto.');
+    state.data = data.preview;
+
+    if (data.preview?.kind === 'image') {
+      const image = await clientApiFetch(`/api/portal/projects/${project.value.id}/updates/${update.id}/preview/image`);
+      if (!image.ok) throw new Error('No se pudo preparar el adelanto.');
+      state.imageUrl = URL.createObjectURL(await image.blob());
+    }
+  } catch (err) {
+    state.error = err.message;
+  } finally {
+    state.isLoading = false;
   }
 }
 
@@ -251,6 +364,11 @@ async function handleUpload(payment, event) {
       target.receipts = [...(target.receipts || []), ...(data.receipts || [])];
       target.estado = 'pagado';
     }
+    // Los entregables atados a esta cuota pasan a "en revisión" en el acto: el
+    // cliente ve el efecto de su comprobante sin recargar la página.
+    updates.value.forEach((update) => {
+      if (update.income_id === payment.id) update.unlock_estado = 'pagado';
+    });
   } catch (err) {
     uploadErrors[payment.id] = err.message;
   } finally {
@@ -279,6 +397,14 @@ function openUpdateAttachment(update) {
 }
 
 onMounted(loadProject);
+
+// Los adelantos de imagen viven como object URL: si no se sueltan al salir de
+// la pantalla, el navegador se queda con los blobs en memoria.
+onBeforeUnmount(() => {
+  Object.values(previews).forEach((state) => {
+    if (state.imageUrl) URL.revokeObjectURL(state.imageUrl);
+  });
+});
 </script>
 
 <style scoped>
@@ -337,6 +463,83 @@ onMounted(loadProject);
   font-weight: 700;
   color: var(--primary);
   cursor: pointer;
+}
+
+/* Adelanto del entregable: se ve el arranque del documento y se corta con un
+   degradado, para que quede claro que hay más detrás del pago. */
+.portal-preview-toggle {
+  margin-top: 0.6rem;
+  padding: 0.3rem 0.65rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-sub);
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.portal-preview {
+  margin-top: 0.6rem;
+}
+
+.portal-preview-paper {
+  position: relative;
+  max-height: 190px;
+  overflow: hidden;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-card-solid);
+}
+
+.portal-preview-paper.is-image {
+  padding: 0;
+  max-height: 220px;
+}
+
+.portal-preview-text {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.6;
+  color: var(--text-sub);
+  white-space: pre-line;
+  /* El adelanto se mira, no se copia: el archivo se entrega al verificar el pago. */
+  user-select: none;
+}
+
+.portal-preview-img {
+  display: block;
+  width: 100%;
+  object-fit: cover;
+  user-select: none;
+  pointer-events: none;
+}
+
+.portal-preview-fade {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 70px;
+  background: linear-gradient(to bottom, transparent, var(--bg-card-solid));
+}
+
+.portal-preview-msg {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.portal-preview-foot {
+  margin: 0.4rem 0 0;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+
+.portal-locked-pay {
+  margin-top: 0.7rem;
 }
 
 .portal-payment-summary {

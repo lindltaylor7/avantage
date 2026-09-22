@@ -108,7 +108,12 @@ antes de tocar el arranque de producción.
 - Un hito de la línea de tiempo puede atarse a una cuota (`project_updates.income_id`): el cliente
   lo ve en su portal con el adjunto **bloqueado** hasta que Finanzas verifique ese pago. Como
   `projects.is_locked`, el `is_locked` del hito se deriva del estado del ingreso en cada lectura —
-  nunca se guarda— y la descarga del portal lo verifica también en el servidor (403).
+  nunca se guarda— y la descarga del portal lo verifica también en el servidor (403). Del
+  entregable retenido el portal sí muestra un **adelanto parcial**
+  (`attachmentPreviewService.js`): un extracto de texto de las primeras líneas — PDF, DOCX/ODT y
+  texto plano, extraído solo con `zlib`, sin dependencias nuevas — o los primeros bytes si es una
+  imagen. El recorte se hace en el servidor: el archivo completo nunca viaja al navegador antes de
+  que el pago esté verificado.
 - **RBAC**: `roles` ↔ `permissions` (N:N vía `role_permissions`) ↔ `users` (N:1 vía `role_id`). Los
   permisos son "herramientas" habilitables (`leads.view`, `projects.view`, `roles.manage`,
   `finance.view`, ...); se resuelven una vez en el login y se embeben en el JWT.
