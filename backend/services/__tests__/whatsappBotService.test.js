@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractLeadFormFields, detectRedundantAsk, daysMatchingPreferredTime, spreadSlotsAcrossDays, schedulingPurpose, asksForPhoneCall } from '../whatsappBotService.js';
+import { extractLeadFormFields, detectRedundantAsk, daysMatchingPreferredTime, spreadSlotsAcrossDays, schedulingPurpose, asksForPhoneCall, slotMenuFooter, urgencyOpener } from '../whatsappBotService.js';
 
 // Mensaje real (anonimizado) de un lead de Meta Ads con formulario propio:
 // llega como líneas "¿Pregunta?: Respuesta" que el LLM de conversación a
@@ -119,6 +119,42 @@ test('asksForPhoneCall reconoce el sustantivo suelto', () => {
   assert.equal(asksForPhoneCall('Celular'), true);
   assert.equal(asksForPhoneCall('mejor por teléfono porfa'), true);
   assert.equal(asksForPhoneCall('llámenme mejor'), true);
+});
+
+// Caso real: un lead escribió a las 22:15, vio tres horarios del día
+// siguiente y, como el único camino alternativo que el menú le nombraba era
+// "no", respondió "No" y se transfirió a un asesor a las 22:22.
+test('slotMenuFooter ofrece pedir otra hora cuando solo hay agenda ese día', () => {
+  const slots = [{ date: '2026-09-22' }, { date: '2026-09-22' }, { date: '2026-09-22' }];
+  const footer = slotMenuFooter(slots, ['2026-09-22']);
+  assert.match(footer, /dime a qué hora te viene mejor/);
+  assert.doesNotMatch(footer, /qué día/);
+  assert.match(footer, /"no"/);
+});
+
+test('slotMenuFooter ofrece pedir otro día cuando de verdad hay otro día', () => {
+  const slots = [{ date: '2026-09-22' }];
+  assert.match(slotMenuFooter(slots, ['2026-09-22', '2026-09-23']), /dime qué día y hora te vienen mejor/);
+  // Y también cuando la propia lista ya mezcla días.
+  assert.match(slotMenuFooter([{ date: '2026-09-22' }, { date: '2026-09-23' }]), /dime qué día y hora te vienen mejor/);
+});
+
+test('slotMenuFooter sin datos de agenda no promete días que no sabe si existen', () => {
+  assert.match(slotMenuFooter(), /dime a qué hora te viene mejor/);
+});
+
+// "¿Para cuándo necesitas avanzar?" era el tercer campo del formulario que se
+// preguntaba y no se leía en ninguna parte.
+test('extractLeadFormFields lee para cuándo necesita avanzar', () => {
+  assert.equal(extractLeadFormFields('¿Para cuándo necesitas avanzar?: Lo antes posible').urgency, 'asap');
+  assert.equal(extractLeadFormFields('¿Para cuándo necesitas avanzar?: Este mes').urgency, 'pronto');
+  assert.equal(extractLeadFormFields('¿Para cuándo necesitas avanzar?: Solo estoy explorando').urgency, 'explorando');
+});
+
+test('urgencyOpener reconoce la prisa que declaró el lead', () => {
+  assert.equal(urgencyOpener('asap'), 'Coordinemos cuanto antes');
+  assert.equal(urgencyOpener('explorando'), 'Coordinemos, sin compromiso,');
+  assert.equal(urgencyOpener(undefined), 'Coordinemos');
 });
 
 test('asksForPhoneCall no cambia la modalidad si el lead nombra el Meet', () => {

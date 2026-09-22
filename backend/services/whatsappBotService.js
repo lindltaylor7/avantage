@@ -400,6 +400,8 @@ const FORM_FIELD_LABEL_RE = /carrera/i;
 const FORM_PROGRESS_LABEL_RE = /en\s+qu[eé]\s+punto|en\s+qu[eé]\s+etapa|etapa\s+(?:de\s+)?(?:tu\s+)?tesis|qu[eé]\s+tan\s+avanzado|avance\s+(?:de\s+)?(?:tu\s+)?tesis|estado\s+de\s+(?:tu\s+)?tesis/i;
 // "¿Qué necesitas resolver?" — el servicio que el lead viene buscando.
 const FORM_NEED_LABEL_RE = /qu[eé]\s+necesitas|necesitas\s+resolver|qu[eé]\s+servicio|en\s+qu[eé]\s+te\s+(?:podemos\s+)?ayudamos?/i;
+// "¿Para cuándo necesitas avanzar?" — con cuánta prisa viene.
+const FORM_URGENCY_LABEL_RE = /para\s+cu[aá]ndo|cu[aá]ndo\s+necesitas|qu[eé]\s+urgencia|para\s+qu[eé]\s+fecha/i;
 // Mismas frases que el prompt del LLM ya trata como "no tiene tema, empieza
 // de cero" cuando la persona las escribe directamente en el chat (ver
 // ollamaService.js): si el formulario la responde así de entrada, es la
@@ -425,6 +427,34 @@ function mapThesisStage(value) {
   return null;
 }
 
+/**
+ * "¿Para cuándo necesitas avanzar?" -> valor canónico, o null. Era el tercer
+ * campo del formulario que se preguntaba y se tiraba: el lead declara que
+ * tiene prisa y el bot le hablaba exactamente igual que al que está mirando
+ * opciones para el año que viene.
+ */
+function mapLeadUrgency(value) {
+  const v = normalize(String(value || ''));
+  if (/lo\s*antes\s*posible|cuanto\s*antes|urgente|de\s*inmediato|ya\s*mismo|esta\s*semana/.test(v)) return 'asap';
+  if (/este\s*mes|proximas?\s*semanas?|en\s*(dos|tres|\d+)\s*semanas?/.test(v)) return 'pronto';
+  if (/explorando|solo\s*estoy|cotizando|sin\s*apuro|no\s*tengo\s*apuro|mas\s*adelante|proximo\s*(ciclo|semestre|ano)/.test(v)) return 'explorando';
+  if (/\d\s*(a|-)?\s*\d*\s*meses|en\s*unos\s*meses/.test(v)) return 'meses';
+  return null;
+}
+
+/**
+ * Cómo arranca la propuesta de reunión según la prisa que declaró el lead.
+ * No cambia lo que se le ofrece (la agenda es la que es), pero sí reconoce lo
+ * que acaba de decir, que es justo lo que no pasaba.
+ */
+export function urgencyOpener(urgency) {
+  switch (urgency) {
+    case 'asap': return 'Coordinemos cuanto antes';
+    case 'explorando': return 'Coordinemos, sin compromiso,';
+    default: return 'Coordinemos';
+  }
+}
+
 /** "¿Qué necesitas resolver?" -> valor canónico, o null si no se reconoce. */
 function mapLeadNeed(value) {
   const v = normalize(String(value || ''));
@@ -446,6 +476,12 @@ const NEED_LABELS = {
   correcciones: 'Correcciones / levantamiento de observaciones',
   acompanamiento: 'Acompañamiento completo',
   por_etapas: 'Asesoría por etapas'
+};
+const URGENCY_LABELS = {
+  asap: 'Lo antes posible',
+  pronto: 'Este mes',
+  meses: 'En los próximos meses',
+  explorando: 'Todavía explorando'
 };
 
 /**
@@ -487,6 +523,9 @@ export function extractLeadFormFields(text) {
     } else if (!fields.need && FORM_NEED_LABEL_RE.test(label)) {
       const need = mapLeadNeed(value);
       if (need) fields.need = need;
+    } else if (!fields.urgency && FORM_URGENCY_LABEL_RE.test(label)) {
+      const urgency = mapLeadUrgency(value);
+      if (urgency) fields.urgency = urgency;
     } else if (!fields.phone && FORM_PHONE_LABEL_RE.test(label) && looksLikePhone(value)) {
       fields.phone = digitsOnly(value);
     }
@@ -504,6 +543,31 @@ export function extractLeadFormFields(text) {
 export function isAdFormMessage(text) {
   const fields = extractLeadFormFields(text);
   return !!(fields.level || fields.university || fields.field || fields.problem || fields.stage || fields.need);
+}
+
+/**
+ * Cierre de los menús de horarios.
+ *
+ * Antes decía siempre lo mismo: «Responde con el número que prefieras, o "no"
+ * si prefieres que te contacten después». Al lead al que ninguno de los tres
+ * horarios le servía, la única salida que se le nombraba era la que apaga el
+ * bot y despierta a una persona — y la tomaba. Caso real: un lead escribió a
+ * las 22:15, vio tres horarios de la mañana siguiente, respondió "No" y se
+ * transfirió a un asesor a las 22:22. El flujo SÍ sabe atender "mejor a las
+ * 6" o "el jueves" (lo resuelven _answerDayRequestWhileChoosing y el paso de
+ * horario), pero eso no se le decía en ningún momento.
+ *
+ * Lo que se ofrece se ajusta a lo que de verdad hay: solo se le invita a
+ * pedir OTRO DÍA si existe otro día con agenda. Si no, se le invita a pedir
+ * otra hora, que es lo que sí se le puede cumplir.
+ */
+export function slotMenuFooter(slots = [], availableDays = []) {
+  const shownDays = new Set((slots || []).map((slot) => slot.date).filter(Boolean));
+  const hasOtherDay = shownDays.size > 1 || (availableDays || []).some((day) => !shownDays.has(day));
+  const alternative = hasOtherDay
+    ? 'dime qué día y hora te vienen mejor'
+    : 'dime a qué hora te viene mejor y la busco';
+  return `Responde con el número que prefieras. Si ninguno te acomoda, ${alternative}, o "no" si prefieres que te contacten después.`;
 }
 
 /** Interpreta la elección de modalidad de llamada: 'phone' | 'meet' | null. */
@@ -1524,6 +1588,7 @@ export class WhatsappBotService {
         // schedulingPurpose) y para que el asesor los vea en la ficha del lead.
         if (formFields.stage) answers.stage = formFields.stage;
         if (formFields.need) answers.need = formFields.need;
+        if (formFields.urgency) answers.urgency = formFields.urgency;
         await this.updateSession(waId, { answers: JSON.stringify(answers) });
 
         this.logActivity({ type: 'ad_form_lead_fast_track', waId, formFields });
@@ -1796,6 +1861,7 @@ export class WhatsappBotService {
       (university ? ` | Universidad: ${university}` : '') +
       (STAGE_LABELS[answers.stage] ? ` | Etapa: ${STAGE_LABELS[answers.stage]}` : '') +
       (NEED_LABELS[answers.need] ? ` | Necesita: ${NEED_LABELS[answers.need]}` : '') +
+      (URGENCY_LABELS[answers.urgency] ? ` | Urgencia: ${URGENCY_LABELS[answers.urgency]}` : '') +
       ' | Origen: WhatsApp (Avan, bot automático)';
 
     // Antes había aquí un mensaje intro largo ("¡Genial! Con lo que me
@@ -2103,7 +2169,7 @@ export class WhatsappBotService {
       const purpose = schedulingPurpose({ stage: answers.stage, need: answers.need, hasTopic });
       await this.send(
         waId,
-        `${opener}Coordinemos una reunión por Google Meet con nuestro asesor para ${purpose} 🙌 ` +
+        `${opener}${urgencyOpener(answers.urgency)} una reunión por Google Meet con nuestro asesor para ${purpose} 🙌 ` +
         `Por Google Meet tienes ${MEET_DISCOUNT_PCT}% de descuento sobre el precio final; si prefieres una llamada telefónica, solo dímelo.`
       );
       await this.promptForDate(waId);
@@ -2165,7 +2231,7 @@ export class WhatsappBotService {
         const list = numberedList(slotOptionLabels(scheduling.slots));
         return {
           question: `¿Cuál de estos horarios prefieres?\n${list}`,
-          restate: `Volviendo a los horarios:\n\n${list}\n\nResponde con el número que prefieras, o "no" si prefieres que te contacten después.`,
+          restate: `Volviendo a los horarios:\n\n${list}\n\n${slotMenuFooter(scheduling.slots, scheduling.availableDays)}`,
           restateShort: '¿Con cuál de esos horarios te quedas? Responde con su número.'
         };
       }
@@ -2432,7 +2498,7 @@ export class WhatsappBotService {
       await this.updateSession(waId, { answers: JSON.stringify(answers) });
       await this.send(
         waId,
-        `Estos son los horarios más cercanos a lo que buscas:\n\n${numberedList(slotOptionLabels(nearSlots))}\n\nResponde con el número que prefieras, o "no" si prefieres que te contacten después.`
+        `Estos son los horarios más cercanos a lo que buscas:\n\n${numberedList(slotOptionLabels(nearSlots))}\n\n${slotMenuFooter(nearSlots, scheduling.availableDays)}`
       );
       return true;
     }
@@ -2502,7 +2568,7 @@ export class WhatsappBotService {
       await this.send(
         waId,
         `${intro}\n\n${numberedList(slotOptionLabels(offered))}\n\n` +
-        'Responde con el número que prefieras, o "no" si prefieres que te contacten después.'
+        slotMenuFooter(offered, scheduling.availableDays)
       );
       return true;
     }
@@ -2523,7 +2589,7 @@ export class WhatsappBotService {
     await this.send(
       waId,
       `${reason} Lo más cercano que tenemos:\n\n${numberedList(fullSlotLabels(scheduling.slots))}\n\n` +
-      'Responde con el número que prefieras, o "no" si prefieres que te contacten después.'
+      slotMenuFooter(scheduling.slots, scheduling.availableDays)
     );
     return true;
   }
@@ -2672,7 +2738,7 @@ export class WhatsappBotService {
             await this.send(
               waId,
               `${intro}\n\n${numberedList(labels)}\n\n` +
-              'Responde con el número que prefieras, o "no" si prefieres que te contacten después.'
+              slotMenuFooter(slots, days)
             );
             return;
           }
@@ -2695,7 +2761,7 @@ export class WhatsappBotService {
           ? `${droppedDayNotice} Tenemos agenda para ${dayLabelWithArticle(day)}. Estos son los horarios:\n\n`
           : `📅 Tenemos agenda para ${dayLabelWithArticle(day)}. Estos son los horarios:\n\n`) +
         `${numberedList(slotOptionLabels(slots))}\n\n` +
-        'Responde con el número que prefieras, o "no" si prefieres que te contacten después.'
+        slotMenuFooter(slots, days)
       );
       return;
     }
@@ -2846,7 +2912,7 @@ ${numberedList(fullSlotLabels(offer))}
     await this.send(
       waId,
       `${notice}Sin problema, cambiamos el horario 👍\n\n${numberedList(labels)}\n\n` +
-      'Responde con el número que prefieras, o "no" si prefieres que te contacten después.'
+      slotMenuFooter(scheduling.slots, scheduling.availableDays)
     );
     return true;
   }
@@ -3113,7 +3179,7 @@ ${numberedList(fullSlotLabels(offer))}
     await this.updateSession(waId, { status: 'scheduling_time', answers: JSON.stringify(answers) });
 
     const list = numberedList(slotOptionLabels(slots));
-    await this.send(waId, `${intro}\n\n${list}\n\nResponde con el número que prefieras, o "no" si prefieres que te contacten después.`);
+    await this.send(waId, `${intro}\n\n${list}\n\n${slotMenuFooter(slots, availableDays)}`);
   }
 
   /**
@@ -3165,7 +3231,7 @@ ${numberedList(fullSlotLabels(offer))}
           await this.updateSession(waId, { answers: JSON.stringify(answers) });
           await this.send(
             waId,
-            `Ese horario ya no está disponible, pero estos son los más cercanos a lo que buscas:\n\n${numberedList(slotOptionLabels(nearSlots))}\n\nResponde con el número que prefieras, o "no" si prefieres que te contacten después.`
+            `Ese horario ya no está disponible, pero estos son los más cercanos a lo que buscas:\n\n${numberedList(slotOptionLabels(nearSlots))}\n\n${slotMenuFooter(nearSlots, scheduling.availableDays)}`
           );
           return;
         }
