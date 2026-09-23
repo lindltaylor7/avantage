@@ -106,7 +106,8 @@ export const CAREER_GROUPS = [
       'Literatura y Lingüística',
       'Filosofía',
       'Historia',
-      'Traducción e Interpretación'
+      'Traducción e Interpretación',
+      'Gestión Educativa'
     ]
   },
   {
