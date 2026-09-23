@@ -18,6 +18,7 @@ import { buildContractDocument } from './services/contractDocument.js';
 import { buildQuotationDocument } from './services/quotationDocument.js';
 import { buildPaymentReceiptDocument } from './services/paymentReceiptDocument.js';
 import { buildPaymentReceiptPdf, receiptPdfFilename } from './services/paymentReceiptPdf.js';
+import { LeadNoteService } from './services/leadNoteService.js';
 import { CampaignService } from './services/campaignService.js';
 import { MetaAdsService } from './services/metaAdsService.js';
 import { TikTokAdsService } from './services/tiktokAdsService.js';
@@ -114,6 +115,7 @@ const taskService = new TaskService();
 const taskTemplateService = new TaskTemplateService();
 const quoteService = new QuoteService();
 const contractTemplateService = new ContractTemplateService();
+const leadNoteService = new LeadNoteService();
 const campaignService = new CampaignService();
 const metaAdsService = new MetaAdsService();
 const tiktokAdsService = new TikTokAdsService();
@@ -1519,6 +1521,52 @@ app.get('/api/leads/:id', requireAuth, requirePermission('leads.view'), async (r
   } catch (error) {
     console.error('❌ Error al obtener el lead:', error);
     res.status(500).json({ error: 'Error al obtener el lead desde la base de datos.', details: error.message });
+  }
+});
+
+/* ------------------- Notas / observaciones de un lead ------------------ */
+/*
+ * Bitácora interna del setter y del closer ("en qué se quedó este lead").
+ * Vive aparte de `leads.additional_notes`, que lo escribe el propio prospecto
+ * en el evaluador de tesis. La ruta de borrado cuelga de /api/lead-notes y no
+ * de /api/leads/... para no competir con `/api/leads/:id`.
+ */
+
+app.get('/api/leads/:id/notes', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const notes = await leadNoteService.listForLead(req.params.id);
+    res.json({ notes });
+  } catch (error) {
+    console.error('❌ Error al obtener las notas del lead:', error);
+    res.status(500).json({ error: 'Error al obtener las notas del lead.', details: error.message });
+  }
+});
+
+app.post('/api/leads/:id/notes', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const note = await leadNoteService.create(req.params.id, { body: req.body?.body, author: req.user });
+    res.status(201).json({ note });
+  } catch (error) {
+    const badRequest = ['EMPTY_NOTE', 'NOTE_TOO_LONG'];
+    if (badRequest.includes(error.code)) return res.status(400).json({ error: error.message });
+    if (error.code === 'LEAD_NOT_FOUND') return res.status(404).json({ error: error.message });
+    console.error('❌ Error al guardar la nota del lead:', error);
+    res.status(500).json({ error: 'Error al guardar la nota.', details: error.message });
+  }
+});
+
+app.delete('/api/lead-notes/:noteId', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    await leadNoteService.remove(req.params.noteId, {
+      userId: req.user.id,
+      canManage: req.user.permissions?.includes('roles.manage')
+    });
+    res.json({ success: true });
+  } catch (error) {
+    if (error.code === 'NOTE_NOT_FOUND') return res.status(404).json({ error: error.message });
+    if (error.code === 'FORBIDDEN') return res.status(403).json({ error: error.message });
+    console.error('❌ Error al borrar la nota del lead:', error);
+    res.status(500).json({ error: 'Error al borrar la nota.', details: error.message });
   }
 });
 

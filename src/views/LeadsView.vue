@@ -758,6 +758,9 @@
             </label>
           </div>
 
+          <!-- Bitácora del seguimiento: en qué se quedó este lead -->
+          <LeadNotes :lead-id="selectedLead.id" class="lead-notes-panel" />
+
           <!-- Conversación con el bot de WhatsApp (Avan) -->
           <div v-if="selectedLead.phone" class="bot-chat-section">
             <button
@@ -1018,6 +1021,7 @@ import { QUOTE_DELIVERABLES, QUOTE_SERVICE_DEFAULTS, deliverableLine } from '../
 import { careerGroupsWith, DEFAULT_CAREER } from '../data/careers.js';
 import { hasPermission } from '../auth.js';
 import WinDealModal from '../components/WinDealModal.vue';
+import LeadNotes from '../components/LeadNotes.vue';
 
 // Columnas predeterminadas del sistema (usadas solo para "Restablecer columnas")
 const DEFAULT_COLUMNS = [
@@ -3428,6 +3432,8 @@ onMounted(() => {
 .info-value.selectable {
   user-select: all;
 }
+
+.lead-notes-panel { margin-top: 1.25rem; }
 
 .lead-notes-box {
   background: var(--surface-1);

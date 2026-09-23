@@ -129,9 +129,9 @@
       <div class="items-per-page-box">
         <span class="toolbar-label">Por pág:</span>
         <select v-model="itemsPerPage" class="items-select" title="Límite de tarjetas por columna">
-          <option :value="5">5 leads</option>
-          <option :value="8">8 leads</option>
-          <option :value="12">12 leads</option>
+          <option :value="10">10 leads</option>
+          <option :value="20">20 leads</option>
+          <option :value="30">30 leads</option>
           <option value="all">Ver todos</option>
         </select>
       </div>
@@ -286,99 +286,17 @@
               @dragend="onDragEnd"
               @click="selectedLead = lead"
             >
-              <!-- Línea superior: ID, Canal de Origen y Viabilidad -->
-              <div class="card-header-line">
-                <span class="lead-id-tag">#{{ lead.id }}</span>
-
-                <!-- Badge del Canal de Origen (WhatsApp / Facebook / Instagram) -->
-                <span
-                  class="channel-tag-badge"
-                  :class="getLeadChannelInfo(lead).cssClass"
-                  :title="'Origen: ' + (lead.source || getLeadChannelInfo(lead).label)"
-                >
-                  <span class="channel-tag-icon">{{ getLeadChannelInfo(lead).icon }}</span>
-                  <span class="channel-tag-text">{{ getLeadChannelInfo(lead).label }}</span>
-                </span>
-
-                <span :class="['viability-pill', getLevelClass(lead.viability_level)]">
-                  {{ lead.overall_viability_score ?? '—' }}%
-                </span>
-              </div>
-
-              <!-- Nombre Completo del Prospecto -->
-              <div class="card-lead-name-box">
-                <span class="lead-name-icon">👤</span>
-                <h4 class="card-lead-name" :title="getLeadFullName(lead)">
-                  {{ getLeadFullName(lead) }}
-                </h4>
-              </div>
-
-              <!-- Tema o Necesidad de Tesis -->
-              <p
-                v-if="lead.topic && lead.topic.trim() && lead.topic.trim().toLowerCase() !== (lead.full_name || '').trim().toLowerCase()"
-                class="card-lead-topic"
-                :title="lead.topic"
-              >
-                <span class="topic-icon">📄</span> {{ lead.topic }}
-              </p>
-
-              <!-- Información de Contacto -->
-              <div class="card-lead-contact">
-                <div class="contact-row" :title="lead.phone">
-                  <span class="icon">📱</span>
-                  <span>{{ lead.phone || 'Sin número' }}</span>
-                </div>
-                <div v-if="lead.email" class="contact-row" :title="lead.email">
-                  <span class="icon">✉️</span>
-                  <span class="truncate">{{ lead.email }}</span>
-                </div>
-              </div>
-
-              <!-- Badge Académico -->
-              <div class="card-academic-badge" v-if="lead.field_of_study || lead.academic_level">
-                <span>🎓 {{ formatAcademic(lead.academic_level, lead.field_of_study) }}</span>
-              </div>
-
-              <!-- Footer de la tarjeta -->
-              <div class="card-footer-line">
-                <div class="footer-meta">
-                  <span v-if="lead.assigned_to" class="setter-assigned-pill" :title="'Setter/Asesor: ' + lead.assigned_to">
-                    👤 {{ lead.assigned_to }}
-                  </span>
-                  <span v-else class="lead-date-tag">
-                    🕒 {{ formatDateShort(lead.created_at) }}
-                  </span>
-                </div>
-
-                <!-- Accesos rápidos para el Setter -->
-                <div class="quick-contact-actions" @click.stop>
-                  <a
-                    v-if="lead.phone"
-                    :href="'https://wa.me/' + normalizePhone(lead.phone)"
-                    target="_blank"
-                    rel="noopener"
-                    class="quick-icon-btn whatsapp"
-                    title="Chatear por WhatsApp"
-                  >
-                    💬
-                  </a>
-                  <a
-                    v-if="lead.email"
-                    :href="'mailto:' + lead.email"
-                    class="quick-icon-btn email"
-                    title="Enviar Correo"
-                  >
-                    ✉️
-                  </a>
-                  <button
-                    class="quick-icon-btn detail"
-                    @click.stop="selectedLead = lead"
-                    title="Ver ficha completa"
-                  >
-                    👁️
-                  </button>
-                </div>
-              </div>
+              <!-- La tarjeta dice lo mínimo para reconocer al lead y llamarlo
+                   —la misma que el funnel de ventas—; todo lo demás (canal,
+                   viabilidad, tema, accesos rápidos y las notas del setter)
+                   está en la ficha que se abre al hacer clic. Así entran diez
+                   de un vistazo en la columna, que es como se trabaja el
+                   tablero. El borde de color se conserva porque no ocupa
+                   espacio y es como el setter distingue el canal de origen. -->
+              <h4 class="card-lead-name" :title="getLeadFullName(lead)">
+                {{ getLeadFullName(lead) }}
+              </h4>
+              <span class="card-lead-phone">📱 {{ lead.phone || 'Sin celular' }}</span>
             </div>
 
             <!-- Silueta de Destino al Arrastrar -->
@@ -857,6 +775,9 @@
               </p>
             </div>
           </div>
+
+          <!-- Bitácora del seguimiento: en qué se quedó este lead -->
+          <LeadNotes :lead-id="selectedLead.id" />
          </div>
 
           <!-- Panel lateral: conversación con el bot de WhatsApp (Avan) -->
@@ -915,6 +836,7 @@
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { apiFetch } from '../apiClient.js';
 import { loadApiImage } from '../apiImage.js';
+import LeadNotes from '../components/LeadNotes.vue';
 
 /** Deja de mostrar solo "[Imagen]"/"[Video]": para esos placeholders se intenta cargar el adjunto real. */
 const MEDIA_BODY_PLACEHOLDER_RE = /^\[(Imagen|Video|Audio|Documento|Sticker)\]$/;
@@ -1028,7 +950,7 @@ const selectedViabilityFilter = ref('all');
 
 // Paginación por Columna
 const columnPages = reactive({});
-const itemsPerPage = ref(8);
+const itemsPerPage = ref(10);
 
 function getColumnPage(colKey) {
   return columnPages[colKey] || 1;
@@ -1626,24 +1548,6 @@ function getLevelClass(level) {
   if (lvl.includes('media')) return 'viability-medium';
   if (lvl.includes('baja')) return 'viability-low';
   return 'viability-unknown';
-}
-
-function normalizePhone(phone) {
-  return String(phone || '').replace(/\D/g, '');
-}
-
-function formatAcademic(level, field) {
-  const parts = [];
-  if (level) parts.push(level);
-  if (field) parts.push(field);
-  return parts.join(' — ') || 'Académico General';
-}
-
-function formatDateShort(dateStr) {
-  if (!dateStr) return 'Reciente';
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return 'Reciente';
-  return d.toLocaleDateString('es-PE', { day: '2-digit', month: 'short' });
 }
 
 function formatDate(dateStr) {
@@ -2393,32 +2297,53 @@ onMounted(() => {
 
 /* Cuerpo de la Columna y Tarjetas */
 .kanban-column-body {
-  padding: 0.85rem;
+  --lead-card-h: 52px;
+  --lead-card-gap: 0.5rem;
+  --column-visible-cards: 10;
+  flex: 1;
+  padding: 0.6rem;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  min-height: 280px;
-  max-height: 620px;
+  gap: var(--lead-card-gap);
   overflow-y: auto;
+  min-height: calc(2 * var(--lead-card-h));
+  /* Diez tarjetas + sus separaciones + el padding de arriba y abajo: lo que
+     pase de ahí se ve al hacer scroll (o cambiando "Ver por pág"). */
+  max-height: calc(
+    var(--column-visible-cards) * var(--lead-card-h) +
+    (var(--column-visible-cards) - 1) * var(--lead-card-gap) +
+    1.2rem
+  );
 }
 
+/* Altura fija (--lead-card-h): con todas las tarjetas iguales, el cuerpo de
+   la columna se dimensiona para mostrar exactamente diez sin scroll. */
 .kanban-lead-card {
   background: var(--bg-card-solid);
   border: 1px solid var(--border-color);
-  border-radius: 14px;
-  padding: 0.85rem;
-  cursor: pointer;
-  transition: all 0.2s ease;
+  border-radius: 10px;
+  padding: 0.5rem 0.7rem;
+  cursor: grab;
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, opacity 0.2s ease;
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 0.55rem;
+  justify-content: center;
+  gap: 0.1rem;
+  height: var(--lead-card-h);
+  flex-shrink: 0;
+  overflow: hidden;
 }
 
 .kanban-lead-card:hover {
   transform: translateY(-2px);
-  border-color: var(--surface-4);
+  border-color: var(--surface-5);
   box-shadow: var(--shadow-md);
+}
+
+.kanban-lead-card:active {
+  cursor: grabbing;
 }
 
 .kanban-lead-card.channel-whatsapp-border {
@@ -2438,58 +2363,6 @@ onMounted(() => {
   transform: scale(0.96);
 }
 
-.card-header-line {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.4rem;
-}
-
-.lead-id-tag {
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: var(--text-muted);
-}
-
-/* Badge de Canal en la tarjeta */
-.channel-tag-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.15rem 0.5rem;
-  border-radius: 10px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.channel-tag-badge.channel-whatsapp {
-  background: rgba(46, 125, 70, 0.16);
-  color: var(--accent-emerald);
-  border: 1px solid rgba(46, 125, 70, 0.35);
-}
-
-.channel-tag-badge.channel-facebook {
-  background: rgba(107, 122, 94, 0.16);
-  color: var(--accent-cyan);
-  border: 1px solid rgba(107, 122, 94, 0.35);
-}
-
-.channel-tag-badge.channel-instagram {
-  background: rgba(138, 63, 40, 0.16);
-  color: var(--accent-pink);
-  border: 1px solid rgba(138, 63, 40, 0.35);
-}
-
-.channel-tag-badge.channel-direct {
-  background: var(--surface-2);
-  color: var(--text-sub);
-  border: 1px solid var(--border-color);
-}
-
 .viability-pill {
   font-size: 0.72rem;
   font-weight: 700;
@@ -2502,119 +2375,25 @@ onMounted(() => {
 .viability-low { background: rgba(200, 85, 50, 0.18); color: var(--accent-rose); }
 .viability-unknown { background: var(--surface-2); color: var(--text-muted); }
 
-.card-lead-name-box {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.lead-name-icon {
-  font-size: 0.85rem;
-  opacity: 0.7;
-}
-
+/* Contenido de la tarjeta: lo mismo que el funnel de ventas. Un nombre largo
+   se recorta en vez de crecer — si la tarjeta cambia de alto, dejan de entrar
+   diez; el nombre completo va en el `title`. */
 .card-lead-name {
-  font-size: 0.92rem;
+  font-size: 0.86rem;
   font-weight: 700;
   color: var(--text-main);
   line-height: 1.3;
   margin: 0;
-}
-
-.card-lead-topic {
-  font-size: 0.8rem;
-  color: var(--text-sub);
-  line-height: 1.35;
-  margin: 0;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.card-lead-contact {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.78rem;
-  color: var(--text-muted);
-}
-
-.contact-row {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.card-academic-badge {
-  background: var(--surface-1);
-  padding: 0.25rem 0.5rem;
-  border-radius: 6px;
-  font-size: 0.75rem;
-  color: var(--accent-silver);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.card-footer-line {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 0.25rem;
-  padding-top: 0.45rem;
-  border-top: 1px solid var(--surface-2);
-}
-
-.footer-meta {
-  font-size: 0.72rem;
+.card-lead-phone {
+  font-family: var(--font-mono);
+  font-size: 0.73rem;
   color: var(--text-muted);
-}
-
-.setter-assigned-pill {
-  background: rgba(158, 186, 75, 0.12);
-  color: #5AAEB8;
-  padding: 0.1rem 0.4rem;
-  border-radius: 6px;
-  font-weight: 600;
-}
-
-.quick-contact-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-
-.quick-icon-btn {
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.75rem;
-  text-decoration: none;
-  background: var(--surface-2);
-  border: 1px solid var(--border-color);
-  color: var(--text-main);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.quick-icon-btn.whatsapp:hover {
-  background: #2F7D5A;
-  border-color: #2F7D5A;
-  color: #fff;
-}
-
-.quick-icon-btn.email:hover {
-  background: #56624A;
-  border-color: #56624A;
-  color: #fff;
-}
-
-.quick-icon-btn.detail:hover {
-  background: var(--surface-4);
+  white-space: nowrap;
 }
 
 /* Silueta Drop Preview */
