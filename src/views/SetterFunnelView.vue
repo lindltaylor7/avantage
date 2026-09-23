@@ -179,6 +179,23 @@
       </div>
     </transition>
 
+    <!-- Toast del Pase Manual al Funnel de Closer -->
+    <transition name="toast-slide">
+      <div v-if="handoffToast" class="project-created-banner handoff-banner">
+        <div class="banner-content">
+          <span class="banner-icon">🤝</span>
+          <div>
+            <strong>Lead pasado al Funnel de Closer</strong>
+            <p class="banner-subtext">"{{ handoffToast.name }}" ya no está en el Setter Funnel: lo trabaja el closer.</p>
+          </div>
+        </div>
+        <div class="banner-actions">
+          <router-link to="/admin/leads" class="banner-btn primary">Ver en Funnel de Ventas</router-link>
+          <button class="banner-btn secondary" @click="handoffToast = null">✕</button>
+        </div>
+      </div>
+    </transition>
+
     <!-- Tablero Kanban Dinámico con Scroll Suave -->
     <div class="kanban-viewport custom-scrollbar" ref="kanbanBoardRef">
       <div class="kanban-columns-container">
@@ -731,6 +748,25 @@
                   {{ c.icon }} {{ c.label }} {{ c.final ? ' (🏆 Cierre)' : '' }}
                 </option>
               </select>
+
+              <!-- Pase manual al closer: para la reunión que agenda el propio
+                   setter (por teléfono, por WhatsApp a mano…) y que el bot no
+                   registró. Deja el lead en el mismo estado que el pase
+                   automático, así que el closer lo ve igual. -->
+              <button
+                v-if="!SALES_FUNNEL_STATUSES.has(selectedLead.status)"
+                type="button"
+                class="handoff-closer-btn"
+                :disabled="handingOff"
+                title="La reunión ya está agendada: pasa el lead al Funnel de Ventas para que lo trabaje el closer"
+                @click="handOffToCloser(selectedLead)"
+              >
+                {{ handingOff ? 'Pasando…' : '🤝 Pasar al funnel de Closer (cita agendada a mano)' }}
+              </button>
+              <p v-else class="handoff-done-hint">
+                ✅ Este lead ya está en el Funnel de Ventas
+                (<strong>{{ SALES_FUNNEL_STATUS_LABELS[selectedLead.status] || selectedLead.status }}</strong>).
+              </p>
             </div>
           </div>
 
@@ -1137,6 +1173,30 @@ const qualificationRate = computed(() => {
 });
 
 // Agrupación y Mapeo de Leads en Columnas del Setter Funnel
+/**
+ * Estados que ya pertenecen al Funnel de Ventas: el lead "graduó" del Setter
+ * Funnel y lo trabaja el closer. `transferido_closer` NO está aquí a propósito
+ * — es un lead que Avan pasó a una persona SIN llegar a agendar, así que sigue
+ * siendo del setter (ver SETTER_ONLY_STATUSES en LeadsView.vue).
+ */
+const SALES_FUNNEL_STATUSES = new Set(['cita_agendada', 'en_negociacion', 'ganado', 'perdido']);
+
+/** Etiqueta legible de esos estados, para no mostrar la clave cruda en la ficha. */
+const SALES_FUNNEL_STATUS_LABELS = {
+  cita_agendada: '📅 Cita agendada',
+  en_negociacion: '🤝 En negociación',
+  ganado: '🏆 Ganado',
+  perdido: '❌ Perdido'
+};
+
+/**
+ * Estado con el que un lead entra al funnel del closer. Es el mismo que pone
+ * el bot cuando logra agendar: en LeadsView sólo `cita_agendada` gradúa al
+ * Funnel de Ventas (`GRADUATED_STATUS_TO_SALES_COLUMN`), de modo que el pase
+ * manual y el automático dejan el lead exactamente en el mismo sitio.
+ */
+const CLOSER_HANDOFF_STATUS = 'cita_agendada';
+
 const filteredLeadsByColumn = computed(() => {
   const grouped = {};
   for (const col of columns.value) {
@@ -1197,6 +1257,12 @@ const filteredLeadsByColumn = computed(() => {
       grouped['transferido_closer'].push(lead);
     } else if (status === 'perdido' && grouped['descartado']) {
       grouped['descartado'].push(lead);
+    } else if (SALES_FUNNEL_STATUSES.has(status)) {
+      // Ya graduó al Funnel de Ventas y este tablero no tiene una columna para
+      // ese estado: se oculta en vez de caer en la primera columna. Si no,
+      // un lead con la cita ya agendada reaparecería como "Conversación
+      // Abierta", como si nadie lo hubiera trabajado.
+      continue;
     } else {
       // Si no coincide, ubicar en la primera columna
       if (grouped[firstColKey]) {
@@ -1345,6 +1411,71 @@ async function updateLeadStatusFromSelect(leadId, newStatus) {
     console.error('Error al actualizar status:', err);
     lead.status = oldStatus;
     alert('No se pudo actualizar el estado del lead.');
+  }
+}
+
+const handingOff = ref(false);
+const handoffToast = ref(null);
+
+/**
+ * Pase manual al funnel del closer, para cuando la reunión la agenda el propio
+ * setter y no el bot. Hace lo mismo que `handleSchedulingTimeReply` del bot:
+ * deja el lead en `cita_agendada`, que es el único estado que gradúa al Funnel
+ * de Ventas.
+ *
+ * NO crea una reunión en `scheduled_meetings` a propósito: esa tabla alimenta
+ * los recordatorios que el bot manda por WhatsApp, y una cita coordinada a
+ * mano ya la está siguiendo la persona que la agendó — inventar ahí una fila
+ * haría que el bot le escribiera al contacto por su cuenta.
+ */
+async function handOffToCloser(lead) {
+  if (!lead || handingOff.value) return;
+  const name = getLeadFullName(lead);
+  const ok = window.confirm(
+    `¿Pasar a "${name}" al Funnel de Ventas?
+
+`
+    + 'Úsalo cuando ya coordinaste la reunión por tu cuenta. El lead sale del Setter Funnel '
+    + 'y el closer lo ve en la columna "Nuevo".'
+  );
+  if (!ok) return;
+
+  handingOff.value = true;
+  const previousStatus = lead.status;
+  try {
+    const res = await apiFetch(`/api/leads/${lead.id}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: CLOSER_HANDOFF_STATUS })
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'No se pudo pasar el lead al closer.');
+    }
+    lead.status = CLOSER_HANDOFF_STATUS;
+
+    // Queda constancia de quién lo pasó y por qué: sin esto, en el Funnel de
+    // Ventas el lead aparece con cita sin que nadie sepa de dónde salió. Si
+    // falla, el pase ya se hizo — no tiene sentido revertirlo por la nota.
+    try {
+      await apiFetch(`/api/leads/${lead.id}/notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          body: 'Pasado manualmente al Funnel de Closer desde el Setter Funnel: la reunión se coordinó fuera del bot.'
+        })
+      });
+    } catch (noteError) {
+      console.warn('No se pudo registrar la nota del pase al closer:', noteError);
+    }
+
+    selectedLead.value = null;
+    handoffToast.value = { name };
+  } catch (err) {
+    lead.status = previousStatus;
+    alert(err.message);
+  } finally {
+    handingOff.value = false;
   }
 }
 
@@ -2020,6 +2151,41 @@ onMounted(() => {
   justify-content: space-between;
   gap: 1rem;
   box-shadow: 0 10px 30px -10px rgba(46, 125, 70, 0.4);
+}
+
+.handoff-banner {
+  background: linear-gradient(135deg, rgba(86, 98, 74, 0.22) 0%, rgba(44, 140, 153, 0.18) 100%);
+  border-color: #56624A;
+  box-shadow: 0 10px 30px -10px rgba(86, 98, 74, 0.4);
+}
+
+.handoff-closer-btn {
+  flex: 1 0 100%;
+  padding: 0.5rem 0.75rem;
+  border-radius: 9px;
+  border: 1px solid #56624A;
+  background: rgba(86, 98, 74, 0.14);
+  color: var(--text-main);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.handoff-closer-btn:hover:not(:disabled) {
+  background: rgba(86, 98, 74, 0.28);
+}
+
+.handoff-closer-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.handoff-done-hint {
+  flex: 1 0 100%;
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-muted);
 }
 
 .banner-content {
