@@ -75,8 +75,11 @@ function handleToggleSidebar() {
 }
 
 .admin-content-container {
-  padding: 1.25rem 1.5rem;
-  max-width: 1400px;
+  padding: var(--shell-py) var(--shell-px);
+  /* El tope existe para que en un monitor ultra-ancho las tablas no se
+     estiren de borde a borde; en un monitor normal ya no recorta nada, que
+     es de donde venía la mayor parte del aire lateral. */
+  max-width: var(--shell-max);
   width: 100%;
   margin: 0 auto;
   flex: 1;
@@ -86,7 +89,7 @@ function handleToggleSidebar() {
 
 @media (max-width: 768px) {
   .admin-content-container {
-    padding: 1rem;
+    padding: 0.5rem;
   }
 }
 </style>

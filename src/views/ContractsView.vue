@@ -44,6 +44,6 @@ const activeComponent = computed(() => TABS.find((t) => t.key === activeTab.valu
 </script>
 
 <style scoped>
-.contracts-page { padding: 24px; }
+.contracts-page { padding: var(--page-py) var(--page-px) var(--page-pb); }
 .ct-tabs { margin-bottom: 20px; }
 </style>

@@ -87,6 +87,12 @@ antes de tocar el arranque de producción.
   grandes (>500 líneas) que combinan estado, llamadas a la API y UI de una sección completa.
 - **`components/`**: piezas reutilizadas entre vistas (layout admin, navbar, sidebar, chatbot de
   evaluación de tesis, reporte de viabilidad).
+- **Densidad del panel interno**: todo el aire alrededor de las pantallas de `/admin` sale de los
+  tokens `--shell-px/--shell-py/--shell-max` (contenedor de `AdminLayout`) y `--page-px/--page-py/
+  --page-pb` (wrapper de cada vista, `<main class="container-fluid ...-page">`). Una vista nueva usa
+  esos tokens en su wrapper en vez de un padding propio. La escala compacta de títulos, botones,
+  inputs y modales vive en la sección "DENSIDAD Y ESTILO DEL PANEL INTERNO" de `src/style.css`,
+  acotada a `.admin-layout`: el evaluador público conserva la escala espaciosa de landing.
 - El evaluador público de viabilidad de tesis (`/evaluador-tesis`, `HomeView` + `ThesisForm` +
   `ThesisChatbot` + `ViabilityReport`) es una funcionalidad separada del CRM interno: genera un
   lead vía IA (Ollama Cloud, con fallback local) y no requiere autenticación.

@@ -442,7 +442,7 @@ onUnmounted(() => {
 
 <style scoped>
 .availability-page-wrapper {
-  padding: 1.75rem 2rem 3rem 2rem;
+  padding: var(--page-py) var(--page-px) var(--page-pb);
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
@@ -466,7 +466,7 @@ onUnmounted(() => {
 
 .section-subheading {
   color: var(--text-sub);
-  font-size: 0.9rem;
+  font-size: 0.83rem;
   line-height: 1.5;
 }
 

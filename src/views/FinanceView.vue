@@ -47,7 +47,7 @@ const activeComponent = computed(() => TABS.find((t) => t.key === activeTab.valu
 
 <style scoped>
 .finance-page {
-  padding: 1.75rem 2rem 3rem 2rem;
+  padding: var(--page-py) var(--page-px) var(--page-pb);
   display: flex;
   flex-direction: column;
   gap: 1.25rem;

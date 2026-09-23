@@ -1,5 +1,5 @@
 <template>
-  <main class="container" style="flex: 1; padding-top: 2rem; padding-bottom: 4rem;">
+  <main class="container-fluid projects-page">
     <div style="display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem;">
       <div>
         <h2 class="section-heading"><span>🚀</span> Proyectos</h2>
@@ -441,6 +441,12 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.projects-page {
+  padding: var(--page-py) var(--page-px) var(--page-pb);
+  width: 100%;
+  box-sizing: border-box;
+}
+
 .row-edit-btn {
   padding: 0.3rem 0.6rem;
   font-size: 0.85rem;

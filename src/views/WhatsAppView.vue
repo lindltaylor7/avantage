@@ -1304,7 +1304,7 @@ onUnmounted(() => {
 
 <style scoped>
 .whatsapp-page-wrapper {
-  padding: 1.75rem 2rem 3rem 2rem;
+  padding: var(--page-py) var(--page-px) var(--page-pb);
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
@@ -1327,7 +1327,7 @@ onUnmounted(() => {
 
 .section-subheading {
   color: var(--text-sub);
-  font-size: 0.9rem;
+  font-size: 0.83rem;
   line-height: 1.5;
 }
 
@@ -1428,14 +1428,14 @@ onUnmounted(() => {
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
 .stat-card {
   background: var(--bg-card-solid);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
-  padding: 1.1rem 1.25rem;
+  padding: 0.8rem 1rem;
   display: flex;
   align-items: center;
   box-shadow: var(--shadow-sm);
@@ -1443,14 +1443,14 @@ onUnmounted(() => {
 }
 
 .stat-icon-wrapper {
-  width: 46px;
-  height: 46px;
-  border-radius: var(--radius-md);
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  font-size: 1.3rem;
+  font-size: 1.15rem;
   flex-shrink: 0;
 }
 
@@ -1463,12 +1463,12 @@ onUnmounted(() => {
 }
 
 .stat-label {
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   color: var(--text-sub);
 }
 
 .stat-value {
-  font-size: 1.75rem;
+  font-size: 1.35rem;
   font-weight: 800;
   font-family: var(--font-heading);
   letter-spacing: -0.01em;

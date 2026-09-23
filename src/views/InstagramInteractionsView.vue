@@ -452,7 +452,7 @@ onMounted(fetchAll);
 
 <style scoped>
 .ig-page-wrapper {
-  padding: 1.5rem 2rem;
+  padding: var(--page-py) var(--page-px) var(--page-pb);
   max-width: 100%;
   box-sizing: border-box;
 }
@@ -464,7 +464,7 @@ onMounted(fetchAll);
   align-items: flex-start;
   flex-wrap: wrap;
   gap: 1.5rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
 }
 
 .header-titles {
@@ -472,7 +472,7 @@ onMounted(fetchAll);
 }
 
 .section-heading {
-  font-size: 1.85rem;
+  font-size: 1.3rem;
   font-weight: 800;
   color: var(--text-main);
   display: flex;
@@ -488,7 +488,7 @@ onMounted(fetchAll);
 }
 
 .section-subheading {
-  font-size: 0.95rem;
+  font-size: 0.83rem;
   color: var(--text-muted);
   line-height: 1.5;
   margin: 0;
@@ -682,15 +682,15 @@ onMounted(fetchAll);
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1rem;
-  margin-bottom: 1.5rem;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
 }
 
 .stat-card {
   background: var(--bg-card-solid);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
-  padding: 1.15rem 1.25rem;
+  padding: 0.8rem 1rem;
   display: flex;
   align-items: center;
   box-shadow: var(--shadow-sm);
@@ -699,13 +699,13 @@ onMounted(fetchAll);
 }
 
 .stat-icon-wrapper {
-  width: 48px;
-  height: 48px;
-  border-radius: 14px;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.4rem;
+  font-size: 1.15rem;
   flex-shrink: 0;
 }
 
@@ -720,7 +720,7 @@ onMounted(fetchAll);
 }
 
 .stat-label {
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -728,7 +728,7 @@ onMounted(fetchAll);
 }
 
 .stat-value {
-  font-size: 1.75rem;
+  font-size: 1.35rem;
   font-weight: 800;
   letter-spacing: -0.01em;
   color: var(--text-main);

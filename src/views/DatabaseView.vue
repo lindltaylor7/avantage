@@ -892,7 +892,7 @@ onMounted(() => {
 
 <style scoped>
 .database-page-wrapper {
-  padding: 1.75rem 2rem 3rem 2rem;
+  padding: var(--page-py) var(--page-px) var(--page-pb);
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
@@ -981,7 +981,7 @@ onMounted(() => {
   backdrop-filter: blur(16px);
   border: 1px solid var(--border-color);
   border-radius: 14px;
-  padding: 1rem 1.25rem;
+  padding: 0.8rem 1rem;
   display: flex;
   align-items: center;
   gap: 1rem;
@@ -994,13 +994,13 @@ onMounted(() => {
 }
 
 .stat-icon-wrapper {
-  width: 44px;
-  height: 44px;
+  width: 40px;
+  height: 40px;
   border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.3rem;
+  font-size: 1.15rem;
 }
 
 .stat-icon-wrapper.blue { background: rgba(111, 129, 37, 0.15); border: 1px solid rgba(111, 129, 37, 0.3); }
@@ -1014,14 +1014,14 @@ onMounted(() => {
 }
 
 .stat-label {
-  font-size: 0.76rem;
+  font-size: 0.72rem;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 
 .stat-value {
-  font-size: 1.45rem;
+  font-size: 1.35rem;
   font-weight: 700;
   color: var(--text-main);
   font-family: var(--font-heading);

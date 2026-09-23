@@ -1,5 +1,5 @@
 ﻿<template>
-  <main class="container" style="flex: 1; padding-top: 2rem; padding-bottom: 4rem;">
+  <main class="container-fluid project-detail-page">
     <router-link to="/admin/projects" style="color: var(--accent-cyan); font-size: 0.85rem; text-decoration: none; display: inline-block; margin-bottom: 1rem;">
       ← Volver a Proyectos
     </router-link>
@@ -824,6 +824,12 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.project-detail-page {
+  padding: var(--page-py) var(--page-px) var(--page-pb);
+  width: 100%;
+  box-sizing: border-box;
+}
+
 /* ------------------------------------------------- Plantillas de tareas */
 .template-suggestion {
   display: flex;

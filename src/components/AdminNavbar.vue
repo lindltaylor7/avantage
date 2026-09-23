@@ -272,16 +272,18 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* La barra se pega al contenido: con el aire reducido del panel, 1.5rem
+   dejaba un hueco tan grande como la propia barra. */
 .admin-navbar {
-  margin-bottom: 1.5rem;
+  margin-bottom: 0.75rem;
 }
 
 .navbar-inner {
   background-color: var(--bg-card-solid);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
-  height: 56px;
-  padding: 0 1rem;
+  border-radius: var(--radius-md);
+  height: 52px;
+  padding: 0 0.9rem;
   display: flex;
   align-items: center;
   justify-content: space-between;

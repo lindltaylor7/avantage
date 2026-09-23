@@ -832,7 +832,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .pf-page {
-  padding: 1.75rem 2rem 3rem;
+  padding: var(--page-py) var(--page-px) var(--page-pb);
   display: flex;
   flex-direction: column;
   gap: 1.75rem;
