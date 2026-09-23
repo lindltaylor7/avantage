@@ -117,6 +117,30 @@ adelante) desde **hPanel → Avanzado → Node.js**. Pasos:
   rama 9 es lo más alto que se puede subir sin arriesgar el arranque en producción; ya incluye
   el parche de todas las vulnerabilidades reportadas de `addressparser` y de la opción `raw`.
   Antes de saltar a 10, confirma la versión de Node en hPanel → Avanzado → Node.js.
+- **Por qué `esbuild` se queda en 0.25.x pese al aviso de seguridad**: el escáner de dependencias
+  marca `esbuild@0.25.12` (GHSA-gv7w-rqvm-qjhr, "actualiza a 0.28.1"). Ese aviso **está retirado
+  por GitHub** —dice textualmente que el paquete afectado se identificó mal— y describe un fallo
+  del módulo **Deno** de esbuild (`lib/deno/mod.ts`), que descarga su binario sin verificar el
+  hash. Este proyecto no usa Deno: esbuild entra como dependencia de desarrollo de Vite y se
+  instala por la ruta de npm, que **sí** comprueba el SHA-256 de cada binario
+  (`binaryIntegrityCheck` en `lib/npm/node-install.ts`) — es justo la función que el aviso señala
+  como ausente en Deno. Tampoco viaja al cliente: solo compila `dist/`.
+
+  Y no se puede subir aunque se quisiera. Se probaron las dos vías:
+
+  1. `overrides` de `esbuild@^0.28.1` manteniendo Vite 6 → **el build falla** con 181 errores
+     ("Transforming destructuring to the configured target environment is not supported yet"):
+     esbuild 0.28 ya no reescribe ciertas sintaxis al target que Vite 6 pide por defecto.
+  2. Subir Vite, que es quien fija el rango → **ningún Vite 6 ni 7 usa esbuild ≥ 0.28** (todos
+     piden `^0.25.0`). El primero que resuelve el aviso es **Vite 8**, que directamente dejó de
+     usar esbuild (pasó a rolldown/oxc), pero exige **Node ^20.19 || >=22.12** y el build corre en
+     el hosting, que hoy tiene **Node 18**. Se probó localmente y funciona (compila en ~1 s, el
+     bundle baja de 649 kB a 623 kB, el dev server y la app quedan igual), así que **cuando el
+     hosting suba a Node 20.19+ el camino es Vite 8 + `@vitejs/plugin-vue@^6`**, y el aviso
+     desaparece solo porque esbuild sale del árbol de dependencias.
+
+  Mientras tanto el aviso se puede descartar en GitHub como "no aplica" (advisory retirado).
+
 - **Por qué hay un `overrides` de `uuid` en `package.json`**: `uuid` entra solo como dependencia
   de `exceljs` (exportación de campañas a Excel), y `exceljs@4.4.0` —la última publicada— lo pide
   como `^8.3.0`, versión con una vulnerabilidad de límites de buffer. La corrección automática que
