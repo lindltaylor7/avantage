@@ -596,6 +596,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue';
 import { apiFetch } from '../apiClient.js';
+import { CAREERS } from '../data/careers.js';
 
 // Universidades representativas de Perú
 const PERU_UNIVERSITIES = [
@@ -618,23 +619,8 @@ const PERU_UNIVERSITIES = [
   'UNHEVAL - Universidad Nacional Hermilio Valdizán (Huánuco)'
 ];
 
-const PERU_CAREERS = [
-  'Ingeniería de Sistemas y Computación',
-  'Ingeniería Civil',
-  'Ingeniería Industrial',
-  'Ingeniería Agrónoma y Agroindustrial',
-  'Ingeniería de Minas y Geología',
-  'Ingeniería Ambiental y Ecología',
-  'Administración, Negocios y Finanzas',
-  'Contabilidad y Auditoría',
-  'Derecho y Ciencias Políticas',
-  'Medicina Humana y Ciencias de la Salud',
-  'Enfermería y Obstetricia',
-  'Psicología y Trabajo Social',
-  'Educación y Pedagogía',
-  'Economía y Comercio Internacional',
-  'Arquitectura y Urbanismo'
-];
+/** El datalist de carreras sale del catálogo compartido (permite escribir otra). */
+const PERU_CAREERS = CAREERS;
 
 const PERU_DEPARTMENTS = [
   'Junín', 'Lima', 'Arequipa', 'Cusco', 'La Libertad', 'Lambayeque',

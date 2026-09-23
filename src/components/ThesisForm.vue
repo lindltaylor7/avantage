@@ -55,14 +55,9 @@
             Carrera / Área Académica <span style="color: var(--accent-rose);">*</span>
           </label>
           <select id="field-select" v-model="formData.fieldOfStudy" class="form-select">
-            <option value="Ingeniería de Sistemas y Computación">Ingeniería de Sistemas y Computación</option>
-            <option value="Ingeniería Agrónoma y Agroindustrial">Ingeniería Agrónoma y Agroindustrial</option>
-            <option value="Ciencias de la Salud y Medicina">Ciencias de la Salud y Medicina</option>
-            <option value="Administración, Negocios y Finanzas">Administración, Negocios y Finanzas</option>
-            <option value="Derecho y Ciencias Políticas">Derecho y Ciencias Políticas</option>
-            <option value="Educación y Psicología">Educación y Psicología</option>
-            <option value="Ingeniería de Minas y Geología">Ingeniería de Minas y Geología</option>
-            <option value="Ingeniería Ambiental y Ecología">Ingeniería Ambiental y Ecología</option>
+            <optgroup v-for="group in careerGroupsWith(formData.fieldOfStudy)" :key="group.label" :label="group.label">
+              <option v-for="career in group.careers" :key="career" :value="career">{{ career }}</option>
+            </optgroup>
           </select>
         </div>
       </div>
@@ -153,6 +148,7 @@
 
 <script setup>
 import { ref, reactive } from 'vue';
+import { careerGroupsWith, DEFAULT_CAREER } from '../data/careers.js';
 
 const props = defineProps({
   isLoading: {
@@ -168,7 +164,7 @@ const showOllamaConfig = ref(false);
 const formData = reactive({
   topic: '',
   academicLevel: 'Pregrado (Bachiller/Título)',
-  fieldOfStudy: 'Ingeniería de Sistemas y Computación',
+  fieldOfStudy: DEFAULT_CAREER,
   email: 'estudiante.tesis@peru.edu.pe',
   additionalNotes: '',
   apiKeyOverride: '',
@@ -180,19 +176,19 @@ const presetExamples = [
     label: '🥑 Palta Agro-IA (Pregrado)',
     topic: 'Implementación de algoritmo de visión por computador en dron para la detección temprana de plagas en cultivos de palta Hass en la provincia de Cañete',
     level: 'Pregrado (Bachiller/Título)',
-    field: 'Ingeniería Agrónoma y Agroindustrial'
+    field: 'Ingeniería Agroindustrial'
   },
   {
     label: '⛏️ Minería Verde (Posgrado)',
     topic: 'Modelo de bioremediación con microalgas nativas de la sierra central del Perú para la neutralización de aguas ácidas en relaves mineros de Junín',
     level: 'Posgrado (Maestría)',
-    field: 'Ingeniería Ambiental y Ecología'
+    field: 'Ingeniería Ambiental'
   },
   {
     label: '🏦 MYPEs Fintech (Pregrado)',
     topic: 'Impacto de las herramientas de score crediticio basado en machine learning sobre la morosidad de las MYPEs comerciales en Gamarra - Lima',
     level: 'Pregrado (Bachiller/Título)',
-    field: 'Administración, Negocios y Finanzas'
+    field: 'Administración de Empresas'
   }
 ];
 

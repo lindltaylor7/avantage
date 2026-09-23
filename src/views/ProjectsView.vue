@@ -146,7 +146,9 @@
             <div class="form-group">
               <label class="form-label">Carrera / Campo de estudio</label>
               <select v-model="newProject.fieldOfStudy" class="form-select" required>
-                <option v-for="field in FIELDS_OF_STUDY" :key="field" :value="field">{{ field }}</option>
+                <optgroup v-for="group in careerGroupsWith(newProject.fieldOfStudy)" :key="group.label" :label="group.label">
+                  <option v-for="career in group.careers" :key="career" :value="career">{{ career }}</option>
+                </optgroup>
               </select>
             </div>
             <div class="form-group">
@@ -199,7 +201,9 @@
             <div class="form-group">
               <label class="form-label">Carrera / Campo de estudio</label>
               <select v-model="editing.fieldOfStudy" class="form-select">
-                <option v-for="field in FIELDS_OF_STUDY" :key="field" :value="field">{{ field }}</option>
+                <optgroup v-for="group in careerGroupsWith(editing.fieldOfStudy)" :key="group.label" :label="group.label">
+                  <option v-for="career in group.careers" :key="career" :value="career">{{ career }}</option>
+                </optgroup>
               </select>
             </div>
             <div class="form-group">
@@ -231,21 +235,12 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue';
 import { apiFetch } from '../apiClient.js';
+import { careerGroupsWith, DEFAULT_CAREER } from '../data/careers.js';
 
 const STATUSES = ['Creado', 'Activo', 'Iniciado', 'En Desarrollo', 'Entregado', 'Cancelado'];
 
 const ACADEMIC_LEVELS = ['Pregrado (Bachiller/Título)', 'Posgrado (Maestría)', 'Posgrado (Doctorado)'];
 
-const FIELDS_OF_STUDY = [
-  'Ingeniería de Sistemas y Computación',
-  'Ingeniería Agrónoma y Agroindustrial',
-  'Ciencias de la Salud y Medicina',
-  'Administración, Negocios y Finanzas',
-  'Derecho y Ciencias Políticas',
-  'Educación y Psicología',
-  'Ingeniería de Minas y Geología',
-  'Ingeniería Ambiental y Ecología'
-];
 
 const projects = ref([]);
 const isLoading = ref(false);
@@ -264,7 +259,7 @@ const newProject = reactive({
   clientEmail: '',
   clientPhone: '',
   academicLevel: 'Pregrado (Bachiller/Título)',
-  fieldOfStudy: 'Ingeniería de Sistemas y Computación',
+  fieldOfStudy: DEFAULT_CAREER,
   deadline: ''
 });
 
@@ -349,7 +344,7 @@ function openCreateModal() {
   newProject.clientEmail = '';
   newProject.clientPhone = '';
   newProject.academicLevel = 'Pregrado (Bachiller/Título)';
-  newProject.fieldOfStudy = 'Ingeniería de Sistemas y Computación';
+  newProject.fieldOfStudy = DEFAULT_CAREER;
   newProject.deadline = '';
   showCreateModal.value = true;
 }
@@ -383,7 +378,7 @@ function openEditModal(project) {
     clientEmail: project.client_email || '',
     clientPhone: project.client_phone || '',
     academicLevel: project.academic_level || ACADEMIC_LEVELS[0],
-    fieldOfStudy: project.field_of_study || FIELDS_OF_STUDY[0],
+    fieldOfStudy: project.field_of_study || DEFAULT_CAREER,
     deadline: project.deadline ? String(project.deadline).slice(0, 10) : ''
   };
 }

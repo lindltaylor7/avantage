@@ -48,14 +48,9 @@
             <div>
               <label class="chat-step3-label">Carrera / campo de estudio</label>
               <select v-model="step3Data.field" class="form-select chat-step3-select">
-                <option value="Ingeniería de Sistemas y Computación">Ingeniería de Sistemas y Computación</option>
-                <option value="Ingeniería Agrónoma y Agroindustrial">Ingeniería Agrónoma y Agroindustrial</option>
-                <option value="Ciencias de la Salud y Medicina">Ciencias de la Salud y Medicina</option>
-                <option value="Administración, Negocios y Finanzas">Administración, Negocios y Finanzas</option>
-                <option value="Derecho y Ciencias Políticas">Derecho y Ciencias Políticas</option>
-                <option value="Educación y Psicología">Educación y Psicología</option>
-                <option value="Ingeniería de Minas y Geología">Ingeniería de Minas y Geología</option>
-                <option value="Ingeniería Ambiental y Ecología">Ingeniería Ambiental y Ecología</option>
+                <optgroup v-for="group in careerGroupsWith(step3Data.field)" :key="group.label" :label="group.label">
+                  <option v-for="career in group.careers" :key="career" :value="career">{{ career }}</option>
+                </optgroup>
               </select>
             </div>
 
@@ -109,6 +104,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, nextTick } from 'vue';
+import { careerGroupsWith, DEFAULT_CAREER } from '../data/careers.js';
 
 const props = defineProps({
   isLoading: {
@@ -130,14 +126,14 @@ const answers = reactive({
   problem: '',
   location: '',
   level: 'Pregrado (Bachiller/Título)',
-  field: 'Ingeniería de Sistemas y Computación',
+  field: DEFAULT_CAREER,
   email: '',
   phone: ''
 });
 
 const step3Data = reactive({
   level: 'Pregrado (Bachiller/Título)',
-  field: 'Ingeniería de Sistemas y Computación'
+  field: DEFAULT_CAREER
 });
 
 const step1Suggestions = [
