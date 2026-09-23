@@ -1174,7 +1174,19 @@ export class WhatsappBotService {
    * mensaje anterior al mismo contacto (message_gap_seconds), para no caer en
    * comportamiento de spam.
    */
-  async send(waId, text) {
+  async send(waId, text, { requireOpenWindow = false } = {}) {
+    // WhatsApp solo acepta texto libre dentro de las 24 h siguientes al último
+    // mensaje del contacto. Una respuesta a un mensaje que acaba de llegar
+    // siempre está dentro, así que el chequeo solo se exige en los envíos que
+    // el bot inicia por su cuenta (recordatorios, seguimientos): son los que
+    // quedaban en `failed` sin que nadie se enterara.
+    if (requireOpenWindow && !(await this.whatsappMessageService.isCustomerWindowOpen(waId))) {
+      const error = new Error('La ventana de 24 h de WhatsApp con este contacto está cerrada.');
+      error.code = 'WINDOW_CLOSED';
+      this.logActivity({ type: 'send_skipped_window_closed', waId, text });
+      throw error;
+    }
+
     let settings = {};
     try {
       settings = await this.settingsService.get();
@@ -2137,25 +2149,76 @@ export class WhatsappBotService {
 
     const body = `🆘 Lead transferido a un asesor: ${contactLabel}.${reason ? ` Motivo: ${reason}` : ''}`;
 
+    await this.alertInternal({
+      waId,
+      type: 'whatsapp_lead_handed_off',
+      title: 'Lead de WhatsApp transferido a un asesor',
+      body
+    });
+  }
+
+  /**
+   * Aviso interno al equipo. Va SIEMPRE por dos canales que no dependen de
+   * WhatsApp —la campana del panel y el correo— y solo intenta WhatsApp si la
+   * ventana de 24 h con el número interno está abierta.
+   *
+   * El motivo es un caso real: las 3 alertas "🆘 Lead transferido a un asesor"
+   * se mandaron como texto libre al número interno más de 24 h después de su
+   * último mensaje, WhatsApp las rechazó, y los asesores nunca se enteraron de
+   * esas transferencias. Un aviso interno no puede depender de que alguien le
+   * haya escrito al número de negocio en el último día.
+   *
+   * Nunca reintenta: si el correo falla se registra y se sigue. Reintentar en
+   * cada barrido repetiría el mismo error sin que el aviso llegue antes.
+   */
+  async alertInternal({ waId = null, type, title, body }) {
+    const link = waId ? `/admin/whatsapp?waId=${encodeURIComponent(waId)}` : '/admin/whatsapp';
+
     if (this.notificationService) {
       try {
-        await this.notificationService.create({
-          type: 'whatsapp_lead_handed_off',
-          title: 'Lead de WhatsApp transferido a un asesor',
-          body,
-          link: '/admin/whatsapp'
-        });
+        await this.notificationService.create({ type, title, body, link });
       } catch (error) {
-        console.error('❌ [WhatsApp Bot] Error al crear la notificación de transferencia:', error);
+        console.error(`❌ [WhatsApp Bot] Error al crear la notificación interna (${type}):`, error.message);
       }
     }
 
+    let settings = {};
     try {
-      const settings = await this.settingsService.get();
-      const salesPhone = settings.sales_notification_phone;
-      if (salesPhone) await this.whatsappMessageService.sendTextMessage(salesPhone, body);
-    } catch (error) {
-      console.error(`❌ [WhatsApp Bot] No se pudo avisar por WhatsApp al vendedor sobre ${waId}:`, error.message);
+      settings = await this.settingsService.get();
+    } catch { /* sin settings se usan los valores del entorno */ }
+
+    const recipient = settings.sales_notification_email || process.env.INTERNAL_ALERT_EMAIL || null;
+    if (recipient && this.emailService) {
+      try {
+        const result = await this.emailService.sendInternalAlertEmail(recipient, {
+          subject: `[Avan] ${title}`,
+          title,
+          bodyText: body,
+          actionUrl: `${(process.env.APP_BASE_URL || '').replace(/\/$/, '')}${link}`,
+          actionLabel: 'Abrir la conversación'
+        });
+        if (!result?.success) {
+          console.error(`❌ [WhatsApp Bot] No se pudo mandar la alerta interna por correo a ${recipient}: ${result?.error}`);
+        }
+      } catch (error) {
+        console.error(`❌ [WhatsApp Bot] Error al mandar la alerta interna por correo a ${recipient}:`, error.message);
+      }
+    } else {
+      console.warn(`⚠️ [WhatsApp Bot] Alerta interna sin destinatario de correo (configura sales_notification_email o INTERNAL_ALERT_EMAIL): ${title}`);
+    }
+
+    // WhatsApp es el canal de cortesía, no el que garantiza el aviso.
+    const salesPhone = settings.sales_notification_phone;
+    if (salesPhone) {
+      try {
+        if (await this.whatsappMessageService.isCustomerWindowOpen(salesPhone)) {
+          await this.whatsappMessageService.sendTextMessage(salesPhone, body);
+        } else {
+          this.logActivity({ type: 'internal_alert_whatsapp_skipped', waId: salesPhone, reason: 'ventana de 24 h cerrada' });
+        }
+      } catch (error) {
+        console.error(`❌ [WhatsApp Bot] No se pudo avisar por WhatsApp al vendedor sobre ${waId}:`, error.message);
+      }
     }
   }
 
@@ -3545,13 +3608,28 @@ ${numberedList(fullSlotLabels(offer))}
         (meeting.meet_link ? `\n\n🔗 ${sanitizeMeetLink(meeting.meet_link)}` : '\n\n📞 Te llamamos a este mismo número.');
 
       try {
-        await this.send(meeting.wa_id, text);
+        await this.send(meeting.wa_id, text, { requireOpenWindow: true });
         this.logActivity({ type: 'meeting_reminder_sent', waId: meeting.wa_id, meetingId: meeting.id });
       } catch (error) {
         // Se marca igual que si hubiera salido: reintentar en cada barrido
         // repetiría el mismo error (típicamente la ventana de 24 h de
         // WhatsApp ya cerrada) y el aviso tampoco llegaría a tiempo.
-        console.error(`❌ [WhatsApp Bot] Error al mandar el recordatorio de la reunión ${meeting.id} a ${meeting.wa_id}:`, error);
+        console.error(`❌ [WhatsApp Bot] Error al mandar el recordatorio de la reunión ${meeting.id} a ${meeting.wa_id}:`, error.message);
+
+        // Sin plantillas aprobadas no hay forma de escribirle al contacto
+        // fuera de la ventana. Antes el recordatorio simplemente se perdía y
+        // nadie lo sabía; ahora el aviso cambia de destinatario: se le pasa a
+        // una persona, que sí puede llamarlo.
+        if (error.code === 'WINDOW_CLOSED') {
+          await this.alertInternal({
+            waId: meeting.wa_id,
+            type: 'whatsapp_reminder_undeliverable',
+            title: 'Recordatorio de reunión sin entregar',
+            body: `No se pudo avisar por WhatsApp a ${meeting.lead_full_name || meeting.wa_id} de su reunión `
+              + `(${formatMeetingDateTimeLabel(meeting.start_time)}): su ventana de 24 h está cerrada. `
+              + 'Contáctalo por otro medio si hace falta confirmarla.'
+          });
+        }
       }
 
       await this.scheduledMeetingService.markReminderSent(meeting.id);
@@ -3750,10 +3828,13 @@ ${numberedList(fullSlotLabels(offer))}
       if (!claimed) continue;
 
       try {
-        await this.send(session.wa_id, INACTIVITY_NUDGE_TEXTS[nudgesSent]);
+        await this.send(session.wa_id, INACTIVITY_NUDGE_TEXTS[nudgesSent], { requireOpenWindow: true });
         this.logActivity({ type: 'inactivity_nudge', waId: session.wa_id, attempt: nudgesSent + 1 });
       } catch (error) {
-        console.error(`❌ [WhatsApp Bot] Error al mandar el recordatorio de inactividad a ${session.wa_id}:`, error);
+        // Incluye la ventana de 24 h cerrada: el seguimiento se da por
+        // gastado igual (la fila ya quedó reservada arriba) en vez de
+        // reintentarse en cada barrido contra un error que no se arregla solo.
+        console.error(`❌ [WhatsApp Bot] Error al mandar el recordatorio de inactividad a ${session.wa_id}:`, error.message);
       }
     }
 

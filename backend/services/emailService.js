@@ -417,6 +417,68 @@ export class EmailService {
   }
 
   /**
+   * Alerta interna para el equipo (lead transferido a un asesor, recordatorio
+   * que no se pudo entregar por WhatsApp, etc.).
+   *
+   * Va por correo y NO por WhatsApp a propósito: el número interno casi nunca
+   * tiene la ventana de 24 h abierta con el número de negocio, así que esas
+   * alertas se perdían calladas (las 3 transferencias reales que fallaron
+   * nunca llegaron a nadie). El correo no depende de ninguna ventana.
+   *
+   * Lleva un botón directo a la conversación en el panel: quien recibe la
+   * alerta tiene que poder abrir el chat sin buscar el número a mano.
+   */
+  async sendInternalAlertEmail(recipientEmail, { subject, title, bodyText, actionUrl = null, actionLabel = 'Abrir la conversación' }) {
+    await this.initPromise;
+
+    const fromAddress = process.env.SMTP_FROM || '"Avantage Group" <tesis@avantagegroup.pe>';
+    const htmlBody = String(bodyText || '')
+      .split(/\r?\n/)
+      .map((line) => (line ? escapeHtml(line) : '&nbsp;'))
+      .join('<br/>');
+
+    const button = actionUrl
+      ? `<p style="margin: 22px 0 0;">
+           <a href="${escapeHtml(actionUrl)}"
+              style="display:inline-block;background:#2F7D5A;color:#ffffff;text-decoration:none;
+                     font-weight:600;font-size:14px;padding:11px 20px;border-radius:8px;">
+             ${escapeHtml(actionLabel)}
+           </a>
+         </p>
+         <p style="margin: 12px 0 0; font-size: 12px; color: #64748B;">
+           Si el botón no funciona, copia este enlace:<br/>${escapeHtml(actionUrl)}
+         </p>`
+      : '';
+
+    const mailOptions = {
+      from: fromAddress,
+      to: recipientEmail,
+      subject,
+      // El texto plano repite el enlace: hay clientes de correo que no
+      // renderizan HTML, y ahí el botón desaparecería sin dejar rastro.
+      text: `${title}
+
+${bodyText}${actionUrl ? `
+
+${actionLabel}: ${actionUrl}` : ''}`,
+      html: `<div style="font-family:'Segoe UI',Tahoma,sans-serif;font-size:14px;color:#0F172A;line-height:1.6;">
+               <h2 style="margin:0 0 12px;font-size:17px;color:#0F172A;">${escapeHtml(title)}</h2>
+               <div>${htmlBody}</div>
+               ${button}
+             </div>`
+    };
+
+    try {
+      if (!this.transporter) throw new Error('El servidor de correo no está disponible.');
+      const info = await this.transporter.sendMail(mailOptions);
+      return { success: true, messageId: info.messageId, recipient: recipientEmail };
+    } catch (error) {
+      console.error('Error al enviar la alerta interna por correo:', error);
+      return { success: false, error: error.message, recipient: recipientEmail };
+    }
+  }
+
+  /**
    * Invitación al portal de clientes: se manda apenas nace la cuenta (al
    * crearse su proyecto), con el link para que el cliente ponga su propia
    * contraseña. Sin este correo la cuenta queda inservible para siempre —

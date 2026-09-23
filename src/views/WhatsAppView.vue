@@ -1284,6 +1284,12 @@ const POLL_FULL_EVERY = 6;
 let pollTick = 0;
 
 onMounted(() => {
+  // `?waId=...` abre directo esa conversación: es el enlace que llevan las
+  // alertas internas por correo ("Abrir la conversación"), para que quien
+  // recibe el aviso no tenga que buscar el número a mano en la lista.
+  const requestedWaId = new URLSearchParams(window.location.search).get('waId');
+  if (requestedWaId) selectConversation(requestedWaId);
+
   fetchAll();
   window.addEventListener('keydown', onActivityKeydown);
   pollHandle = setInterval(() => {

@@ -10,7 +10,10 @@ test('priceAnchor no menciona montos y aclara que la reunión es gratis', () => 
   assert.doesNotMatch(text, /S\/\d/);
   assert.doesNotMatch(text, /\d{3,}/);
   assert.match(text, /gratis/i);
-  assert.match(text, /20 min/);
+  // Antes se exigía además "20 min": el texto dejó de mencionar la duración y
+  // la prueba se quedó atrás, fallando por algo que ya no existe. Lo que el
+  // mensaje sí debe seguir diciendo es que la reunión no compromete a nada.
+  assert.match(text, /no te compromete/i);
 });
 
 test('priceAnchor saluda por nombre solo cuando se pasa un contactName', () => {

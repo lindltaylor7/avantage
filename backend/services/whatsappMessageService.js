@@ -198,6 +198,21 @@ export function detectWhatsappChannel(referral) {
  * Persistencia y envío de mensajes de WhatsApp Business Platform: guarda los
  * mensajes entrantes recibidos vía webhook y permite responder vía la Graph API.
  */
+/** Ventana de servicio al cliente de WhatsApp: 24 h desde el último inbound. */
+const CUSTOMER_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * La decisión sola, sin base de datos, para poder probarla: ¿sigue abierta la
+ * ventana si el último mensaje del contacto llegó en `lastInboundAt`?
+ * Sin ningún mensaje entrante (`null`) la ventana nunca estuvo abierta.
+ */
+export function isWithinCustomerWindow(lastInboundAt, now = Date.now()) {
+  if (!lastInboundAt) return false;
+  const at = new Date(lastInboundAt).getTime();
+  if (Number.isNaN(at)) return false;
+  return now - at < CUSTOMER_WINDOW_MS;
+}
+
 export class WhatsappMessageService {
   async createFromMessage(value, message) {
     // Normalmente el remitente viene en "from" (teléfono). Algunos mensajes
@@ -796,6 +811,38 @@ export class WhatsappMessageService {
     });
 
     return db('whatsapp_conversation_deletions').where({ id }).first();
+  }
+
+  /**
+   * ¿Sigue abierta la ventana de servicio al cliente de 24 h con este
+   * contacto?
+   *
+   * WhatsApp solo deja mandar texto libre dentro de las 24 h siguientes al
+   * ÚLTIMO mensaje del cliente; pasado ese plazo hay que usar una plantilla
+   * aprobada o el envío se rechaza. El bot no lo comprobaba nunca: todos los
+   * mensajes que quedaron en `failed` —recordatorios de reunión y las alertas
+   * "🆘 Lead transferido a un asesor" al número interno— eran texto libre
+   * mandado fuera de la ventana. Los asesores nunca se enteraron de esas
+   * transferencias.
+   *
+   * Ante un error de base de datos devuelve `true` (falla abierta): quedarse
+   * sin poder responder por una consulta caída es peor que intentar un envío
+   * que WhatsApp rechazará.
+   */
+  async isCustomerWindowOpen(waId) {
+    if (!waId) return false;
+    try {
+      // Por `id` y no por `received_at`: dos mensajes del mismo segundo son
+      // indistinguibles por fecha, y aquí importa cuál fue realmente el último.
+      const last = await db('whatsapp_messages')
+        .where({ wa_id: waId, direction: 'inbound' })
+        .orderBy('id', 'desc')
+        .first('received_at');
+      return isWithinCustomerWindow(last?.received_at);
+    } catch (error) {
+      console.error(`❌ [WhatsApp] No se pudo comprobar la ventana de 24 h de ${waId}:`, error.message);
+      return true;
+    }
   }
 
   /** Últimas conversaciones eliminadas, para mostrar quién borró qué. */
