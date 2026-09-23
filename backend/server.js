@@ -3437,6 +3437,31 @@ app.patch('/api/project-updates/:id/unlock-income', requireAuth, requirePermissi
 });
 
 /**
+ * Elimina un hito de la línea de tiempo (y su adjunto del disco).
+ *
+ * Pasa por la puerta del pago verificado como el resto de la gestión del
+ * proyecto: si no se puede publicar un avance, tampoco borrarlo. El cliente
+ * deja de verlo en su portal en cuanto se borra, esté o no atado a una cuota.
+ */
+app.delete('/api/project-updates/:id', requireAuth, requirePermission('projects.view'), async (req, res) => {
+  try {
+    const existing = await projectUpdateService.getUpdateById(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Actualización no encontrada.' });
+    if (!await guardProjectManageable(existing.project_id, res)) return;
+
+    const update = await projectUpdateService.deleteUpdate(req.params.id);
+    if (update?.attachment_filename) {
+      fs.unlink(path.join(uploadDir, update.attachment_filename), () => {});
+    }
+    console.log(`🗑️ [Proyectos] Hito #${req.params.id} del proyecto #${existing.project_id} eliminado por ${req.user.email}`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error al eliminar la actualización:', error);
+    res.status(500).json({ error: 'Error al eliminar la actualización.', details: error.message });
+  }
+});
+
+/**
  * Descarga del documento adjunto de una actualización (requiere sesión y
  * permiso projects.view, igual que el resto del módulo de proyectos)
  */

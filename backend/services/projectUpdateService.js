@@ -59,6 +59,18 @@ export class ProjectUpdateService {
     return withLock(row);
   }
 
+  /**
+   * Borra un hito de la línea de tiempo. Devuelve la fila borrada para que la
+   * ruta pueda quitar su adjunto del disco: de eso la base no sabe nada, y un
+   * archivo huérfano en `uploads/` no lo vuelve a mirar nadie.
+   */
+  async deleteUpdate(id) {
+    const update = await db('project_updates').where({ id }).first();
+    if (!update) return null;
+    await db('project_updates').where({ id }).del();
+    return update;
+  }
+
   async getUpdatesByProject(projectId) {
     const rows = await db('project_updates')
       .leftJoin('users', 'users.id', 'project_updates.author_id')

@@ -250,7 +250,17 @@
             <div class="timeline-content">
               <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; flex-wrap: wrap;">
                 <strong style="color: var(--text-main); font-size: 0.85rem;">{{ update.author_name || 'Usuario' }}</strong>
-                <span style="color: var(--text-muted); font-size: 0.75rem;">{{ formatDateTime(update.created_at) }}</span>
+                <span class="timeline-meta">
+                  <span style="color: var(--text-muted); font-size: 0.75rem;">{{ formatDateTime(update.created_at) }}</span>
+                  <button
+                    v-if="!isLocked"
+                    type="button"
+                    class="timeline-delete-btn"
+                    title="Eliminar este hito de la línea de tiempo"
+                    :disabled="deletingUpdateId === update.id"
+                    @click="removeUpdate(update)"
+                  >{{ deletingUpdateId === update.id ? '…' : '✕' }}</button>
+                </span>
               </div>
               <p style="color: var(--text-sub); font-size: 0.88rem; margin-top: 0.4rem; white-space: pre-line;">{{ update.content }}</p>
               <button
@@ -382,6 +392,7 @@ const newUpdateFile = ref(null);
 const newUpdateIncomeId = ref('');
 const payments = ref([]);
 const isPublishing = ref(false);
+const deletingUpdateId = ref(null);
 const isUploadingVoucher = ref(false);
 
 // Plantillas de tareas: conjuntos guardados que se importan al proyecto.
@@ -475,6 +486,31 @@ async function fetchPayments() {
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || 'Error al obtener el cronograma de pagos.');
   payments.value = data.payments || [];
+}
+
+/**
+ * Borra un hito publicado. Se confirma porque el adjunto se va con él: el
+ * archivo se elimina del disco y el cliente deja de verlo en su portal.
+ */
+async function removeUpdate(update) {
+  const label = update.attachment_original_name
+    ? `"${update.content.slice(0, 60)}" y su adjunto ${update.attachment_original_name}`
+    : `"${update.content.slice(0, 60)}"`;
+  if (!window.confirm(`¿Eliminar ${label}?
+
+El cliente dejará de verlo en su portal y no se puede deshacer.`)) return;
+
+  deletingUpdateId.value = update.id;
+  try {
+    const response = await apiFetch(`/api/project-updates/${update.id}`, { method: 'DELETE' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No se pudo eliminar la actualización.');
+    updates.value = updates.value.filter((u) => u.id !== update.id);
+  } catch (err) {
+    alert('No se pudo eliminar la actualización: ' + err.message);
+  } finally {
+    deletingUpdateId.value = null;
+  }
 }
 
 async function fetchTemplates() {
