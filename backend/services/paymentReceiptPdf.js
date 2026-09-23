@@ -70,6 +70,18 @@ function fit(text, font, size, maxWidth) {
   return `${value}...`;
 }
 
+/**
+ * Igual que `wrap`, pero garantizando el ancho: una palabra sola más larga que
+ * la columna (un correo institucional, por ejemplo) no se puede partir por
+ * espacios, así que se recorta. Sin esto se salía del bloque y se montaba
+ * sobre la columna de al lado.
+ */
+function wrapFit(text, font, size, maxWidth, maxLines = 2) {
+  return wrap(text, font, size, maxWidth)
+    .slice(0, maxLines)
+    .map((line) => fit(line, font, size, maxWidth));
+}
+
 /** Parte un párrafo en líneas que quepan en `maxWidth`. */
 function wrap(text, font, size, maxWidth) {
   const words = ansi(text).split(/\s+/).filter(Boolean);
@@ -147,39 +159,48 @@ export async function buildPaymentReceiptPdf({ income }) {
   });
 
   /* ──────────────────── Datos del cliente / presentación ──────────── */
-  let y = headTop - 34;
+  const y = headTop - 34;
   const columnGap = 22;
-  const clientWidth = contentWidth * 0.34;
+  const clientWidth = contentWidth * 0.36;
   const presentX = left + clientWidth + columnGap;
-  const presentWidth = contentWidth * 0.38;
+  const presentWidth = contentWidth * 0.36;
   const conceptX = presentX + presentWidth + columnGap;
+  const conceptWidth = right - conceptX;
 
   page.drawText('DATOS DEL CLIENTE', { x: left, y, size: 9, font: bold, color: OLIVE_DEEP, characterSpacing: 0.6 });
-  page.drawText('PRESENTACION', { x: presentX, y, size: 9, font: bold, color: OLIVE_DEEP, characterSpacing: 0.6 });
+  page.drawText('PRESENTACIÓN', { x: presentX, y, size: 9, font: bold, color: OLIVE_DEEP, characterSpacing: 0.6 });
   page.drawText('CONCEPTO', { x: conceptX, y, size: 9, font: bold, color: OLIVE_DEEP, characterSpacing: 0.6 });
 
-  // Filete vertical olivo entre los datos y la presentación, como en el HTML.
-  page.drawRectangle({ x: presentX - columnGap / 2, y: y - 92, width: 1.4, height: 104, color: OLIVE });
-
+  // ── Columna 1: datos del cliente.
   const clientRows = [
     ['Cliente:', income.lead_name || 'Cliente'],
     ['Carrera:', income.lead_career || '—'],
     ['Correo:', income.lead_email || '—'],
-    ['Telefono:', income.lead_phone || '—']
+    ['Teléfono:', income.lead_phone || '—']
   ];
-  let rowY = y - 16;
+  let clientY = y - 16;
   for (const [label, value] of clientRows) {
-    page.drawText(ansi(label), { x: left, y: rowY, size: 8.5, font: bold, color: INK });
+    page.drawText(ansi(label), { x: label === 'Cliente:' ? left : left, y: clientY, size: 8.5, font: bold, color: INK });
     const labelWidth = bold.widthOfTextAtSize(ansi(label), 8.5) + 5;
-    page.drawText(fit(value, regular, 8.5, clientWidth - labelWidth), {
-      x: left + labelWidth, y: rowY, size: 8.5, font: regular, color: MUTED
+    // La carrera es larga y es un dato del cliente, no un adorno: se parte en
+    // dos líneas antes que recortarla con puntos suspensivos.
+    const lines = wrapFit(value, regular, 8.5, clientWidth - labelWidth);
+    lines.forEach((line, index) => {
+      page.drawText(line, {
+        x: index === 0 ? left + labelWidth : left + labelWidth,
+        y: clientY - index * 11,
+        size: 8.5,
+        font: regular,
+        color: MUTED
+      });
     });
-    rowY -= 15;
+    clientY -= 15 + (lines.length - 1) * 11;
   }
 
+  // ── Columna 2: presentación.
   const presentation = [
-    'Estimados senores,',
-    `Dejamos constancia del pago recibido por el concepto detallado a continuacion. Agradecemos su confianza en ${COMPANY.brandName} y quedamos atentos a cualquier consulta.`,
+    'Estimados señores,',
+    `Dejamos constancia del pago recibido por el concepto detallado a continuación. Agradecemos su confianza en ${COMPANY.brandName} y quedamos atentos a cualquier consulta.`,
     'Atentamente,'
   ];
   let presentY = y - 16;
@@ -191,32 +212,56 @@ export async function buildPaymentReceiptPdf({ income }) {
     presentY -= 3;
   }
   page.drawText(ansi(COMPANY.brandName), { x: presentX, y: presentY, size: 8.5, font: bold, color: INK });
+  presentY -= 12;
 
-  page.drawText(fit(concept, bold, 8.5, contentWidth - (conceptX - left)), {
-    x: conceptX, y: y - 16, size: 8.5, font: bold, color: MUTED
-  });
+  // ── Columna 3: concepto y medio de pago.
+  let conceptY = y - 16;
+  for (const line of wrapFit(concept, bold, 8.5, conceptWidth)) {
+    page.drawText(line, { x: conceptX, y: conceptY, size: 8.5, font: bold, color: MUTED });
+    conceptY -= 11;
+  }
   if (income.banco) {
-    page.drawText('MEDIO', { x: conceptX, y: y - 40, size: 9, font: bold, color: OLIVE_DEEP, characterSpacing: 0.6 });
-    page.drawText(fit(income.banco, regular, 8.5, contentWidth - (conceptX - left)), {
-      x: conceptX, y: y - 56, size: 8.5, font: regular, color: MUTED
+    conceptY -= 10;
+    page.drawText('MEDIO', { x: conceptX, y: conceptY, size: 9, font: bold, color: OLIVE_DEEP, characterSpacing: 0.6 });
+    conceptY -= 15;
+    page.drawText(fit(income.banco, regular, 8.5, conceptWidth), {
+      x: conceptX, y: conceptY, size: 8.5, font: regular, color: MUTED
     });
+    conceptY -= 11;
   }
 
+  // El bloque termina donde termina la columna MÁS LARGA. Sin esto la fila de
+  // "FECHA / ELABORADO POR" se dibujaba a la altura de la columna del cliente
+  // y, cuando la presentación bajaba más (un nombre de empresa largo, una
+  // línea extra), le caía encima: en el correo se leían las dos frases
+  // superpuestas.
+  const blockBottom = Math.min(clientY, presentY, conceptY);
+
+  // Filete vertical olivo entre los datos y la presentación, a la altura real
+  // del bloque.
+  page.drawRectangle({
+    x: presentX - columnGap / 2,
+    y: blockBottom + 6,
+    width: 1.4,
+    height: y + 10 - (blockBottom + 6),
+    color: OLIVE
+  });
+
   /* ─────────────────────────── Fecha y emisor ─────────────────────── */
-  y = rowY - 18;
-  page.drawText(`FECHA: ${ansi(formatLongDate(income.fecha))}`, { x: left, y, size: 8, font: bold, color: MUTED });
-  page.drawText(`ELABORADO POR: ${ansi(COMPANY.brandName)}`, { x: presentX, y, size: 8, font: bold, color: MUTED });
+  let cursorY = blockBottom - 6;
+  page.drawText(`FECHA: ${ansi(formatLongDate(income.fecha))}`, { x: left, y: cursorY, size: 8, font: bold, color: MUTED });
+  page.drawText(`ELABORADO POR: ${ansi(COMPANY.brandName)}`, { x: presentX, y: cursorY, size: 8, font: bold, color: MUTED });
 
   /* ───────────────────────── Tabla de importes ────────────────────── */
-  y -= 26;
+  cursorY -= 26;
   const rowHeight = 26;
   const amountColumn = 150;
 
-  page.drawRectangle({ x: left, y: y - rowHeight + 8, width: contentWidth, height: rowHeight, color: OLIVE });
-  page.drawText('CONCEPTO / DESCRIPCION', { x: left + 12, y: y - 9, size: 9, font: bold, color: WHITE, characterSpacing: 0.6 });
+  page.drawRectangle({ x: left, y: cursorY - rowHeight + 8, width: contentWidth, height: rowHeight, color: OLIVE });
+  page.drawText('CONCEPTO / DESCRIPCIÓN', { x: left + 12, y: cursorY - 9, size: 9, font: bold, color: WHITE, characterSpacing: 0.6 });
   page.drawText('IMPORTE', {
     x: right - 12 - bold.widthOfTextAtSize('IMPORTE', 9),
-    y: y - 9, size: 9, font: bold, color: WHITE, characterSpacing: 0.6
+    y: cursorY - 9, size: 9, font: bold, color: WHITE, characterSpacing: 0.6
   });
 
   const rows = [
@@ -224,7 +269,7 @@ export async function buildPaymentReceiptPdf({ income }) {
     { label: 'SUBTOTAL', value: money(amount, 'PEN'), alignRight: true },
     { label: 'DESCUENTO', value: money(discount, 'PEN'), alignRight: true }
   ];
-  let tableY = y - rowHeight + 8;
+  let tableY = cursorY - rowHeight + 8;
   for (const row of rows) {
     tableY -= rowHeight;
     page.drawRectangle({ x: left, y: tableY, width: contentWidth, height: rowHeight, color: WHITE, borderColor: RULE, borderWidth: 0.7 });
