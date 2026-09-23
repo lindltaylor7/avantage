@@ -7,6 +7,7 @@ import DatabaseView from '../views/DatabaseView.vue';
 import ProjectsView from '../views/ProjectsView.vue';
 import ProjectDetailView from '../views/ProjectDetailView.vue';
 import RolesView from '../views/RolesView.vue';
+import CareersView from '../views/CareersView.vue';
 import MetaWebhookTestView from '../views/MetaWebhookTestView.vue';
 import SocialInteractionsView from '../views/SocialInteractionsView.vue';
 import WhatsAppView from '../views/WhatsAppView.vue';
@@ -44,6 +45,7 @@ const router = createRouter({
     { path: '/admin/projects', name: 'projects', component: ProjectsView, meta: { requiresAuth: true, permission: 'projects.view' } },
     { path: '/admin/projects/:id', name: 'project-detail', component: ProjectDetailView, props: true, meta: { requiresAuth: true, permission: 'projects.view' } },
     { path: '/admin/roles', name: 'roles', component: RolesView, meta: { requiresAuth: true, permission: 'roles.manage' } },
+    { path: '/admin/carreras', name: 'careers', component: CareersView, meta: { requiresAuth: true, permission: 'careers.manage' } },
     { path: '/admin/webhooks', name: 'webhooks', component: MetaWebhookTestView, meta: { requiresAuth: true, permission: 'leads.view' } },
     { path: '/admin/social', name: 'social', component: SocialInteractionsView, meta: { requiresAuth: true, permission: 'leads.view' } },
     { path: '/admin/instagram', name: 'instagram', component: InstagramInteractionsView, meta: { requiresAuth: true, permission: 'leads.view' } },

@@ -8,6 +8,7 @@ import { OllamaService } from './services/ollamaService.js';
 import { EmailService } from './services/emailService.js';
 import { LeadService } from './services/leadService.js';
 import { FunnelColumnService } from './services/funnelColumnService.js';
+import { CareerCatalogService } from './services/careerCatalogService.js';
 import { ProjectService } from './services/projectService.js';
 import { TaskService } from './services/taskService.js';
 import { TaskTemplateService } from './services/taskTemplateService.js';
@@ -110,6 +111,7 @@ const ollamaService = new OllamaService();
 const emailService = new EmailService();
 const leadService = new LeadService();
 const funnelColumnService = new FunnelColumnService();
+const careerCatalogService = new CareerCatalogService();
 const clientAccountService = new ClientAccountService();
 const projectService = new ProjectService({ clientAccountService, emailService });
 const taskService = new TaskService();
@@ -2604,6 +2606,139 @@ app.delete('/api/funnel-columns/:key', requireAuth, requirePermission('leads.vie
   } catch (error) {
     console.error('❌ Error al eliminar la columna:', error);
     res.status(500).json({ error: 'Error al eliminar la columna del funnel.', details: error.message });
+  }
+});
+
+// =====================================================================
+// CATÁLOGO DE CARRERAS (/api/careers)
+// =====================================================================
+// Las áreas y carreras que alimentan todos los desplegables de "Carrera".
+// La lectura es pública porque el evaluador de tesis (/evaluador-tesis) no
+// pide sesión y necesita la misma lista; escribir exige `careers.manage`.
+
+/**
+ * Catálogo para los desplegables: solo carreras activas, agrupadas y en orden.
+ */
+app.get('/api/careers', async (req, res) => {
+  try {
+    const groups = await careerCatalogService.listCatalog();
+    res.json({ groups });
+  } catch (error) {
+    console.error('❌ Error al obtener el catálogo de carreras:', error);
+    res.status(500).json({ error: 'Error al obtener el catálogo de carreras.', details: error.message });
+  }
+});
+
+/**
+ * Catálogo completo para la pantalla de administración: incluye las carreras
+ * desactivadas y cuántos leads/proyectos usan cada una.
+ */
+app.get('/api/careers/manage', requireAuth, requirePermission('careers.manage'), async (req, res) => {
+  try {
+    const groups = await careerCatalogService.listCatalog({ includeInactive: true, withUsage: true });
+    res.json({ groups });
+  } catch (error) {
+    console.error('❌ Error al obtener el catálogo de carreras:', error);
+    res.status(500).json({ error: 'Error al obtener el catálogo de carreras.', details: error.message });
+  }
+});
+
+app.post('/api/careers/groups', requireAuth, requirePermission('careers.manage'), async (req, res) => {
+  try {
+    const group = await careerCatalogService.createGroup(req.body?.label);
+    res.status(201).json({ group });
+  } catch (error) {
+    console.error('❌ Error al crear el área de carreras:', error);
+    res.status(400).json({ error: error.message || 'Error al crear el área.' });
+  }
+});
+
+app.patch('/api/careers/groups/reorder', requireAuth, requirePermission('careers.manage'), async (req, res) => {
+  try {
+    const { ids } = req.body || {};
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids debe ser un arreglo con el orden de las áreas.' });
+    }
+    const groups = await careerCatalogService.reorderGroups(ids);
+    res.json({ groups });
+  } catch (error) {
+    console.error('❌ Error al reordenar las áreas de carreras:', error);
+    res.status(500).json({ error: 'Error al reordenar las áreas.', details: error.message });
+  }
+});
+
+app.put('/api/careers/groups/:id', requireAuth, requirePermission('careers.manage'), async (req, res) => {
+  try {
+    const group = await careerCatalogService.renameGroup(req.params.id, req.body?.label);
+    if (!group) return res.status(404).json({ error: 'Área no encontrada.' });
+    res.json({ group });
+  } catch (error) {
+    console.error('❌ Error al renombrar el área de carreras:', error);
+    res.status(400).json({ error: error.message || 'Error al renombrar el área.' });
+  }
+});
+
+app.delete('/api/careers/groups/:id', requireAuth, requirePermission('careers.manage'), async (req, res) => {
+  try {
+    const group = await careerCatalogService.deleteGroup(req.params.id);
+    if (!group) return res.status(404).json({ error: 'Área no encontrada.' });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error al eliminar el área de carreras:', error);
+    res.status(400).json({ error: error.message || 'Error al eliminar el área.' });
+  }
+});
+
+app.post('/api/careers', requireAuth, requirePermission('careers.manage'), async (req, res) => {
+  try {
+    const { groupId, name } = req.body || {};
+    const career = await careerCatalogService.createCareer({ groupId, name });
+    res.status(201).json({ career });
+  } catch (error) {
+    console.error('❌ Error al crear la carrera:', error);
+    res.status(400).json({ error: error.message || 'Error al crear la carrera.' });
+  }
+});
+
+app.patch('/api/careers/reorder', requireAuth, requirePermission('careers.manage'), async (req, res) => {
+  try {
+    const { groupId, ids } = req.body || {};
+    if (!groupId || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'Se requiere groupId y un arreglo ids con el nuevo orden.' });
+    }
+    const groups = await careerCatalogService.reorderCareers(groupId, ids);
+    res.json({ groups });
+  } catch (error) {
+    console.error('❌ Error al reordenar las carreras:', error);
+    res.status(500).json({ error: 'Error al reordenar las carreras.', details: error.message });
+  }
+});
+
+/**
+ * Renombrar, mover de área o activar/desactivar una carrera. Con
+ * `propagate: true` el nuevo nombre también se escribe en los leads y
+ * proyectos que tenían el anterior (los documentos emitidos no se tocan).
+ */
+app.put('/api/careers/:id', requireAuth, requirePermission('careers.manage'), async (req, res) => {
+  try {
+    const { name, groupId, active, propagate } = req.body || {};
+    const result = await careerCatalogService.updateCareer(req.params.id, { name, groupId, active, propagate });
+    if (!result) return res.status(404).json({ error: 'Carrera no encontrada.' });
+    res.json(result);
+  } catch (error) {
+    console.error('❌ Error al actualizar la carrera:', error);
+    res.status(400).json({ error: error.message || 'Error al actualizar la carrera.' });
+  }
+});
+
+app.delete('/api/careers/:id', requireAuth, requirePermission('careers.manage'), async (req, res) => {
+  try {
+    const career = await careerCatalogService.deleteCareer(req.params.id);
+    if (!career) return res.status(404).json({ error: 'Carrera no encontrada.' });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error al eliminar la carrera:', error);
+    res.status(500).json({ error: 'Error al eliminar la carrera.', details: error.message });
   }
 });
 

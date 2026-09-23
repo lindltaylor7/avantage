@@ -134,6 +134,17 @@ antes de tocar el arranque de producción.
   puro porque el hosting compartido no corre un navegador headless): es la que se adjunta al correo
   del cliente y la que muestra la vista previa antes de enviarlo, así que lo que se ve es
   exactamente lo que se manda.
+- El **catálogo de carreras** (`career_groups` + `careers`, `careerCatalogService.js`) es lo que
+  alimenta todos los desplegables de "Carrera", incluido el evaluador público. Se administra en
+  `/admin/carreras` (`CareersView.vue`, permiso `careers.manage`) y se lee en `GET /api/careers`,
+  el único endpoint **público** del módulo (el evaluador no pide sesión). En el frontend,
+  `src/data/careers.js` guarda el catálogo en un `ref` que se carga una vez al arrancar
+  (`loadCareerCatalog()` en `main.js`); la lista literal que quedó en ese archivo es solo el
+  **respaldo** mientras la petición viaja o si falla. Leads, proyectos y contratos guardan la
+  carrera como **texto**, así que quitar o renombrar una carrera no toca las fichas existentes
+  (el desplegable reagrega ese valor como "Registrado anteriormente"); renombrar con
+  `propagate: true` sí reescribe `leads.field_of_study` y `projects.field_of_study`, nunca
+  cotizaciones ni contratos ya emitidos.
 - **RBAC**: `roles` ↔ `permissions` (N:N vía `role_permissions`) ↔ `users` (N:1 vía `role_id`). Los
   permisos son "herramientas" habilitables (`leads.view`, `projects.view`, `roles.manage`,
   `finance.view`, ...); se resuelven una vez en el login y se embeben en el JWT.

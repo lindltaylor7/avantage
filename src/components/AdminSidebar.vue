@@ -223,6 +223,20 @@
           </svg>
           <span class="nav-label" v-if="!isCollapsed">Perfiles</span>
         </router-link>
+
+        <router-link
+          v-if="hasPermission('careers.manage')"
+          to="/admin/carreras"
+          class="nav-item"
+          :class="{ 'is-active': $route.path === '/admin/carreras' }"
+          @click="closeMobile"
+        >
+          <svg class="nav-icon" style="color: var(--accent-cyan);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 10L12 5 2 10l10 5 10-5z"/>
+            <path d="M6 12v5c0 1.1 2.7 2 6 2s6-.9 6-2v-5"/>
+          </svg>
+          <span class="nav-label" v-if="!isCollapsed">Carreras</span>
+        </router-link>
       </div>
     </div>
   </aside>

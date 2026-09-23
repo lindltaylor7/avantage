@@ -596,7 +596,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue';
 import { apiFetch } from '../apiClient.js';
-import { CAREERS } from '../data/careers.js';
+import { careerNames } from '../data/careers.js';
 
 // Universidades representativas de Perú
 const PERU_UNIVERSITIES = [
@@ -620,7 +620,7 @@ const PERU_UNIVERSITIES = [
 ];
 
 /** El datalist de carreras sale del catálogo compartido (permite escribir otra). */
-const PERU_CAREERS = CAREERS;
+const PERU_CAREERS = careerNames;
 
 const PERU_DEPARTMENTS = [
   'Junín', 'Lima', 'Arequipa', 'Cusco', 'La Libertad', 'Lambayeque',
