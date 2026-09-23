@@ -298,6 +298,10 @@ import { useLedgerTable } from './useLedgerTable.js';
 import LedgerPagination from './LedgerPagination.vue';
 import './ledger.css';
 
+const props = defineProps({
+  openFormTrigger: { type: Number, default: 0 }
+});
+
 const BANCOS = ['BCP', 'Interbank', 'Efectivo'];
 // Debe coincidir con MAX_FINANCE_RECEIPTS del backend.
 const MAX_RECEIPTS = 10;
@@ -307,6 +311,12 @@ const isSaving = ref(false);
 const isLoading = ref(false);
 const errorMessage = ref('');
 const successMessage = ref('');
+
+watch(() => props.openFormTrigger, (val) => {
+  if (val > 0) {
+    openCreate();
+  }
+});
 
 const rows = ref([]);
 const receiptUrls = reactive({});

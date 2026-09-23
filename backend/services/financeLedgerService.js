@@ -974,6 +974,71 @@ export class FinanceLedgerService {
     const totalIngresos = Math.round(grandTotal(ingresos) * 100) / 100;
     const totalEgresos = Math.round(grandTotal(egresos) * 100) / 100;
 
+    const [incomeCount] = await db('finance_income')
+      .where('fecha', '>=', earliest)
+      .where('estado', 'verificado')
+      .count('id as cnt');
+    const [journalCount] = await db('finance_journal')
+      .where('fecha', '>=', earliest)
+      .where('moneda', 'soles')
+      .where('estado', 'pagado')
+      .count('id as cnt');
+    const totalTransactions = (Number(incomeCount?.cnt) || 0) + (Number(journalCount?.cnt) || 0);
+
+    const recentIncome = await db('finance_income')
+      .leftJoin('leads', 'leads.id', 'finance_income.lead_id')
+      .select(
+        'finance_income.id',
+        'finance_income.code',
+        'finance_income.fecha',
+        'finance_income.monto',
+        'finance_income.banco',
+        'finance_income.cuota',
+        db.raw("COALESCE(NULLIF(leads.full_name, ''), leads.topic, 'Cliente') as client_name")
+      )
+      .where('finance_income.estado', 'verificado')
+      .orderBy('finance_income.fecha', 'desc')
+      .orderBy('finance_income.id', 'desc')
+      .limit(8);
+
+    const recentJournal = await db('finance_journal')
+      .select('id', 'code', 'fecha', 'monto', 'banco', 'detalle', 'area')
+      .where('moneda', 'soles')
+      .where('estado', 'pagado')
+      .orderBy('fecha', 'desc')
+      .orderBy('id', 'desc')
+      .limit(8);
+
+    const recentTransactions = [
+      ...recentIncome.map((r) => ({
+        id: `inc-${r.id}`,
+        code: r.code,
+        fecha: r.fecha,
+        title: r.client_name,
+        subtitle: r.cuota ? `Cuota ${r.cuota}` : 'Ingreso por cuota',
+        banco: r.banco,
+        amount: Number(r.monto) || 0,
+        type: 'in',
+        source: 'income'
+      })),
+      ...recentJournal.map((r) => {
+        const num = Number(r.monto) || 0;
+        return {
+          id: `jrn-${r.id}`,
+          code: r.code,
+          fecha: r.fecha,
+          title: r.detalle || 'Movimiento contable',
+          subtitle: r.area || (num >= 0 ? 'Ingreso operativo' : 'Egreso operativo'),
+          banco: r.banco,
+          amount: Math.abs(num),
+          type: num >= 0 ? 'in' : 'out',
+          source: 'journal'
+        };
+      })
+    ]
+      .sort((a, b) => new Date(b.fecha) - new Date(a.fecha))
+      .slice(0, 8);
+
     return {
       months: monthKeys,
       banks: BANCOS,
@@ -983,12 +1048,14 @@ export class FinanceLedgerService {
         ingresos: totalIngresos,
         egresos: totalEgresos,
         balance: Math.round((totalIngresos - totalEgresos) * 100) / 100,
+        totalTransactions,
         byBank: BANCOS.map((banco) => ({
           banco,
           ingresos: Math.round(bankTotal(ingresos, banco) * 100) / 100,
           egresos: Math.round(bankTotal(egresos, banco) * 100) / 100
         }))
-      }
+      },
+      recentTransactions
     };
   }
 }

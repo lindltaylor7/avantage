@@ -503,6 +503,10 @@ import SendTributarioModal from "./SendTributarioModal.vue";
 import SendReceiptModal from "./SendReceiptModal.vue";
 import "./ledger.css";
 
+const props = defineProps({
+  openFormTrigger: { type: Number, default: 0 }
+});
+
 // Debe coincidir con MAX_FINANCE_RECEIPTS del backend.
 const MAX_RECEIPTS = 10;
 const MESES = [
@@ -515,6 +519,12 @@ const isSaving = ref(false);
 const isLoading = ref(false);
 const errorMessage = ref("");
 const successMessage = ref("");
+
+watch(() => props.openFormTrigger, (val) => {
+  if (val > 0) {
+    openCreate();
+  }
+});
 
 const rows = ref([]);
 const leads = ref([]);
