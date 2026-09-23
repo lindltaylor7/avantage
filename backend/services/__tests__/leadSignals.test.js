@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { criticalSignal, detectLeadSignals } from '../leadSignals.js';
+import { criticalSignal, detectLeadSignals, saysNotInterested } from '../leadSignals.js';
 
 test('detecta el plantón en la reunión en las formas en que se dice de verdad', () => {
   for (const text of [
@@ -107,4 +107,35 @@ test('detectLeadSignals devuelve todas las banderas en false para un mensaje nor
   assert.deepEqual(detectLeadSignals('Soy de Contabilidad, San Marcos'), {
     noShow: false, complaint: false, humanRequest: false, frustration: false
   });
+});
+
+/**
+ * Caso real del 22/09: el lead escribió "Ya no estoy interesado, gracias", el
+ * bot se despidió bien… y una hora después el barrido de inactividad le mandó
+ * "¿Sigues por ahí?". La señal existe para cerrar la sesión y que eso no pase.
+ */
+test('saysNotInterested reconoce una despedida', () => {
+  for (const text of [
+    'Ya no estoy interesado, gracias',
+    'no me interesa',
+    'ya no quiero',
+    'ya consegui a alguien',
+    'ya contrate a otra persona',
+    'ya no deseo continuar con el servicio'
+  ]) {
+    assert.equal(saysNotInterested(text), true, `no reconoció la despedida en: "${text}"`);
+  }
+});
+
+test('saysNotInterested no confunde una preferencia con un adiós', () => {
+  for (const text of [
+    'no me interesa el horario de la tarde',
+    'no me interesa el precio ahora, quiero saber que incluye',
+    'no puedo ahora',
+    'no me llames, prefiero Meet',
+    'quiero saber el precio',
+    '1'
+  ]) {
+    assert.equal(saysNotInterested(text), false, `cerró la conversación de más en: "${text}"`);
+  }
 });

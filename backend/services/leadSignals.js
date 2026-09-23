@@ -82,6 +82,30 @@ const SIGNAL_TESTS = [
  * Todas las señales presentes en el texto, como objeto de banderas. Útil para
  * la bitácora del panel (deja ver por qué se escaló una conversación).
  */
+/**
+ * El lead dice, sin ambigüedad, que ya no quiere seguir. No es una objeción
+ * ("está caro", "ahora no puedo") sino un cierre: seguir mandándole horarios
+ * —o el recordatorio "¿Sigues por ahí?" una hora después, como pasó— es
+ * insistirle a alguien que ya se despidió.
+ *
+ * Se exige un mensaje CORTO: "no me interesa el horario de la tarde" o "no me
+ * interesa el precio todavía" no son despedidas, y confundirlas costaría el
+ * lead entero. Por eso también se descarta cualquier mensaje que hable de la
+ * reunión, del precio o de la modalidad: ahí "no me interesa" califica a otra
+ * cosa, no a la conversación.
+ */
+const NOT_INTERESTED_RE = /^(?:ya\s+)?(?:no\s+(?:me\s+interesa|estoy\s+interesad[oa]|deseo|quiero|necesito)|no\s+gracias|gracias\s*,?\s*(?:pero\s+)?no)\b|ya\s+(?:no\s+(?:me\s+interesa|quiero|deseo)|consegui|contrate|encontre|resolvi|tengo\s+(?:quien|asesor))/;
+
+/** Palabras que hacen que "no me interesa" se refiera a OTRA cosa. */
+const NOT_INTERESTED_EXCLUSIONS = /horario|hora\b|reunion|meet|llamada|telefon|precio|costo|cuanto|dia\b|fecha|manana|tarde|noche|descuento/;
+
+export function saysNotInterested(text) {
+  const clean = normalize(text);
+  if (!clean || clean.length > 90) return false;
+  if (NOT_INTERESTED_EXCLUSIONS.test(clean)) return false;
+  return NOT_INTERESTED_RE.test(clean);
+}
+
 export function detectLeadSignals(text) {
   const clean = normalize(text);
   const signals = {};

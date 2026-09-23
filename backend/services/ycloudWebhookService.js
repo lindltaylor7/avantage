@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { WhatsappMessageService, detectWhatsappChannel, cacheYCloudMedia, resolveMessageBody } from './whatsappMessageService.js';
+import { WhatsappMessageService, detectWhatsappChannel, cacheYCloudMedia, resolveMessageBody, extractBody } from './whatsappMessageService.js';
 import { LeadService } from './leadService.js';
 
 const MAX_RECENT_EVENTS = 50;
@@ -178,7 +178,12 @@ export class YCloudWebhookService {
         waId,
         messageId: message.wamid || message.id,
         messageType: message.type,
-        body: message.text?.body || '',
+        // Un adjunto que manda el asesor desde su celular no trae texto: con
+        // `message.text?.body || ''` se guardaba una fila VACÍA y el panel (y
+        // el resumen diario) mostraban renglones en blanco. `extractBody` le
+        // pone la misma etiqueta que a un adjunto entrante ("[Imagen]",
+        // "[Audio]", el nombre del documento…).
+        body: extractBody(message),
         sentAt: message.sendTime ? new Date(message.sendTime) : new Date(),
         rawPayload: message
       });

@@ -154,3 +154,15 @@ export function missedReplyApology() {
 export function missedReplyHandoff() {
   return 'Perdona la demora, se me quedó tu mensaje sin responder 🙏';
 }
+
+/**
+ * El lead dijo que ya no le interesa. Se le agradece, se cierra y NO se le
+ * vuelve a escribir: la conversación queda marcada como terminada para que el
+ * barrido de inactividad no le mande "¿Sigues por ahí?" una hora después
+ * (caso real del 22/09). La puerta queda abierta sin pedirle nada.
+ */
+export function notInterestedFarewell(contactName) {
+  const name = contactName ? `, ${contactName}` : '';
+  return `Entendido${name}, gracias por avisarme 🙌 Cierro por acá para no molestarte más. ` +
+    'Si más adelante retomas tu tesis, escríbeme a este mismo número y te atiendo al toque.';
+}

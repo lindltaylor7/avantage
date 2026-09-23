@@ -125,6 +125,21 @@ function toFreeSlot(slot) {
  * Conexión OAuth de cada asesor con su propio Google Calendar, usada para
  * crear reuniones con Google Meet directamente en su calendario real.
  */
+/**
+ * Deja el link de Meet limpio: sin parámetros de consulta ni fragmento.
+ *
+ * Google devuelve el link pelado, pero cuando alguien lo copia desde la barra
+ * del navegador se lleva `?authuser=0`, y ese parámetro fuerza la PRIMERA
+ * cuenta de Google del dispositivo del cliente: si tiene dos sesiones abiertas
+ * entra con la equivocada o le rebota ("entré a este y nada", caso real). El
+ * link que sale del sistema nunca debe llevarlo.
+ */
+export function sanitizeMeetLink(link) {
+  const clean = String(link || '').trim();
+  if (!clean) return null;
+  return clean.split(/[?#]/)[0];
+}
+
 export class GoogleCalendarService {
   constructor() {
     this.clientId = process.env.GOOGLE_CLIENT_ID || '';
@@ -332,7 +347,7 @@ export class GoogleCalendarService {
 
     return {
       eventId: data.id,
-      meetLink: data.hangoutLink || null,
+      meetLink: sanitizeMeetLink(data.hangoutLink),
       htmlLink: data.htmlLink || null,
       start: data.start,
       end: data.end

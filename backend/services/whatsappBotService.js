@@ -4,7 +4,9 @@ import { WhatsappBotSettingsService } from './whatsappBotSettingsService.js';
 import { buildKnowledgeBlock, meetingDurationLabel } from './whatsappBotPromptDefaults.js';
 import { MIN_BOOKING_LEAD_MINUTES } from './googleCalendarService.js';
 import { normalizeUniversity } from './universityNormalizer.js';
-import { criticalSignal, isTrustDoubt } from './leadSignals.js';
+import { normalizeCareer } from './careerNormalizer.js';
+import { sanitizeMeetLink } from './googleCalendarService.js';
+import { criticalSignal, isTrustDoubt, saysNotInterested } from './leadSignals.js';
 import { coalesceTimeFragments } from './messageFragments.js';
 import * as whatsappBotCopy from '../copy/whatsappBotCopy.js';
 import { evaluateQualification, normalizeAcademicStatus, normalizeCycle, normalizeThesisSituation } from './leadQualification.js';
@@ -112,6 +114,11 @@ const MAX_STEP_MISSES = 2;
 // (preguntas sueltas respondidas y el paso retomado). Responderlas está bien,
 // pero quien lleva cuatro mensajes preguntando cosas sin elegir opción quiere
 // hablar con una persona, no recibir el mismo menú una quinta vez.
+// Cuánto tiempo se considera que la lista de horarios sigue "a la vista" en
+// el chat: dentro de esa ventana, retomar el paso es una línea y no el bloque
+// entero repetido.
+const SLOT_LIST_VISIBLE_MS = 3 * 60 * 60 * 1000;
+
 const MAX_STEP_TURNS = 4;
 
 // Estados del flujo de agendamiento (todos "esperan respuesta del contacto").
@@ -718,7 +725,7 @@ function buildDailyAgendaMessage(dateIso, meetings) {
     // Sin link de Meet es una llamada telefónica: el vendedor necesita el
     // número a la vista, no tener que ir a buscarlo al panel.
     const canal = meeting.meet_link
-      ? `💻 ${meeting.meet_link}`
+      ? `💻 ${sanitizeMeetLink(meeting.meet_link)}`
       : `📞 ${meeting.lead_phone?.trim() || meeting.wa_id}`;
     return `*${i + 1}. ${hora}* — ${quien}\n   ${canal}` + (tema ? `\n   📄 ${tema}` : '');
   });
@@ -1366,6 +1373,15 @@ export class WhatsappBotService {
     const session = await this.getSession(waId);
     if (!session || !session.bot_enabled) return;
 
+    // El lead se despidió: se cierra la conversación ANTES de enrutar el
+    // turno. Sin esto la sesión seguía "active", el modelo improvisaba una
+    // despedida y una hora después el barrido de inactividad le mandaba
+    // "¿Sigues por ahí?" a alguien que acababa de decir que no le interesa.
+    if (saysNotInterested(text)) {
+      await this.closeAsNotInterested(waId, text);
+      return;
+    }
+
     switch (session.status) {
       case 'scheduling_mode': return this.handleSchedulingModeReply(waId, session, text);
       case 'scheduling_phone': return this.handleSchedulingPhoneReply(waId, session, text);
@@ -1580,7 +1596,7 @@ export class WhatsappBotService {
       if (isAdFormMessage(incomingText)) {
         if (formFields.level) answers.level = formFields.level;
         if (formFields.university) answers.university = formFields.university;
-        if (formFields.field) answers.field = formFields.field;
+        if (formFields.field) answers.field = normalizeCareer(formFields.field);
         if (formFields.problem) answers.problem = formFields.problem;
         if (formFields.phone) answers.phone = formFields.phone;
         // Etapa de la tesis y servicio que busca: se guardan para no ofrecerle
@@ -1650,7 +1666,7 @@ export class WhatsappBotService {
     if (extracted.problem) answers.problem = extracted.problem;
     if (extracted.location) answers.location = extracted.location;
     if (extracted.level) answers.level = extracted.level;
-    if (extracted.field) answers.field = extracted.field;
+    if (extracted.field) answers.field = normalizeCareer(extracted.field);
     if (extracted.university && extracted.university !== answers.university) {
       // F4 — Las siglas peruanas se confunden fácil (casos reales: "UNAC"
       // leído como "Universidad Nacional del Centro" en vez de la del Callao,
@@ -2054,6 +2070,28 @@ export class WhatsappBotService {
    * sesión del bot y mueve el lead a "Transferido a Closer" — ahí sí entra
    * al Funnel de Ventas para que un asesor lo contacte directamente.
    */
+  /**
+   * El lead dijo que ya no le interesa: se le agradece, la sesión queda
+   * cerrada ('completed', que el barrido de inactividad ya no toca) y el lead
+   * pasa a "descartado" en el funnel, igual que un lead que no califica.
+   *
+   * No se le transfiere a un asesor: no hay nada que atender y meterlo en la
+   * cola del closer haría que alguien lo llame para insistirle.
+   */
+  async closeAsNotInterested(waId, text) {
+    const session = await this.getSession(waId);
+    const answers = typeof session?.answers === 'string' ? JSON.parse(session.answers) : (session?.answers || {});
+    delete answers.__scheduling;
+    answers.__closedAt = new Date().toISOString();
+    answers.__closedReason = 'no_interesado';
+
+    const lead = await this.leadService.findByPhone(waId);
+    await this.send(waId, whatsappBotCopy.notInterestedFarewell(firstNameOf(lead?.full_name)));
+    await this.updateSession(waId, { status: 'completed', answers: JSON.stringify(answers) });
+    await this.moveFunnelStage(waId, 'descartado');
+    this.logActivity({ type: 'lead_not_interested', waId, text });
+  }
+
   async handOffToAdvisor(waId, reason) {
     this.logActivity({ type: 'scheduling_offer_skipped', waId, reason });
 
@@ -2363,10 +2401,15 @@ export class WhatsappBotService {
       }
     }
 
-    // Repetir el bloque completo de opciones en cada respuesta se lee como un
-    // contestador: la primera vez va entero, de ahí en adelante una línea.
+    // Repetir el bloque completo de opciones se lee como un contestador. La
+    // lista entera solo vale la pena cuando ya no está a la vista: si el bot
+    // la mandó hace un rato y el lead sigue en el mismo hilo, le basta una
+    // línea (caso real: recibió los mismos 4 horarios tres veces en 25
+    // minutos, porque preguntó dos cosas entremedio).
     const restated = live ? (live.restated || 0) : 0;
-    const restate = restated >= 1 ? (step.restateShort || step.restate) : step.restate;
+    const listSentAt = live?.slotsSentAt ? Date.parse(live.slotsSentAt) : 0;
+    const listStillVisible = listSentAt > 0 && (Date.now() - listSentAt) < SLOT_LIST_VISIBLE_MS;
+    const restate = (restated >= 1 || listStillVisible) ? (step.restateShort || step.restate) : step.restate;
     if (live) {
       live.restated = restated + 1;
       await this.updateSession(waId, { answers: JSON.stringify(current) });
@@ -2753,7 +2796,10 @@ export class WhatsappBotService {
     if (days.length === 1) {
       const day = days[0];
       const slots = upcoming.filter((s) => s.date === day).slice(0, SLOTS_TO_OFFER);
-      if (scheduling) scheduling.slots = slots;
+      if (scheduling) {
+        scheduling.slots = slots;
+        scheduling.slotsSentAt = new Date().toISOString();
+      }
       await this.updateSession(waId, { status: 'scheduling_time', answers: JSON.stringify(answers) });
       await this.send(
         waId,
@@ -2772,7 +2818,10 @@ export class WhatsappBotService {
     // elige con un número. Si ninguna le sirve, puede pedir otro día u hora y
     // el paso de elección de horario lo resuelve (_answerDayRequestWhileChoosing).
     const offer = spreadSlotsAcrossDays(upcoming, FIRST_OFFER_SLOTS, FIRST_OFFER_MAX_PER_DAY);
-    if (scheduling) scheduling.slots = offer;
+    if (scheduling) {
+      scheduling.slots = offer;
+      scheduling.slotsSentAt = new Date().toISOString();
+    }
     const lastDay = days[days.length - 1];
     await this.updateSession(waId, { status: 'scheduling_time', answers: JSON.stringify(answers) });
     await this.send(
@@ -3493,7 +3542,7 @@ ${numberedList(fullSlotLabels(offer))}
       const startsIn = formatTimeUntil(meeting.start_time);
       const text =
         `⏰ ${name ? `${name}, te` : 'Te'} recuerdo tu reunión con el asesor: *${formatMeetingDateTimeLabel(meeting.start_time)}*${startsIn ? ` (${startsIn})` : ''}.` +
-        (meeting.meet_link ? `\n\n🔗 ${meeting.meet_link}` : '\n\n📞 Te llamamos a este mismo número.');
+        (meeting.meet_link ? `\n\n🔗 ${sanitizeMeetLink(meeting.meet_link)}` : '\n\n📞 Te llamamos a este mismo número.');
 
       try {
         await this.send(meeting.wa_id, text);
@@ -3895,7 +3944,7 @@ ${numberedList(fullSlotLabels(offer))}
     const settings = await this.settingsService.get();
     const result = await this.ollamaService.classifyPostBookingMessage(text, {
       meetingLabel: formatMeetingDateTimeLabel(meeting.start_time),
-      meetLink: meeting.meet_link,
+      meetLink: sanitizeMeetLink(meeting.meet_link),
       knowledgeBlock: buildKnowledgeBlock(settings),
       contactName
     });
