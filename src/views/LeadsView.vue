@@ -228,101 +228,14 @@
               @dragend="onDragEnd"
               @click="selectedLead = lead"
             >
-              <div class="card-header-line">
-                <span class="lead-id-tag">#{{ lead.id }}</span>
-                <span v-if="lead.assigned_to" class="lead-assigned-tag" :title="'Asignado a: ' + lead.assigned_to">
-                  👤 {{ lead.assigned_to }}
-                </span>
-                <span :class="['viability-pill', getLevelClass(lead.viability_level)]">
-                  {{ lead.overall_viability_score ?? '—' }}%
-                </span>
-              </div>
-
-              <!-- Nombre Completo del Prospecto / Lead -->
-              <div class="card-lead-name-box">
-                <span class="lead-name-icon">👤</span>
-                <h4 class="card-lead-name" :title="getLeadFullName(lead)">
-                  {{ getLeadFullName(lead) }}
-                </h4>
-              </div>
-
-              <!-- Tema o Asunto secundario si existe y difiere del nombre -->
-              <p
-                v-if="lead.topic && lead.topic.trim() && lead.topic.trim().toLowerCase() !== (lead.full_name || '').trim().toLowerCase()"
-                class="card-lead-topic"
-                :title="lead.topic"
-              >
-                <span class="topic-icon">📄</span> {{ lead.topic }}
-              </p>
-
-              <div class="card-lead-contact">
-                <div class="contact-row" :title="lead.email">
-                  <span class="icon">✉️</span>
-                  <span class="truncate">{{ lead.email || 'Sin correo' }}</span>
-                </div>
-                <div class="contact-row" :title="lead.phone">
-                  <span class="icon">📱</span>
-                  <span>{{ lead.phone || 'Sin celular' }}</span>
-                </div>
-              </div>
-
-              <div class="card-academic-badge">
-                <span>🎓 {{ formatAcademic(lead.academic_level, lead.field_of_study) }}</span>
-              </div>
-
-              <!-- Primer pago: el vendedor ve en qué va y sube el voucher sin
-                   tener que entrar a Finanzas. -->
-              <div v-if="lead.initial_payment_id" class="card-payment-row" @click.stop>
-                <span :class="['payment-chip', paymentChipClass(lead.initial_payment_estado)]">
-                  {{ paymentChipLabel(lead.initial_payment_estado) }} · S/ {{ formatMoney(lead.initial_payment_monto) }}
-                </span>
-                <label
-                  v-if="lead.initial_payment_estado === 'pendiente'"
-                  class="payment-upload-btn"
-                  :title="voucherUploading === lead.id ? 'Subiendo...' : 'Subir el voucher del primer pago'"
-                >
-                  <input
-                    type="file"
-                    accept="image/*,application/pdf"
-                    multiple
-                    hidden
-                    :disabled="voucherUploading === lead.id"
-                    @change="(e) => uploadVoucher(lead, e)"
-                  />
-                  {{ voucherUploading === lead.id ? '…' : '📎 Voucher' }}
-                </label>
-              </div>
-
-              <div class="card-footer-line">
-                <span v-if="lead.project_id" class="project-created-tag">
-                  🚀 Proyecto #{{ lead.project_id }}
-                </span>
-                <span v-else class="lead-date-tag">
-                  🕒 {{ formatDateShort(lead.created_at) }}
-                </span>
-
-                <!-- Accesos rápidos -->
-                <div class="quick-contact-actions" @click.stop>
-                  <a
-                    v-if="lead.phone"
-                    :href="'https://wa.me/' + normalizePhone(lead.phone)"
-                    target="_blank"
-                    rel="noopener"
-                    class="quick-icon-btn whatsapp"
-                    title="Enviar WhatsApp"
-                  >
-                    💬
-                  </a>
-                  <a
-                    v-if="lead.email"
-                    :href="'mailto:' + lead.email"
-                    class="quick-icon-btn email"
-                    title="Enviar Correo"
-                  >
-                    ✉️
-                  </a>
-                </div>
-              </div>
+              <!-- La tarjeta dice lo mínimo para reconocer al lead y llamarlo;
+                   todo lo demás (viabilidad, tema, pago, accesos) está en el
+                   panel de detalle. Así entran cinco de un vistazo en la
+                   columna, que es como se trabaja el tablero. -->
+              <h4 class="card-lead-name" :title="getLeadFullName(lead)">
+                {{ getLeadFullName(lead) }}
+              </h4>
+              <span class="card-lead-phone">📱 {{ lead.phone || 'Sin celular' }}</span>
             </div>
 
             <!-- Silueta de Destino al Arrastrar (Drop Silhouette Preview) -->
@@ -756,6 +669,30 @@
                 {{ col.icon }} {{ col.label }}
               </option>
             </select>
+          </div>
+
+          <!-- Primer pago: el vendedor ve en qué va y sube el voucher sin
+               entrar a Finanzas. Vivía en la tarjeta del tablero, que ahora
+               solo lleva nombre y celular. -->
+          <div v-if="selectedLead.initial_payment_id" class="detail-payment-row">
+            <span :class="['payment-chip', paymentChipClass(selectedLead.initial_payment_estado)]">
+              1er pago · {{ paymentChipLabel(selectedLead.initial_payment_estado) }}
+            </span>
+            <label
+              v-if="selectedLead.initial_payment_estado === 'pendiente'"
+              class="payment-upload-btn"
+              :title="voucherUploading === selectedLead.id ? 'Subiendo...' : 'Subir el voucher del primer pago'"
+            >
+              <input
+                type="file"
+                accept="image/*,application/pdf"
+                multiple
+                hidden
+                :disabled="voucherUploading === selectedLead.id"
+                @change="(e) => uploadVoucher(selectedLead, e)"
+              />
+              {{ voucherUploading === selectedLead.id ? '…' : '📎 Subir voucher' }}
+            </label>
           </div>
 
           <!-- Conversación con el bot de WhatsApp (Avan) -->
@@ -1624,7 +1561,7 @@ function onDealWon(data) {
   }
 }
 
-/** Subida del voucher desde la tarjeta: deja el ingreso en "pagado". */
+/** Subida del voucher desde el detalle del lead: deja el ingreso en "pagado". */
 async function uploadVoucher(lead, event) {
   const files = Array.from(event.target.files || []).slice(0, 10);
   event.target.value = '';
@@ -1660,9 +1597,6 @@ function paymentChipClass(estado) {
   return 'is-pending';
 }
 
-function formatMoney(value) {
-  return Number(value || 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
 
 async function moveLeadToStatus(lead, newStatus) {
   const previousStatus = lead.status;
@@ -1835,11 +1769,6 @@ function formatDateShort(dateStr) {
   return d.toLocaleDateString('es-PE', { day: '2-digit', month: 'short' });
 }
 
-function formatAcademic(level, field) {
-  const shortLevel = (level || '').includes('Pregrado') ? 'Pregrado' : (level || '').includes('Maestría') ? 'Maestría' : 'Doctorado';
-  const shortField = (field || '').split(' ')[0] || 'General';
-  return `${shortLevel} · ${shortField}`;
-}
 
 function getLeadFullName(lead) {
   if (!lead) return '—';
@@ -2237,7 +2166,6 @@ onMounted(() => {
   border-radius: 16px;
   display: flex;
   flex-direction: column;
-  max-height: 740px;
   position: relative;
   overflow: hidden;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
@@ -2368,28 +2296,43 @@ onMounted(() => {
 
 /* Cuerpo de la Columna */
 .kanban-column-body {
+  --lead-card-h: 52px;
+  --lead-card-gap: 0.5rem;
+  --column-visible-cards: 5;
   flex: 1;
-  padding: 0.75rem;
+  padding: 0.6rem;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--lead-card-gap);
   overflow-y: auto;
-  min-height: 280px;
-  max-height: 570px;
+  min-height: calc(2 * var(--lead-card-h));
+  /* Cinco tarjetas + sus separaciones + el padding de arriba y abajo: lo que
+     pase de ahí se ve al hacer scroll (o cambiando "Ver por pág"). */
+  max-height: calc(
+    var(--column-visible-cards) * var(--lead-card-h) +
+    (var(--column-visible-cards) - 1) * var(--lead-card-gap) +
+    1.2rem
+  );
 }
 
 /* Tarjeta de Lead */
+/* Altura fija (--lead-card-h): con todas las tarjetas iguales, el cuerpo de
+   la columna se dimensiona para mostrar exactamente cinco sin scroll. */
 .kanban-lead-card {
   background: var(--bg-card-solid);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 0.85rem;
+  border-radius: 10px;
+  padding: 0.5rem 0.7rem;
   cursor: grab;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-sm);
   transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, opacity 0.2s ease;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  justify-content: center;
+  gap: 0.1rem;
+  height: var(--lead-card-h);
+  flex-shrink: 0;
+  overflow: hidden;
 }
 
 .kanban-lead-card:hover {
@@ -2482,11 +2425,6 @@ onMounted(() => {
   margin-top: 0.2rem;
 }
 
-.card-header-line {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
 
 .lead-id-tag {
   font-size: 0.68rem;
@@ -2531,117 +2469,48 @@ onMounted(() => {
   color: var(--text-muted);
 }
 
-.lead-assigned-tag {
-  font-size: 0.68rem;
-  font-weight: 600;
-  color: var(--accent-cyan);
-  background: rgba(158, 186, 75, 0.12);
-  border: 1px solid rgba(158, 186, 75, 0.3);
-  padding: 0.1rem 0.4rem;
-  border-radius: 4px;
-  max-width: 110px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 
-.card-lead-name-box {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.4rem;
-  margin-top: 0.1rem;
-}
 
-.lead-name-icon {
-  font-size: 0.85rem;
-  opacity: 0.85;
-  line-height: 1.3;
-}
 
 .card-lead-name {
-  font-size: 0.9rem;
+  font-size: 0.86rem;
   font-weight: 700;
   color: var(--text-main);
   font-family: var(--font-heading);
   line-height: 1.3;
   margin: 0;
-  word-break: break-word;
-}
-
-.card-lead-topic {
-  font-size: 0.78rem;
-  font-weight: 500;
-  color: var(--text-muted);
-  font-family: var(--font-body);
-  line-height: 1.35;
-  margin: 0;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.topic-icon {
-  font-size: 0.72rem;
-  opacity: 0.75;
-}
-
-.card-lead-contact {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.73rem;
-  font-family: var(--font-body);
-  color: var(--text-muted);
-}
-
-.contact-row {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-
-.truncate {
+  /* Un nombre largo se recorta en vez de crecer: si la tarjeta cambia de
+     alto, dejan de entrar cinco. El nombre completo va en el `title`. */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.card-academic-badge {
-  font-size: 0.7rem;
-  font-family: var(--font-body);
-  color: var(--text-sub);
-  background: var(--surface-1);
-  padding: 0.2rem 0.45rem;
-  border-radius: 6px;
-  width: fit-content;
+.card-lead-phone {
+  font-family: var(--font-mono);
+  font-size: 0.73rem;
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 
-.card-footer-line {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding-top: 0.35rem;
-  border-top: 1px solid var(--surface-2);
-  margin-top: 0.2rem;
-}
 
-.project-created-tag {
-  font-size: 0.7rem;
-  font-weight: 600;
-  font-family: var(--font-heading);
-  color: var(--accent-emerald);
-}
+
+
+
+
+
+
 
 /* Estado del primer pago en la tarjeta del lead ganado. El proyecto no se
    puede gestionar hasta que finanzas verifica ese pago, así que el vendedor
    necesita verlo (y poder subir el voucher) sin salir del funnel. */
-.card-payment-row {
+/* Fila del primer pago dentro del panel de detalle del lead. */
+.detail-payment-row {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.4rem;
   flex-wrap: wrap;
-  margin-top: 0.4rem;
+  margin-top: 1rem;
 }
 
 .payment-chip {
@@ -2689,44 +2558,11 @@ onMounted(() => {
   border-color: var(--primary);
 }
 
-.lead-date-tag {
-  font-size: 0.68rem;
-  font-family: var(--font-body);
-  color: var(--text-muted);
-}
 
-.quick-contact-actions {
-  display: flex;
-  gap: 0.3rem;
-}
 
-.quick-icon-btn {
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.75rem;
-  text-decoration: none;
-  background: var(--surface-2);
-  border: 1px solid var(--border-color);
-  transition: all 0.15s ease;
-}
 
-.quick-icon-btn:hover {
-  transform: scale(1.1);
-}
 
-.quick-icon-btn.whatsapp:hover {
-  background: rgba(37, 211, 102, 0.2);
-  border-color: #25D366;
-}
 
-.quick-icon-btn.email:hover {
-  background: rgba(111, 129, 37, 0.2);
-  border-color: var(--primary);
-}
 
 /* Estado Vacío de Columna */
 .column-empty-state {
