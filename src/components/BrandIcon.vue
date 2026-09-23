@@ -15,6 +15,9 @@
       <rect x="3" y="5" width="18" height="14" rx="2" />
       <path d="m3 7 9 6 9-6" />
     </svg>
+    <svg v-else-if="name === 'tiktok'" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M16.6 5.82a4.28 4.28 0 0 1-1.05-2.82h-3.1v11.6a2.6 2.6 0 1 1-2.6-2.6c.27 0 .53.04.78.12V8.96a5.7 5.7 0 0 0-.78-.06 5.7 5.7 0 1 0 5.7 5.7V9.01a7.35 7.35 0 0 0 4.3 1.38V7.29a4.3 4.3 0 0 1-3.25-1.47Z" />
+    </svg>
     <svg v-else-if="name === 'meta'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
       <path d="M2 16c0-5 2.2-9 5-9 3.5 0 4 6 5 6s1.5-6 5-6c2.8 0 5 4 5 9" />
     </svg>

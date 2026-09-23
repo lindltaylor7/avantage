@@ -20,6 +20,7 @@ import { buildPaymentReceiptDocument } from './services/paymentReceiptDocument.j
 import { buildPaymentReceiptPdf, receiptPdfFilename } from './services/paymentReceiptPdf.js';
 import { CampaignService } from './services/campaignService.js';
 import { MetaAdsService } from './services/metaAdsService.js';
+import { TikTokAdsService } from './services/tiktokAdsService.js';
 import { CampaignExportService } from './services/campaignExportService.js';
 import { UserService } from './services/userService.js';
 import { RoleService } from './services/roleService.js';
@@ -115,6 +116,7 @@ const quoteService = new QuoteService();
 const contractTemplateService = new ContractTemplateService();
 const campaignService = new CampaignService();
 const metaAdsService = new MetaAdsService();
+const tiktokAdsService = new TikTokAdsService();
 const campaignExportService = new CampaignExportService({ campaignService });
 const userService = new UserService();
 const roleService = new RoleService();
@@ -2962,6 +2964,73 @@ app.post('/api/campaigns/meta/sync', requireAuth, requirePermission('leads.view'
     const configErrors = ['NOT_CONFIGURED', 'NO_TOKEN', 'NO_AD_ACCOUNT'];
     const status = configErrors.includes(error.code) ? 400 : 502;
     res.status(status).json({ error: error.message, code: error.code || null, metaCode: error.metaCode || null });
+  }
+});
+
+/* ---------------------- TikTok Ads (Marketing API) --------------------- */
+
+/**
+ * Paso 1 de la conexión: la URL del portal de autorización de TikTok. El
+ * anunciante la abre, elige qué cuentas publicitarias autoriza y TikTok
+ * redirige al `redirect_uri` con un `auth_code` de un solo uso.
+ */
+app.get('/api/campaigns/tiktok/auth-url', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const url = tiktokAdsService.authorizationUrl({
+      redirectUri: req.query.redirectUri || process.env.TIKTOK_REDIRECT_URI || null
+    });
+    res.json({ url });
+  } catch (error) {
+    res.status(400).json({ error: error.message, code: error.code || null });
+  }
+});
+
+/**
+ * Paso 2: canjea el `auth_code` de la redirección por el access token de larga
+ * duración. Se devuelve para copiarlo a `TIKTOK_ACCESS_TOKEN` en el `.env` —no
+ * se persiste en la base ni se escribe en el log— porque el token no caduca y
+ * el resto de credenciales del proyecto viven ahí mismo.
+ */
+app.post('/api/campaigns/tiktok/exchange-code', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const result = await tiktokAdsService.exchangeAuthCode(req.body?.authCode);
+    console.log(`🔑 [Campañas] TikTok autorizó ${result.advertiserIds.length} cuenta(s) publicitaria(s).`);
+    res.json(result);
+  } catch (error) {
+    console.error('❌ Error al canjear el auth_code de TikTok:', error.message);
+    const configErrors = ['NOT_CONFIGURED', 'NO_AUTH_CODE'];
+    const status = configErrors.includes(error.code) ? 400 : 502;
+    res.status(status).json({ error: error.message, code: error.code || null, tiktokCode: error.tiktokCode || null });
+  }
+});
+
+/** Estado de la integración con la TikTok Business API. */
+app.get('/api/campaigns/tiktok/status', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    res.json(await tiktokAdsService.status());
+  } catch (error) {
+    res.json({ configured: false, reason: 'error', error: error.message });
+  }
+});
+
+/**
+ * Sincroniza las campañas de TikTok Ads: importa la jerarquía completa
+ * (campaña → grupo de anuncios → anuncio) y trae las métricas del informe
+ * (gasto, resultados, alcance, impresiones, CPM, clics, CTR y CPC).
+ */
+app.post('/api/campaigns/tiktok/sync', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const datePreset = ['today', 'last_7d', 'last_14d', 'last_30d', 'last_90d', 'maximum'].includes(req.body?.datePreset)
+      ? req.body.datePreset
+      : 'last_30d';
+    const summary = await tiktokAdsService.sync({ datePreset });
+    console.log(`📊 [Campañas] Sync TikTok: ${summary.campaigns} campañas, ${summary.ads} anuncios, ${summary.insightsUpdated} con métricas.`);
+    res.json({ summary });
+  } catch (error) {
+    console.error('❌ Error al sincronizar con TikTok Ads:', error);
+    const configErrors = ['NOT_CONFIGURED', 'NO_TOKEN', 'NO_AD_ACCOUNT'];
+    const status = configErrors.includes(error.code) ? 400 : 502;
+    res.status(status).json({ error: error.message, code: error.code || null, tiktokCode: error.tiktokCode || null });
   }
 });
 

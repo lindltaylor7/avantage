@@ -52,7 +52,7 @@ antes de tocar el arranque de producción.
   `ollamaService`, `emailService`, `leadService`, `whatsappMessageService`, `googleCalendarService`,
   `scheduledMeetingService`, `notificationService`).
 - **`services/`**: toda la lógica de negocio y acceso a datos vive aquí, un archivo por dominio
-  (leads, projects, quotes, roles, users, campañas, WhatsApp, Instagram, Meta Ads, Google Calendar,
+  (leads, projects, quotes, roles, users, campañas, WhatsApp, Instagram, Meta Ads, TikTok Ads, Google Calendar,
   finanzas, etc.). `server.js` debería quedar delgado — la lógica nueva va en un servicio, no
   inline en la ruta.
 - **`middleware/auth.js`**: JWT stateless. `requireAuth` exige un Bearer token válido y adjunta el

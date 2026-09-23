@@ -1,54 +1,8 @@
-import fs from 'fs';
-import path from 'path';
 import { db } from '../db/connection.js';
-import { campaignAdImageDir } from '../middleware/upload.js';
+import { downloadAdCreativeImage } from './adCreativeImage.js';
 
 const GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v21.0';
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
-
-const MIME_TO_EXTENSION = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
-const EXTENSION_TO_MIME = Object.fromEntries(Object.entries(MIME_TO_EXTENSION).map(([mime, ext]) => [ext, mime]));
-
-function extensionForMime(mimeType) {
-  return MIME_TO_EXTENSION[String(mimeType || '').split(';')[0].trim().toLowerCase()] || 'jpg';
-}
-
-/** Imagen ya descargada de un anuncio, si la hay en disco. */
-function cachedAdCreativeImage(adId) {
-  for (const [ext, mimeType] of Object.entries(EXTENSION_TO_MIME)) {
-    const filename = `ad-${adId}.${ext}`;
-    if (fs.existsSync(path.join(campaignAdImageDir, filename))) return { filename, mimeType };
-  }
-  return null;
-}
-
-/**
- * Descarga el thumbnail/imagen del creativo de un anuncio y lo cachea en
- * disco. A diferencia de un post orgánico, la imagen de un anuncio se pide
- * directamente al creativo (`thumbnail_url` de la Marketing
- * API) — la mayoría de anuncios usan un "dark post" (publicación no
- * publicada en el muro), que la Graph API no deja leer como post normal
- * (`{post-id}?fields=full_picture` devuelve 404 para esos).
- */
-async function downloadAdCreativeImage(imageUrl, adId) {
-  if (!imageUrl || !adId) return null;
-  // El nombre es determinista por anuncio: así una resincronización reutiliza
-  // el archivo en vez de acumular una copia nueva en disco cada vez.
-  const cached = cachedAdCreativeImage(adId);
-  if (cached) return cached;
-  try {
-    const response = await fetch(imageUrl);
-    if (!response.ok) return null;
-    const mimeType = (response.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
-    if (!mimeType.startsWith('image/')) return null;
-    const filename = `ad-${adId}.${extensionForMime(mimeType)}`;
-    await fs.promises.writeFile(path.join(campaignAdImageDir, filename), Buffer.from(await response.arrayBuffer()));
-    return { filename, mimeType };
-  } catch (error) {
-    console.error('❌ [Meta Ads] No se pudo descargar la imagen del creativo:', error.message);
-    return null;
-  }
-}
 
 /** Cuántas páginas de resultados de la Graph API se siguen como máximo. */
 const MAX_PAGES = 20;
@@ -521,7 +475,11 @@ export class MetaAdsService {
     for (const ad of ads) {
       const localCampaignId = localIdByExternal.get(String(ad.campaign_id));
 
-      const image = await downloadAdCreativeImage(ad.creative?.thumbnail_url || null, String(ad.id));
+      // La imagen se pide al creativo (`thumbnail_url`), no al post: la
+      // mayoría de anuncios son un "dark post" (publicación no publicada en el
+      // muro) y la Graph API devuelve 404 al leerlo como post normal
+      // (`{post-id}?fields=full_picture`).
+      const image = await downloadAdCreativeImage(ad.creative?.thumbnail_url || null, String(ad.id), { label: 'Meta Ads' });
       adMetaById.set(String(ad.id), {
         adId: String(ad.id),
         adName: ad.name || `Anuncio ${ad.id}`,

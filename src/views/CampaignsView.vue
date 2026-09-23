@@ -5,9 +5,10 @@
         <span class="page-eyebrow">Marketing digital · Datos en vivo</span>
         <h2 class="section-heading"><span class="heading-icon">📣</span> Campañas</h2>
         <p class="section-subheading campaigns-subheading">
-          Rendimiento real de las campañas de <strong>Click-to-WhatsApp</strong>: cada contacto que escribe tras tocar
-          un anuncio queda atribuido por el <code>referral</code> de Meta y se sigue por el funnel real hasta la cita o
-          el cierre. La inversión se registra a mano por campaña.
+          Rendimiento real de las campañas de <strong>Meta Ads</strong> y <strong>TikTok Ads</strong>. En
+          <strong>Click-to-WhatsApp</strong>, cada contacto que escribe tras tocar un anuncio queda atribuido por el
+          <code>referral</code> de Meta y se sigue por el funnel real hasta la cita o el cierre; de TikTok se trae el
+          rendimiento publicitario. La inversión de una campaña manual se registra a mano.
         </p>
       </div>
       <div class="campaigns-toolbar">
@@ -28,6 +29,13 @@
           :title="metaStatus && !metaStatus.configured ? 'Configura las credenciales de Meta Ads primero' : ''"
           @click="syncMeta"
         >{{ syncing ? '↻ Sincronizando…' : '↻ Sincronizar con Meta' }}</button>
+        <button
+          type="button"
+          class="btn-secondary sync-btn sync-btn-tiktok"
+          :disabled="syncingTikTok || (tiktokStatus && !tiktokStatus.configured)"
+          :title="tiktokStatus && !tiktokStatus.configured ? 'Configura las credenciales de TikTok Ads primero' : ''"
+          @click="syncTikTok"
+        >{{ syncingTikTok ? '↻ Sincronizando…' : '↻ Sincronizar con TikTok' }}</button>
         <button
           type="button"
           class="btn-secondary export-btn"
@@ -75,6 +83,45 @@
       <span v-if="metaStatus.accountStatus" class="data-mono">(account_status {{ metaStatus.accountStatus }})</span>.
       El token funciona y lo ya sincronizado se sigue viendo, pero Meta no entrega datos nuevos
       hasta que se regularice en el Administrador de anuncios.
+    </p>
+    <p v-if="tiktokStatus && !tiktokStatus.configured" class="state-banner state-hint">
+      <template v-if="tiktokStatus.reason === 'no_token'">
+        🔌 No hay ningún token de TikTok configurado. Completa <code>TIKTOK_APP_ID</code>,
+        <code>TIKTOK_APP_SECRET</code> y <code>TIKTOK_ACCESS_TOKEN</code> en el <code>.env</code>
+        (el token sale de <code>POST /api/campaigns/tiktok/exchange-code</code>; ver
+        <strong>Conectar TikTok Ads</strong> en el README).
+      </template>
+      <template v-else-if="tiktokStatus.reason === 'invalid_token'">
+        🔑 El token de TikTok dejó de ser válido: el anunciante revocó la autorización de la app o el
+        token se regeneró. Vuelve a autorizar desde el portal de TikTok y actualiza
+        <code>TIKTOK_ACCESS_TOKEN</code> en el <code>.env</code>.
+        <span class="state-detail">{{ tiktokStatus.error }}</span>
+      </template>
+      <template v-else-if="tiktokStatus.reason === 'no_ad_account'">
+        🔌 El token de TikTok no tiene acceso a ninguna cuenta publicitaria. Vuelve a autorizar la app
+        marcando la cuenta en TikTok Ads Manager, o define <code>TIKTOK_ADVERTISER_ID</code> en el
+        <code>.env</code>.
+      </template>
+      <template v-else-if="tiktokStatus.reason === 'not_configured'">
+        🔌 Falta configuración de TikTok: {{ tiktokStatus.error }}
+      </template>
+      <template v-else>
+        🔌 No se pudo conectar con TikTok Ads: {{ tiktokStatus.error || 'error desconocido' }}.
+      </template>
+    </p>
+    <p v-else-if="tiktokStatus && tiktokStatus.configured" class="state-banner state-ok tiktok-connected">
+      🟢 Conectado a TikTok Ads<template v-if="tiktokStatus.advertiserName"> · {{ tiktokStatus.advertiserName }}</template>
+      <span class="data-mono"> ({{ tiktokStatus.advertiserId }})</span>
+      <template v-if="tiktokStatus.advertiserSource === 'auto' && tiktokStatus.advertiserOptions > 1">
+        · detectadas {{ tiktokStatus.advertiserOptions }} cuentas, usando la primera; fija una con <code>TIKTOK_ADVERTISER_ID</code>
+      </template>
+    </p>
+    <p v-if="tiktokStatus && tiktokStatus.advertiserDisabled" class="state-banner state-hint">
+      ⚠️ TikTok reporta la cuenta publicitaria
+      <strong>{{ tiktokStatus.advertiserStatusLabel || 'no activa' }}</strong>
+      <span v-if="tiktokStatus.advertiserStatus" class="data-mono">({{ tiktokStatus.advertiserStatus }})</span>.
+      El token funciona y lo ya sincronizado se sigue viendo, pero TikTok no entrega datos nuevos
+      hasta que se regularice en el Ads Manager.
     </p>
     <p v-if="syncMsg" class="state-banner" :class="syncError ? 'state-error' : 'state-ok'">{{ syncMsg }}</p>
     <p v-if="exportMsg" class="state-banner state-error">⚠️ {{ exportMsg }}</p>
@@ -206,6 +253,7 @@
                           <strong class="campaign-name">
                             {{ campaign.name }}
                             <span v-if="campaign.source === 'meta'" class="meta-badge">Meta Ads</span>
+                            <span v-else-if="campaign.source === 'tiktok'" class="tiktok-badge">TikTok Ads</span>
                           </strong>
                           <span class="campaign-objective">{{ campaign.objective || 'Sin objetivo registrado' }}</span>
                         </div>
@@ -230,7 +278,7 @@
                         @click="openTrace(campaign)"
                       >🧭</button>
                       <button
-                        v-if="campaign.source !== 'meta'"
+                        v-if="campaign.source !== 'meta' && campaign.source !== 'tiktok'"
                         type="button"
                         class="icon-btn"
                         title="Eliminar campaña"
@@ -251,7 +299,7 @@
                       <div class="campaign-detail">
                         <span class="campaign-meta">
                           <template v-if="campaign.lastSyncedAt">Última sincronización: {{ formatDateTime(campaign.lastSyncedAt) }}</template>
-                          <template v-else>Campaña manual, sin sincronizar con Meta</template>
+                          <template v-else>Campaña manual, sin sincronizar con Meta ni TikTok</template>
                         </span>
 
                         <!-- Embudo real -->
@@ -313,21 +361,22 @@
                              optimización viven aquí, no en el anuncio. -->
                         <div v-if="campaign.metaAdsets && campaign.metaAdsets.length" class="metrics-block">
                           <div class="metrics-block-head">
-                            <h4 class="metrics-block-title">🗂️ Rendimiento por conjunto de anuncios</h4>
+                            <h4 class="metrics-block-title">🗂️ Rendimiento por {{ groupNoun(campaign).long }}</h4>
                             <span class="metrics-block-note">
                               Informe {{ reportWindowLabel(campaign.metrics) }} ·
-                              {{ campaign.metaAdsets.length }} {{ campaign.metaAdsets.length === 1 ? 'conjunto' : 'conjuntos' }}
+                              {{ campaign.metaAdsets.length }}
+                              {{ campaign.metaAdsets.length === 1 ? groupNoun(campaign).one : groupNoun(campaign).many }}
                               <template v-if="campaign.budgetType">
                                 · Presupuesto de la campaña: {{ campaign.budgetType === 'diario' ? 'diario' : 'total' }}
                               </template>
-                              <template v-else>· El presupuesto lo lleva cada conjunto</template>
+                              <template v-else>· El presupuesto lo lleva cada {{ groupNoun(campaign).one }}</template>
                             </span>
                           </div>
                           <div class="ads-insights-wrapper">
                             <table class="data-table ads-insights-table">
                               <thead>
                                 <tr>
-                                  <th class="col-ad-name">Nombre del conjunto</th>
+                                  <th class="col-ad-name">Nombre del {{ groupNoun(campaign).one }}</th>
                                   <th>Entrega</th>
                                   <th>Anuncios</th>
                                   <th>Presupuesto</th>
@@ -682,6 +731,7 @@
                 <option value="instagram">Instagram</option>
                 <option value="facebook">Facebook</option>
                 <option value="meta">Meta (ambas)</option>
+                <option value="tiktok">TikTok</option>
                 <option value="whatsapp">WhatsApp</option>
                 <option value="other">Otra</option>
               </select>
@@ -791,6 +841,7 @@ const PLATFORM_FILTERS = [
   { value: 'instagram', label: 'Instagram' },
   { value: 'facebook', label: 'Facebook' },
   { value: 'meta', label: 'Meta (ambas)' },
+  { value: 'tiktok', label: 'TikTok' },
   { value: 'whatsapp', label: 'WhatsApp' },
   { value: 'other', label: 'Otra' }
 ];
@@ -878,7 +929,11 @@ const exporting = ref(false);
 const exportMsg = ref('');
 
 const metaStatus = ref(null);
+const tiktokStatus = ref(null);
 const syncing = ref(false);
+const syncingTikTok = ref(false);
+// El mensaje de resultado es uno solo: las dos sincronizaciones no corren a la
+// vez y así el usuario no acumula banners de la plataforma que ya revisó.
 const syncMsg = ref('');
 const syncError = ref(false);
 
@@ -974,6 +1029,13 @@ async function loadMetaStatus() {
   } catch { /* silencioso: el banner de config se muestra solo si hay respuesta */ }
 }
 
+async function loadTikTokStatus() {
+  try {
+    const res = await apiFetch('/api/campaigns/tiktok/status');
+    if (res.ok) tiktokStatus.value = await res.json();
+  } catch { /* silencioso: igual que el de Meta */ }
+}
+
 /** Ventana de insights que se le pide a Meta según el rango en pantalla. */
 const PRESET_BY_RANGE = { [TODAY_RANGE]: 'today', 7: 'last_7d', 30: 'last_30d', 90: 'last_90d', 0: 'maximum' };
 
@@ -999,6 +1061,37 @@ async function syncMeta() {
     syncMsg.value = `No se pudo sincronizar: ${err.message}`;
   } finally {
     syncing.value = false;
+  }
+}
+
+/**
+ * Misma ventana de tiempo que Meta, traducida a fechas por el backend: TikTok
+ * no tiene presets, pero el panel se pide igual para que las dos plataformas
+ * se comparen sobre el mismo rango.
+ */
+async function syncTikTok() {
+  syncingTikTok.value = true;
+  syncMsg.value = '';
+  syncError.value = false;
+  try {
+    const res = await apiFetch('/api/campaigns/tiktok/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ datePreset: PRESET_BY_RANGE[rangeDays.value] || 'last_30d' })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo sincronizar con TikTok.');
+    const s = data.summary;
+    syncMsg.value = `✅ TikTok: ${s.campaigns} campaña(s), ${s.adgroups} grupo(s), ${s.ads} anuncio(s)`
+      + `, ${s.insightsUpdated} con métricas, ${s.adInsights || 0} fila(s) de rendimiento por anuncio.`
+      + (s.errors?.length ? ` ⚠️ ${s.errors.join(' · ')}` : '');
+    await loadReport();
+    await loadTikTokStatus();
+  } catch (err) {
+    syncError.value = true;
+    syncMsg.value = `No se pudo sincronizar: ${err.message}`;
+  } finally {
+    syncingTikTok.value = false;
   }
 }
 
@@ -1310,7 +1403,19 @@ function brandIconName(platform) {
   if (platform === 'instagram') return 'instagram';
   if (platform === 'facebook') return 'facebook';
   if (platform === 'whatsapp') return 'whatsapp';
+  if (platform === 'tiktok') return 'tiktok';
   return 'meta';
+}
+
+/**
+ * Cómo se llama el nivel intermedio de la jerarquía en cada plataforma: Meta
+ * lo llama "conjunto de anuncios" y TikTok "grupo de anuncios". Es el mismo
+ * dato (`campaign.metaAdsets`), sólo cambia la etiqueta.
+ */
+function groupNoun(campaign) {
+  return campaign?.source === 'tiktok'
+    ? { one: 'grupo', many: 'grupos', long: 'grupo de anuncios' }
+    : { one: 'conjunto', many: 'conjuntos', long: 'conjunto de anuncios' };
 }
 
 function funnelBarWidth(funnel, stage) {
@@ -1353,6 +1458,7 @@ function stepDotClass(lead, step, idx) {
 onMounted(() => {
   loadReport();
   loadMetaStatus();
+  loadTikTokStatus();
 });
 </script>
 
@@ -1440,7 +1546,8 @@ onMounted(() => {
 .meta-connected { font-size: 0.8rem; padding: 0.65rem 1rem; }
 .meta-connected .data-mono { opacity: 0.75; }
 
-.meta-badge {
+.meta-badge,
+.tiktok-badge {
   display: inline-block;
   font-size: 0.62rem;
   font-weight: 700;
@@ -1454,10 +1561,21 @@ onMounted(() => {
   margin-left: 0.4rem;
   vertical-align: middle;
 }
+/* El rojo de TikTok, para distinguir de un vistazo el origen de la campaña. */
+.tiktok-badge {
+  color: #EE1D52;
+  background: rgba(238, 29, 82, 0.12);
+  border-color: rgba(238, 29, 82, 0.3);
+}
 .state-detail { display: block; margin-top: 0.35rem; font-size: 0.74rem; opacity: 0.8; font-family: var(--font-mono); }
 
 .export-btn { white-space: nowrap; }
 .export-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.tiktok-connected { font-size: 0.8rem; padding: 0.65rem 1rem; }
+.tiktok-connected .data-mono { opacity: 0.75; }
+
+.sync-btn-tiktok { border-color: rgba(238, 29, 82, 0.35); }
 
 .kpi-meta { border-color: rgba(24, 119, 242, 0.28); }
 .metric-meta { background: rgba(24, 119, 242, 0.06); border-color: rgba(24, 119, 242, 0.2); }

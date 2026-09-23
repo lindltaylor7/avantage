@@ -178,3 +178,125 @@ adelante) desde **hPanel → Avanzado → Node.js**. Pasos:
   5. Verifica: sube un comprobante nuevo desde el panel y confirma por SSH/Administrador de
      archivos que aparece en la carpeta nueva; luego dispara un deploy (push a `main`) y
      confirma que ese archivo sigue estando y ya no aparece el ⚠️ de "comprobante perdido".
+## 4. Conectar TikTok Ads al módulo de Campañas
+
+El módulo de Campañas habla con dos plataformas: **Meta Ads** (botón *Sincronizar con Meta*) y
+**TikTok Ads** (botón *Sincronizar con TikTok*). Las dos importan la misma jerarquía —campaña →
+conjunto/grupo de anuncios → anuncio— y las mismas métricas, y se distinguen en el panel por la
+insignia de origen de cada campaña.
+
+A diferencia de Meta, TikTok **no** manda un `referral.source_id` al chat de WhatsApp, así que sus
+anuncios no se mapean en `campaign_ads`: el embudo del CRM (conversaciones → citas → ganados) sigue
+siendo cosa de Meta, y de TikTok se trae el rendimiento publicitario (gasto, resultados, alcance,
+impresiones, clics, CTR/CPC, video e interacciones).
+
+> La conexión es un **OAuth de dos pasos**: primero el anunciante autoriza la app y TikTok devuelve
+> un `auth_code` de un solo uso; después ese código se canjea por un **access token que no caduca**
+> mientras nadie revoque la autorización. Por eso el token se guarda a mano en el `.env` y no en la
+> base de datos.
+
+### Paso 1 — Crear la app en TikTok for Business
+
+1. Entra a <https://business-api.tiktok.com/portal> con la cuenta que administra el TikTok Ads
+   Manager (o crea una cuenta de desarrollador si es la primera vez).
+2. **My Apps → Create an App**. Completa nombre, descripción, categoría y la URL de tu sitio.
+3. En **Advertiser redirect URL** pon una URL **HTTPS** de tu dominio, por ejemplo
+   `https://tu-dominio.com/admin/campanas`. TikTok **no acepta `http://localhost`**, así que en
+   local se usa igualmente la URL de producción y el `auth_code` se copia a mano de la barra de
+   direcciones (paso 3).
+4. En **Scope of permission** marca como mínimo:
+   - `Ads Management` (leer campañas, grupos de anuncios y anuncios)
+   - `Reporting` / `Ad Account Management` (leer los informes y los datos de la cuenta)
+   - `Creative Management` (opcional: sólo para las miniaturas de los creativos)
+5. Envía la app a revisión (**Submit**). Mientras está en *Pending* puedes seguir: una app sin
+   aprobar ya funciona con las cuentas publicitarias de tu propio Business Center.
+6. Copia el **App ID** y el **Secret** de *Basic Information*.
+
+### Paso 2 — Poner las credenciales en el `.env`
+
+```bash
+TIKTOK_APP_ID=7412...           # Basic Information > App ID
+TIKTOK_APP_SECRET=3f9c...       # Basic Information > Secret
+TIKTOK_REDIRECT_URI=https://tu-dominio.com/admin/campanas
+TIKTOK_ACCESS_TOKEN=            # se completa en el paso 4
+TIKTOK_ADVERTISER_ID=           # opcional, ver paso 5
+```
+
+Reinicia el backend (`npm run dev`, o la app de Node en hPanel) para que lea las variables nuevas.
+
+### Paso 3 — Autorizar la cuenta publicitaria
+
+1. Pide la URL del portal de autorización al propio backend (necesitas estar logueado en el panel,
+   con el permiso `leads.view`):
+
+   ```bash
+   curl -H "Authorization: Bearer <tu-JWT>" https://tu-dominio.com/api/campaigns/tiktok/auth-url
+   # {"url":"https://business-api.tiktok.com/portal/auth?app_id=...&state=minirag&redirect_uri=..."}
+   ```
+
+   *(El JWT es el que guarda el panel en el navegador tras el login; se ve en DevTools →
+   Application → Local Storage.)*
+
+2. Abre esa URL en el navegador, inicia sesión con la cuenta que administra el Ads Manager y
+   **marca la cuenta publicitaria** que quieres conectar. Confirma.
+3. TikTok redirige a tu `redirect_uri` con el código en la barra de direcciones:
+
+   ```
+   https://tu-dominio.com/admin/campanas?auth_code=abc123...&code=abc123...&state=minirag
+   ```
+
+   Copia el valor de **`auth_code`**. Es de **un solo uso** y caduca en minutos: si te pasas de
+   tiempo, repite este paso.
+
+### Paso 4 — Canjear el código por el access token
+
+```bash
+curl -X POST https://tu-dominio.com/api/campaigns/tiktok/exchange-code \
+  -H "Authorization: Bearer <tu-JWT>" \
+  -H "Content-Type: application/json" \
+  -d '{"authCode":"abc123..."}'
+# {"accessToken":"a1b2c3...","advertiserIds":["6912345678901234567"],"scope":[...]}
+```
+
+Copia el `accessToken` a `TIKTOK_ACCESS_TOKEN` en el `.env` y reinicia el backend. El token **no
+caduca**: sólo deja de servir si el anunciante revoca la app o se regenera el secret.
+
+### Paso 5 — (Opcional) Fijar la cuenta publicitaria
+
+Si el token autorizó **una sola** cuenta, déjalo así: el backend la descubre solo. Si autorizó
+varias, el panel avisa (*«detectadas N cuentas, usando la primera»*) y conviene fijar cuál:
+
+```bash
+TIKTOK_ADVERTISER_ID=6912345678901234567   # del paso 4, o del Ads Manager (parámetro aadvid= de la URL)
+```
+
+### Paso 6 — Comprobar y sincronizar
+
+1. Abre **Panel → Campañas**. Arriba debe aparecer el banner verde
+   *🟢 Conectado a TikTok Ads · <nombre de la cuenta>*.
+2. Elige el rango (Hoy / 7 / 30 / 90 días / Todo) y pulsa **↻ Sincronizar con TikTok**.
+3. Al terminar verás el resumen: campañas, grupos, anuncios y cuántos trajeron métricas. Las
+   campañas importadas aparecen con la insignia roja **TikTok Ads** y su miniatura del creativo.
+
+La sincronización es manual y **idempotente**: se puede repetir cuantas veces haga falta, reescribe
+las métricas de la ventana pedida y no duplica campañas (se reconocen por `external_id = tt:<id>`).
+
+### Si algo falla
+
+| Lo que dice el panel | Qué revisar |
+| --- | --- |
+| *No hay ningún token de TikTok configurado* | Falta `TIKTOK_ACCESS_TOKEN` en el `.env`, o el backend no se reinició tras editarlo. |
+| *El token de TikTok dejó de ser válido* | Se revocó la autorización o se regeneró el secret: repite los pasos 3 y 4. |
+| *El token no tiene acceso a ninguna cuenta publicitaria* | En el paso 3 no se marcó ninguna cuenta. Reautoriza marcándola, o define `TIKTOK_ADVERTISER_ID`. |
+| *Falta configuración de TikTok* | Faltan `TIKTOK_APP_ID` / `TIKTOK_APP_SECRET` (hacen falta para descubrir la cuenta y para canjear el código). |
+| Sincroniza pero todo sale en 0 | Normal si la campaña no tuvo entrega en la ventana elegida; prueba con *Todo*. TikTok tarda hasta unas horas en consolidar los datos del día en curso. |
+| *Métricas completas rechazadas…* en el log | Aviso, no error: la cuenta no soporta alguna métrica avanzada y se reintentó con el juego mínimo (gasto, impresiones, clics, CTR, CPC, CPM). |
+
+### Cómo se guarda
+
+Las dos integraciones escriben en las **mismas columnas** de `campaigns` (`meta_insights`,
+`meta_adsets_insights`, `meta_ads_insights`): las métricas ya normalizadas tienen idéntica forma en
+Meta y en TikTok, así que el informe de rendimiento, la exportación a Excel y la vista funcionan
+igual sin duplicar nada. Lo que distingue el origen es `campaigns.source` (`meta` | `tiktok` |
+`manual`), y los `external_id` de TikTok van prefijados con `tt:` para que no puedan colisionar con
+los de Meta. No hace falta ninguna migración para usar el módulo.
