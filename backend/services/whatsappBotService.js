@@ -68,11 +68,16 @@ const BOOKING_ADVISOR_USER_ID = Number(process.env.GOOGLE_BOOKING_ADVISOR_USER_I
 
 // Horizonte máximo de agendamiento: solo se ofrecen (y aceptan) horarios de
 // hoy hasta N días más adelante. days = N + 1 en los constructores de bloques,
-// que cuentan el día 0 = hoy. Por defecto 1 (hoy y mañana): es la agenda
-// corta con la que trabaja el asesor. Ampliarla es decisión del equipo:
-// basta con WHATSAPP_BOOKING_MAX_DAYS_AHEAD (p. ej. 6 = toda la semana), y
-// los horarios ofrecidos siempre salen de su horario semanal y su calendario.
-const MAX_BOOKING_DAYS_AHEAD = Number(process.env.WHATSAPP_BOOKING_MAX_DAYS_AHEAD) || 1;
+// que cuentan el día 0 = hoy. Por defecto 2: hoy, mañana y pasado mañana.
+//
+// Estaba en 1 (solo hoy y mañana) y era la causa de varios "Ese día no hay
+// agenda" que el contacto leía como un error: quien pedía el miércoles un
+// lunes, o "el sábado", nombraba un día perfectamente razonable que
+// simplemente caía fuera de una ventana de dos días. Ampliarla más es
+// decisión del equipo: basta con WHATSAPP_BOOKING_MAX_DAYS_AHEAD (p. ej. 6 =
+// toda la semana), y los horarios ofrecidos siempre salen del horario semanal
+// del asesor y de su calendario real.
+const MAX_BOOKING_DAYS_AHEAD = Number(process.env.WHATSAPP_BOOKING_MAX_DAYS_AHEAD) || 2;
 const BOOKING_WINDOW_DAYS = MAX_BOOKING_DAYS_AHEAD + 1;
 
 // Tope de bloques al consultar TODA la ventana de agenda. Los bloques vienen
@@ -122,7 +127,27 @@ const SLOT_LIST_VISIBLE_MS = 3 * 60 * 60 * 1000;
 const MAX_STEP_TURNS = 4;
 
 // Estados del flujo de agendamiento (todos "esperan respuesta del contacto").
-const SCHEDULING_STATUSES = ['scheduling_mode', 'scheduling_phone', 'scheduling_email', 'scheduling_date', 'scheduling_time'];
+const SCHEDULING_STATUSES = ['scheduling_mode', 'scheduling_phone', 'scheduling_email', 'scheduling_date', 'scheduling_time', 'scheduling_confirm'];
+
+/** Cómo se le nombra al contacto la modalidad que eligió. */
+export function modeLabel(mode) {
+  return mode === 'phone' ? 'llamada telefónica' : 'videollamada por Google Meet';
+}
+
+/**
+ * ¿El contacto dijo que sí? Se exige una afirmación reconocible: ante la duda
+ * NO se reserva, porque el paso de confirmación existe precisamente para no
+ * agendar sobre una interpretación. "sí, pero el jueves" no cuenta como sí —
+ * lleva una corrección detrás, y se trata como tal.
+ */
+const AFFIRMATIVE_RE = /^(?:s[ií]+|sip|sipi|si\s*por\s*favor|claro|dale|ok(?:ey)?|okay|listo|perfecto|correcto|exacto|confirmo|confirmado|de\s*acuerdo|va|ya|as[ií]\s*es|me\s*parece|excelente|genial)[\s!.,😊🙌👍✅]*$/i;
+
+export function isAffirmative(text) {
+  const clean = normalize((text || '').trim()).replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+  if (!clean) return false;
+  if (SCHEDULE_CHANGE_HINT_RE.test(text || '')) return false;
+  return AFFIRMATIVE_RE.test(clean);
+}
 
 // Descuento que se aplica si el lead elige reunión por Google Meet en vez de
 // llamada telefónica (solo informativo: lo confirma el ).
@@ -883,6 +908,10 @@ function isObviousStepAnswer(status, text) {
       // Un correo escrito solo, o un "mándamelo por aquí" (que el handler ya
       // sabe leer como "sigo sin correo"): ni uno ni otro necesitan al LLM.
       return /^[^\s<>@]+@[^\s<>@]+\.[a-z]{2,}$/i.test(t) || wantsLinkHere(t);
+    case 'scheduling_confirm':
+      // Un "sí" o un "no" a "¿Confirmo…?" no necesitan al LLM. Cualquier otra
+      // cosa sí: puede traer la corrección del día o de la modalidad.
+      return isAffirmative(t) || /^no+[\s!.,]*$/i.test(normalize(t));
     default:
       // scheduling_date: "mañana", "el jueves"... no hay forma barata de
       // distinguirlo de una pregunta, así que siempre se clasifica.
@@ -908,6 +937,34 @@ function isObviousStepAnswer(status, text) {
 function canBookExactTime(text, parsed) {
   if (!parsed?.preferredTime || parsed.timePrecision !== 'exact') return false;
   return !/[?¿]/.test(String(text || ''));
+}
+
+/**
+ * El contacto dice que NO puede asistir a la reunión que ya tiene agendada, o
+ * pide moverla o cancelarla.
+ *
+ * Se reconoce con una expresión y no con el clasificador porque de esto
+ * depende callar un recordatorio ya programado, y el clasificador marca como
+ * "urgente" cosas que no tienen nada que ver (una pregunta de precio, otro
+ * tema de tesis). Equivocarse hacia el lado de callar un recordatorio válido
+ * es peor que dejarlo salir.
+ *
+ * Caso real: el lead escribió "No puedo martes" y el bot igual le mandó el
+ * recordatorio del martes.
+ */
+const CANNOT_ATTEND_RE = new RegExp(
+  '\\bno\\s+(?:voy\\s+a\\s+)?(?:puedo|podre|podr[eé]|voy|llego|alcanzo|asisto)\\b'
+  + '|\\bno\\s+me\\s+(?:va|viene|queda)\\b'
+  + '|\\b(?:cancel(?:ar|a|o|emos)|anul(?:ar|a|o))\\b'
+  + '|\\b(?:reagend|reprogram)\\w*\\b'
+  + '|\\bcambiar\\s+(?:la\\s+)?(?:hora|fecha|d[ií]a|reuni[oó]n|cita)\\b'
+  + '|\\bmover\\s+(?:la\\s+)?(?:hora|reuni[oó]n|cita)\\b'
+  + '|\\bpara\\s+otro\\s+d[ií]a\\b',
+  'i'
+);
+
+export function cannotAttendMeeting(text) {
+  return CANNOT_ATTEND_RE.test(normalize(String(text || '')));
 }
 
 /**
@@ -1398,6 +1455,7 @@ export class WhatsappBotService {
       case 'scheduling_mode': return this.handleSchedulingModeReply(waId, session, text);
       case 'scheduling_phone': return this.handleSchedulingPhoneReply(waId, session, text);
       case 'scheduling_email': return this.handleSchedulingEmailReply(waId, session, text);
+      case 'scheduling_confirm': return this.handleSchedulingConfirmReply(waId, session, text);
       case 'scheduling_date': return this.handleSchedulingDateReply(waId, session, text);
       case 'scheduling_time': return this.handleSchedulingTimeReply(waId, session, text);
       case 'active': return this.runConversationTurn(waId, text);
@@ -2335,6 +2393,10 @@ export class WhatsappBotService {
           restate: `Volviendo a los horarios:\n\n${list}\n\n${slotMenuFooter(scheduling.slots, scheduling.availableDays)}`,
           restateShort: '¿Con cuál de esos horarios te quedas? Responde con su número.'
         };
+      }
+      case 'scheduling_confirm': {
+        const confirm = `¿Confirmo *${modeLabel(scheduling.mode)}*, *${scheduling.awaitingConfirm?.label}*? Responde *Sí* o dime qué cambiar 🙂`;
+        return { question: confirm, restate: confirm, restateShort: confirm };
       }
       default:
         return { question: '', restate: '', restateShort: '' };
@@ -3426,12 +3488,88 @@ ${numberedList(fullSlotLabels(offer))}
    * manual para sesiones viejas que sí llegaron a quedar en ese paso).
    * Se agenda directo con el horario ya elegido.
    */
+  /**
+   * Último paso antes de reservar: se le repite al contacto lo que se va a
+   * agendar —modalidad, día y hora— y se espera su "sí".
+   *
+   * Existe porque el bot reservaba en cuanto creía haber entendido, y los
+   * errores salían caros: alguien que escribió "¿Miércoles? salgo del trabajo
+   * a las 4 pm" terminó con una reunión el MARTES, dijo "No puedo martes", y
+   * aun así le llegó el recordatorio del martes. Repetir la interpretación en
+   * una línea cuesta un turno; equivocarse cuesta el lead.
+   *
+   * TODOS los caminos de reserva pasan por aquí (elección por número y atajo
+   * de hora exacta). Los únicos que van directo a `confirmSlot` son los que
+   * vuelven a un horario que el contacto YA confirmó y al que solo le faltaba
+   * su teléfono o su correo.
+   */
   async bookSlot(waId, slot) {
     const session = await this.getSession(waId);
-    const { scheduling } = this._readScheduling(session);
+    const { answers, scheduling } = this._readScheduling(session);
     if (!scheduling) { await this.updateSession(waId, { status: 'completed' }); return; }
 
-    return this.confirmSlot(waId, slot);
+    scheduling.awaitingConfirm = slot;
+    await this.updateSession(waId, { status: 'scheduling_confirm', answers: JSON.stringify(answers) });
+    this.logActivity({ type: 'booking_confirmation_asked', waId, slot: slot.label, mode: scheduling.mode || 'meet' });
+
+    await this.send(waId, `¿Confirmo *${modeLabel(scheduling.mode)}*, *${slot.label}*? Responde *Sí* o dime qué cambiar 🙂`);
+  }
+
+  /**
+   * Respuesta al "¿Confirmo…?". Un sí reserva; cualquier otra cosa se trata
+   * como una corrección —nunca como una confirmación—: si nombra otro día u
+   * hora se reinterpreta ahí mismo, y si no, se vuelve a ofrecer la lista.
+   * Ante la duda NO se reserva: ese es justo el error que este paso existe
+   * para evitar.
+   */
+  async handleSchedulingConfirmReply(waId, session, text) {
+    const { answers, scheduling } = this._readScheduling(session);
+    if (!scheduling) { await this.updateSession(waId, { status: 'completed' }); return; }
+
+    const slot = scheduling.awaitingConfirm;
+    if (!slot) {
+      await this.updateSession(waId, { status: 'scheduling_time', answers: JSON.stringify(answers) });
+      return this.promptForDate(waId);
+    }
+
+    const trimmed = (text || '').trim();
+
+    if (isAffirmative(trimmed)) {
+      delete scheduling.awaitingConfirm;
+      await this.updateSession(waId, { answers: JSON.stringify(answers) });
+      this.logActivity({ type: 'booking_confirmed', waId, slot: slot.label });
+      return this.confirmSlot(waId, slot);
+    }
+
+    // Dijo que no, o pidió otra cosa. El horario tentativo se suelta antes de
+    // reinterpretar: si no, una corrección a medias lo dejaría reservado.
+    delete scheduling.awaitingConfirm;
+
+    if (this._isSchedulingRefusal(trimmed)) {
+      delete answers.__scheduling;
+      await this.updateSession(waId, { answers: JSON.stringify(answers) });
+      await this.handOffToAdvisor(waId, 'El lead no confirmó el horario propuesto.');
+      return;
+    }
+
+    // Cambió la modalidad ("mejor llámame"): se atiende y se vuelve a
+    // confirmar con la modalidad correcta, sin perder el horario.
+    if (asksForPhoneCall(trimmed)) {
+      scheduling.mode = 'phone';
+      delete scheduling.discount;
+      await this.updateSession(waId, { answers: JSON.stringify(answers) });
+      this.logActivity({ type: 'mode_switched_at_confirm', waId, mode: 'phone' });
+      return this.bookSlot(waId, slot);
+    }
+
+    // Nombró un día o una hora: es una corrección, se reinterpreta como si
+    // estuviera eligiendo de nuevo.
+    await this.updateSession(waId, { status: 'scheduling_date', answers: JSON.stringify(answers) });
+    if (SCHEDULE_CHANGE_HINT_RE.test(trimmed)) {
+      return this.handleSchedulingDateReply(waId, await this.getSession(waId), trimmed);
+    }
+
+    await this.send(waId, 'Sin problema 🙌 Dime qué día y a qué hora te viene mejor.');
   }
 
   async confirmSlot(waId, slot) {
@@ -4031,6 +4169,31 @@ ${numberedList(fullSlotLabels(offer))}
     });
 
     this.logActivity({ type: 'post_booking_classified', waId, text, needsReply: result.needsReply, isUrgent: result.isUrgent, source: result.source });
+
+    // Dijo que no puede, o pide mover/cancelar: lo primero es callar el
+    // recordatorio de esa reunión. Mandarle "⏰ Te recuerdo tu reunión del
+    // martes" a quien acaba de escribir "No puedo martes" es el peor mensaje
+    // posible — pasó de verdad. Se marca el recordatorio como ya atendido
+    // (la columna significa "enviado o intentado") y se escala a una persona
+    // por correo, que es quien puede mover la reunión de verdad.
+    if (cannotAttendMeeting(text)) {
+      try {
+        await this.scheduledMeetingService.markReminderSent(meeting.id);
+        this.logActivity({ type: 'meeting_reminder_suppressed', waId, meetingId: meeting.id, text });
+      } catch (error) {
+        console.error(`❌ [WhatsApp Bot] No se pudo silenciar el recordatorio de la reunión ${meeting.id}:`, error.message);
+      }
+
+      await this.alertInternal({
+        waId,
+        type: 'meeting_change_requested',
+        title: `${contactName || waId} no puede asistir a su reunión`,
+        body: `Reunión agendada para ${formatMeetingDateTimeLabel(meeting.start_time)}.\n\n`
+          + `El contacto escribió: "${text}"\n\n`
+          + 'Su recordatorio automático quedó silenciado. La reunión sigue en el calendario del asesor: '
+          + 'hay que moverla o cancelarla a mano.'
+      });
+    }
 
     if (!result.needsReply) return;
 

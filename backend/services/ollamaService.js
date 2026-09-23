@@ -220,7 +220,7 @@ function weekdayOfIso(iso) {
  * agendando. Devuelve null (y decide el modelo) si el texto nombra más de un
  * día, habla de otra semana, o trae un día del mes que no coincide.
  */
-function resolveWeekdayDate(text, todayIso) {
+export function resolveWeekdayDate(text, todayIso) {
   const flat = flatten(text);
   const names = [...new Set(flat.match(new RegExp(`\\b(?:${FLAT_WEEKDAY_NAMES.join('|')})\\b`, 'g')) || [])];
   if (names.length !== 1) return null;
