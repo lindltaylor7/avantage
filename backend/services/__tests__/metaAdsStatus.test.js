@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { MetaAdsService } from '../metaAdsService.js';
+import { MetaAdsService, describeAccountStatus } from '../metaAdsService.js';
 
 /**
  * El estado de la integración se muestra como un banner verde/rojo en la vista
@@ -74,13 +74,36 @@ test('con META_ADS_ACCOUNT_ID igual se comprueba el token contra el Graph', asyn
 
 test('una cuenta publicitaria inactiva se marca aunque el token sirva', async () => {
   const fetchImpl = fakeFetch({
-    id: 'act_1625910892246042', name: 'Tesis Perú', account_status: 2, currency: 'PEN'
+    id: 'act_1625910892246042', name: 'Tesis Perú', account_status: 2, disable_reason: 3, currency: 'PEN'
   });
 
   const status = await new MetaAdsService({ fetchImpl }).status();
 
   assert.equal(status.configured, true, 'el token es válido: la integración está configurada');
   assert.equal(status.accountDisabled, true);
+  // El aviso tiene que decir QUÉ pasa: "no está activa" no dice si hay que
+  // pagar una factura o esperar una revisión.
+  assert.equal(status.accountStatus, 2);
+  assert.equal(status.accountStatusLabel, 'deshabilitada por Meta · riesgo en el método de pago');
+});
+
+test('una cuenta activa no arrastra etiqueta de estado', async () => {
+  const fetchImpl = fakeFetch({
+    id: 'act_1625910892246042', name: 'Tesis Perú', account_status: 1, disable_reason: 0, currency: 'PEN'
+  });
+
+  const status = await new MetaAdsService({ fetchImpl }).status();
+
+  assert.equal(status.accountDisabled, false);
+  assert.equal(status.accountStatus, 1);
+  assert.equal(status.accountStatusLabel, null);
+});
+
+test('describeAccountStatus traduce los códigos de Meta', () => {
+  assert.equal(describeAccountStatus(3, 0), 'con pagos pendientes');
+  assert.equal(describeAccountStatus(7, 0), 'en revisión de riesgo');
+  assert.equal(describeAccountStatus(101, 7), 'cerrada · cierre permanente');
+  assert.equal(describeAccountStatus(999, 0), 'estado 999');
 });
 
 test('sin token no se llama al Graph', async () => {

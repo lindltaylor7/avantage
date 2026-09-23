@@ -262,6 +262,44 @@ function dayInAccountTz(millis, offsetHours) {
  * del enlace y totales, visitas a la página de destino, conversaciones de
  * mensajería iniciadas y las tres clasificaciones de calidad).
  */
+/**
+ * `account_status` de una cuenta publicitaria, tal como lo documenta Meta.
+ * Solo el 1 deja entregar datos nuevos; el resto se muestra tal cual para que
+ * quien lo lee sepa QUÉ hay que regularizar (no es lo mismo pagar una factura
+ * que esperar una revisión de riesgo).
+ */
+const ACCOUNT_STATUS_LABELS = {
+  1: 'activa',
+  2: 'deshabilitada por Meta',
+  3: 'con pagos pendientes',
+  7: 'en revisión de riesgo',
+  8: 'esperando la liquidación del pago',
+  9: 'en periodo de gracia por falta de pago',
+  100: 'en proceso de cierre',
+  101: 'cerrada'
+};
+
+/** `disable_reason`: por qué Meta deshabilitó la cuenta (0 = no lo está). */
+const DISABLE_REASON_LABELS = {
+  1: 'incumplimiento de las políticas de anuncios',
+  2: 'revisión de propiedad intelectual',
+  3: 'riesgo en el método de pago',
+  4: 'cierre de cuenta marcada como sospechosa',
+  5: 'revisión de facturación',
+  6: 'revisión de integridad del negocio',
+  7: 'cierre permanente',
+  8: 'cuenta de revendedor sin uso',
+  9: 'cuenta sin uso'
+};
+
+/** Texto del aviso: estado y, si lo hay, el motivo de la deshabilitación. */
+export function describeAccountStatus(accountStatus, disableReason) {
+  const status = Number(accountStatus);
+  const label = ACCOUNT_STATUS_LABELS[status] || `estado ${status}`;
+  const reason = DISABLE_REASON_LABELS[Number(disableReason)];
+  return reason ? `${label} · ${reason}` : label;
+}
+
 export class MetaAdsService {
   constructor({ fetchImpl } = {}) {
     this.fetch = fetchImpl || globalThis.fetch;
@@ -316,7 +354,8 @@ export class MetaAdsService {
       // una configuración con el token ya muerto (y luego fallaría al
       // sincronizar). Leer la propia cuenta valida el token y, de paso, trae
       // el nombre y la moneda reales.
-      const live = await this.#graphGet(account.id, { fields: 'id,name,account_status,currency' });
+      const live = await this.#graphGet(account.id, { fields: 'id,name,account_status,disable_reason,currency' });
+      const inactive = live.account_status != null && Number(live.account_status) !== 1;
 
       return {
         configured: true,
@@ -326,8 +365,12 @@ export class MetaAdsService {
         accountName: live.name || account.name,
         accountCurrency: live.currency || null,
         // 1 = activa; cualquier otro valor (deshabilitada, con pagos
-        // pendientes, en revisión) impide que Meta entregue datos nuevos.
-        accountDisabled: live.account_status != null && Number(live.account_status) !== 1,
+        // pendientes, en revisión) impide que Meta entregue datos nuevos. Se
+        // reporta CUÁL es, porque de eso depende qué tiene que hacer el
+        // equipo para destrabarla.
+        accountDisabled: inactive,
+        accountStatus: live.account_status != null ? Number(live.account_status) : null,
+        accountStatusLabel: inactive ? describeAccountStatus(live.account_status, live.disable_reason) : null,
         accountSource: account.source,
         accountOptions: account.options || 1
       };

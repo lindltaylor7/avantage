@@ -70,8 +70,11 @@
       </template>
     </p>
     <p v-if="metaStatus && metaStatus.accountDisabled" class="state-banner state-hint">
-      ⚠️ La cuenta publicitaria no está activa en Meta (deshabilitada, con pagos pendientes o en revisión).
-      El token funciona, pero Meta no entregará datos nuevos hasta que se regularice.
+      ⚠️ Meta reporta la cuenta publicitaria
+      <strong>{{ metaStatus.accountStatusLabel || 'no activa' }}</strong>
+      <span v-if="metaStatus.accountStatus" class="data-mono">(account_status {{ metaStatus.accountStatus }})</span>.
+      El token funciona y lo ya sincronizado se sigue viendo, pero Meta no entrega datos nuevos
+      hasta que se regularice en el Administrador de anuncios.
     </p>
     <p v-if="syncMsg" class="state-banner" :class="syncError ? 'state-error' : 'state-ok'">{{ syncMsg }}</p>
     <p v-if="exportMsg" class="state-banner state-error">⚠️ {{ exportMsg }}</p>
