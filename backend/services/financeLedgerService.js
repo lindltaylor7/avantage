@@ -298,6 +298,42 @@ export class FinanceLedgerService {
     };
   }
 
+  /**
+   * Deja el marcador `is_initial_payment` donde tiene que estar: en la PRIMERA
+   * cuota del cronograma del lead (la de vencimiento más antiguo), y en una
+   * sola.
+   *
+   * Ese marcador es el que desbloquea el proyecto al verificarse, así que si
+   * se queda pegado a una cuota posterior el proyecto no se activa nunca
+   * aunque el cliente ya haya pagado — y desde Finanzas no se ve por qué. Pasó:
+   * alguien registró "otro primer pago" para destrabarlo y terminó con el
+   * marcador en la segunda cuota. Por eso no se confía en el valor guardado:
+   * se recalcula después de cada cambio en las cuotas del lead.
+   *
+   * Un cierre SIN marcador no se toca: son los anteriores a este flujo, que
+   * nunca bloquearon su proyecto, y ponerles uno ahora los trabaría de golpe.
+   * `ensure` es para el único caso en que hay que reponerlo: se borró
+   * justamente la cuota que lo tenía y quedan otras.
+   */
+  async #syncInitialPayment(leadId, { ensure = false } = {}) {
+    if (!leadId) return;
+    const rows = await db('finance_income')
+      .where({ lead_id: leadId })
+      .select('id', 'is_initial_payment')
+      .orderBy('due_date', 'asc')
+      .orderBy('fecha', 'asc')
+      .orderBy('id', 'asc');
+    if (rows.length === 0) return;
+    if (!ensure && !rows.some((row) => row.is_initial_payment)) return;
+
+    const first = rows[0];
+    const isCorrect = (row) => Boolean(row.is_initial_payment) === (row.id === first.id);
+    if (rows.every(isCorrect)) return;
+
+    await db('finance_income').where({ lead_id: leadId }).update({ is_initial_payment: false });
+    await db('finance_income').where({ id: first.id }).update({ is_initial_payment: true });
+  }
+
   /** El pago inicial ya registrado de un lead, si lo tiene (uno por lead). */
   async findInitialPaymentByLead(leadId) {
     if (!leadId) return null;
@@ -341,6 +377,7 @@ export class FinanceLedgerService {
       is_initial_payment: Boolean(isInitialPayment),
       created_by: createdBy || null
     });
+    await this.#syncInitialPayment(values.lead_id);
     return this.getIncomeById(id);
   }
 
@@ -363,6 +400,10 @@ export class FinanceLedgerService {
       values.estado = existing.estado;
     }
     await db('finance_income').where({ id }).update(values);
+    // Cambiar el vencimiento (o mover la cuota a otro lead) reordena el
+    // cronograma, y con él cuál es la primera cuota.
+    await this.#syncInitialPayment(values.lead_id);
+    if (existing.lead_id && existing.lead_id !== values.lead_id) await this.#syncInitialPayment(existing.lead_id);
     return this.getIncomeById(id);
   }
 
@@ -497,6 +538,7 @@ export class FinanceLedgerService {
       }
     }
 
+    await this.#syncInitialPayment(leadId);
     return this.listScheduleByLead(leadId);
   }
 
@@ -580,11 +622,15 @@ export class FinanceLedgerService {
   }
 
   async deleteIncome(id) {
-    const income = await db('finance_income').where({ id }).select('tributario_filename').first();
+    const income = await db('finance_income').where({ id }).select('tributario_filename', 'lead_id', 'is_initial_payment').first();
     if (income) unlinkQuiet(income.tributario_filename);
     const receipts = await db('finance_income_receipts').where('income_id', id).select('filename');
     receipts.forEach((r) => unlinkQuiet(r.filename));
-    return db('finance_income').where({ id }).del();
+    const deleted = await db('finance_income').where({ id }).del();
+    // Si se borró la cuota que desbloqueaba el proyecto, el marcador pasa a
+    // la que quedó primera: si no, el cierre se quedaría sin ninguna.
+    await this.#syncInitialPayment(income?.lead_id, { ensure: Boolean(income?.is_initial_payment) });
+    return deleted;
   }
 
   // ------------------------------------------------------------ COMPROBANTES

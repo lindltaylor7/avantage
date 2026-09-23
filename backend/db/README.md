@@ -56,6 +56,7 @@ timestamp. Cada uno exporta `up()` (aplicar cambio) y `down()` (revertirlo).
 | `20260814000000_create_funnel_columns_table.js` | Crea la tabla `funnel_columns`: las etapas (columnas) del Kanban de Leads, antes almacenadas solo en `localStorage` del navegador. Cada fila tiene `key`, `label`, `icon`, `color`, `final` y `position` (orden de despliegue). |
 | `20261015000000_payment_schedule_and_gated_deliverables.js` | Agrega `finance_income.due_date` (la fecha **pactada** de la cuota, distinta de `fecha`, el día en que el dinero entró) y `project_updates.income_id` (la cuota que libera el adjunto de ese avance). Con las dos, el cronograma de pagos que se acuerda al ganar el lead **son** las cuotas de Finanzas, y un entregable puede quedar retenido en el portal del cliente hasta que Finanzas verifique el pago. |
 | `20261016000000_create_task_templates.js` | Crea `task_templates` (conjuntos de tareas guardados con nombre y, opcionalmente, la universidad a la que pertenecen) y `task_template_items` (las tareas de cada plantilla, en orden). Al importar una plantilla las tareas se **copian** a `tasks`: editar después la plantilla no altera los proyectos que ya la usaron. |
+| `20261017000000_normalize_initial_payment_flag.js` | Mueve `finance_income.is_initial_payment` a la primera cuota de cada cierre que ya tenía marcador (y activa el proyecto si esa cuota estaba verificada). Arregla los cierres donde el marcador había quedado en una cuota posterior, que dejaban el proyecto bloqueado para siempre. |
 
 ### Cronograma de pagos y entregables bloqueados
 
@@ -68,6 +69,14 @@ el cliente, y el mismo plan se edita desde tres sitios sin copiar datos:
 2. **Contrato** (`ContractsTab.vue` → `PUT /api/contracts/:id`, campo `installments`): se
    reprograma el mismo plan; el marcador `{{cronograma_pagos}}` imprime la tabla en el documento.
 3. **Finanzas** (pestaña INGRESOS): campo "Vence" en el formulario del ingreso.
+
+El pago que desbloquea el proyecto (`finance_income.is_initial_payment`) es **siempre la primera
+cuota del cronograma** — la de `due_date` más antiguo — y solo una por lead:
+`financeLedgerService` recalcula el marcador después de cada alta, edición, borrado o
+reprogramación de cuotas. Antes se guardaba al crear el ingreso y no se volvía a tocar, así que
+podía quedar en una cuota posterior y el proyecto no se activaba nunca aunque el cliente ya
+hubiera pagado. Un cierre que nunca tuvo marcador (anterior a este flujo) se deja como está: su
+proyecto nunca estuvo bloqueado.
 
 Una cuota ya cobrada (`estado` distinto de `pendiente`, o con comprobantes subidos) queda
 bloqueada: no se puede borrar del cronograma ni cambiarle el monto, porque el asiento tiene que

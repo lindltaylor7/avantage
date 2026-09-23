@@ -20,6 +20,10 @@
       <span class="deal-meta">
         <span v-if="group.leadDni && !collapsed">DNI {{ group.leadDni }}</span>
         <span>{{ group.payments.length }} {{ group.payments.length === 1 ? "cuota" : "cuotas" }}</span>
+        <!-- Visible también plegado: es lo que explica un proyecto que no arranca. -->
+        <span v-if="blockingPayment" class="deal-gate-chip" title="La primera cuota no está verificada: el proyecto del cliente sigue bloqueado.">
+          🔒 proyecto bloqueado
+        </span>
       </span>
     </div>
 
@@ -82,6 +86,14 @@
       {{ isAdding ? "✕ Cancelar" : "+ Agregar pago" }}
     </button>
   </div>
+
+  <!-- El cierre tiene que decir por qué el proyecto del cliente no arranca:
+       desde Proyectos solo se ve el candado, no la cuota que lo abre. -->
+  <p v-if="blockingPayment && !collapsed" class="deal-gate-note">
+    🔒 El proyecto de este cliente sigue bloqueado hasta que verifiques la
+    <strong>{{ blockingPayment.cuota }}</strong> cuota (la primera del cronograma), hoy en estado
+    <strong>{{ blockingPayment.estado }}</strong>. Registrar otro pago no lo desbloquea.
+  </p>
 
   <p v-if="errorMessage" class="deal-alert">⚠️ {{ errorMessage }}</p>
 
@@ -163,6 +175,16 @@ const pctCubierto = computed(() => {
 });
 
 const itfPreview = computed(() => calcItf(draft.monto));
+
+/**
+ * La primera cuota del cronograma cuando todavía no está verificada: es la que
+ * mantiene bloqueado el proyecto del cliente. El backend garantiza que el
+ * marcador esté siempre en esa cuota y en una sola.
+ */
+const blockingPayment = computed(() => {
+  const gating = props.group.payments.find((payment) => payment.is_initial_payment);
+  return gating && gating.estado !== "verificado" ? gating : null;
+});
 
 function segWidth(value) {
   const total = Number(props.group.total) || 0;
@@ -387,6 +409,27 @@ async function addPayment() {
 
 .deal-add-toggle:hover { border-style: solid; background: var(--surface-2); }
 .deal-add-toggle.is-open { color: var(--text-muted); }
+
+.deal-gate-note {
+  margin: 0.35rem 0 0;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-md);
+  background: rgba(200, 85, 50, 0.1);
+  border: 1px solid rgba(200, 85, 50, 0.28);
+  color: var(--text-sub);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.deal-gate-chip {
+  padding: 0.1rem 0.45rem;
+  border-radius: 9999px;
+  background: rgba(200, 85, 50, 0.12);
+  border: 1px solid rgba(200, 85, 50, 0.3);
+  color: var(--accent-rose);
+  font-weight: 700;
+  white-space: nowrap;
+}
 
 .deal-alert { margin: 0.5rem 0 0; font-size: 0.76rem; color: var(--accent-rose); }
 

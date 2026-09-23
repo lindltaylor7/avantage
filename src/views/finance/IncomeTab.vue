@@ -343,8 +343,18 @@
                     >
                       {{ verifySaving === row.id ? '…' : (row.estado === 'verificado' ? '✓ Verificado' : 'Verificar') }}
                     </button>
-                    <span v-if="row.is_initial_payment" class="initial-payment-tag" title="Primer pago: activa el proyecto del lead">
-                      1er pago
+                    <!-- La cuota que desbloquea el proyecto tiene que gritarlo:
+                         mientras no esté verificada, el proyecto del cliente no
+                         se puede trabajar, y eso no se ve desde Proyectos. -->
+                    <span
+                      v-if="row.is_initial_payment"
+                      class="initial-payment-tag"
+                      :class="row.estado === 'verificado' ? 'is-open' : 'is-blocking'"
+                      :title="row.estado === 'verificado'
+                        ? 'Primera cuota verificada: el proyecto de este cliente ya está activo.'
+                        : 'Primera cuota del cronograma: hasta que la verifiques, el proyecto de este cliente sigue bloqueado.'"
+                    >
+                      {{ row.estado === 'verificado' ? '🔓 1er pago · proyecto activo' : '🔒 1er pago · proyecto bloqueado' }}
                     </span>
 
                     <!-- El comprobante certifica un pago: solo se emite una
@@ -1253,10 +1263,27 @@ onBeforeUnmount(releaseUrls);
 
 .initial-payment-tag {
   font-family: var(--font-mono);
-  font-size: 0.58rem;
-  letter-spacing: 0.06em;
+  font-size: 0.6rem;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--text-muted);
+  font-weight: 700;
+  padding: 0.18rem 0.5rem;
+  border-radius: 9999px;
+  white-space: nowrap;
+}
+
+/* Bloqueando el proyecto: el mismo naranja de "pendiente", para que se lea
+   como algo que falta hacer y no como una etiqueta decorativa. */
+.initial-payment-tag.is-blocking {
+  background: rgba(200, 85, 50, 0.14);
+  color: var(--accent-rose);
+  border: 1px solid rgba(200, 85, 50, 0.35);
+}
+
+.initial-payment-tag.is-open {
+  background: rgba(46, 125, 70, 0.12);
+  color: var(--accent-emerald);
+  border: 1px solid rgba(46, 125, 70, 0.3);
 }
 
 .pill-toggle {
