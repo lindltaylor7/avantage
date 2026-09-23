@@ -92,9 +92,9 @@
       <div class="items-per-page-box">
         <span class="toolbar-label">Ver por pág:</span>
         <select v-model="itemsPerPage" class="items-select" title="Límite de tarjetas por columna">
-          <option :value="5">5 leads</option>
-          <option :value="8">8 leads</option>
-          <option :value="12">12 leads</option>
+          <option :value="10">10 leads</option>
+          <option :value="20">20 leads</option>
+          <option :value="30">30 leads</option>
           <option value="all">Ver todos</option>
         </select>
       </div>
@@ -595,13 +595,72 @@
         <div class="modal-body" :class="{ 'modal-body-split': showBotChat }">
          <div class="lead-modal-primary">
           <div class="modal-lead-title-area">
-            <h3 class="modal-lead-name">👤 {{ getLeadFullName(selectedLead) }}</h3>
+            <h3 class="modal-lead-name">
+              👤 {{ getLeadFullName(selectedLead) }}
+              <!-- Los datos del lead son los que salen impresos en la
+                   cotización y en el contrato: se corrigen acá mismo, antes
+                   de emitirla, y no en otra pantalla. -->
+              <button v-if="!leadEdit" type="button" class="lead-edit-btn" title="Editar los datos del lead" @click="startLeadEdit">
+                ✏️ Editar datos
+              </button>
+            </h3>
             <p v-if="selectedLead.topic && selectedLead.topic.trim().toLowerCase() !== (selectedLead.full_name || '').trim().toLowerCase()" class="modal-lead-topic-sub">
               📄 {{ selectedLead.topic }}
             </p>
           </div>
 
-          <div class="lead-info-grid">
+          <!-- Edición de los datos del lead -->
+          <form v-if="leadEdit" class="lead-edit-form" @submit.prevent="saveLeadEdit">
+            <div class="lead-edit-grid">
+              <label class="lead-edit-field">
+                <span>Nombre completo</span>
+                <input v-model="leadEdit.fullName" type="text" class="form-input custom-input" />
+              </label>
+              <label class="lead-edit-field">
+                <span>DNI</span>
+                <input v-model="leadEdit.dni" type="text" class="form-input custom-input" />
+              </label>
+              <label class="lead-edit-field">
+                <span>Correo</span>
+                <input v-model="leadEdit.email" type="email" class="form-input custom-input" />
+              </label>
+              <label class="lead-edit-field">
+                <span>Celular</span>
+                <input v-model="leadEdit.phone" type="text" class="form-input custom-input" />
+              </label>
+              <label class="lead-edit-field">
+                <span>Universidad</span>
+                <input v-model="leadEdit.university" type="text" class="form-input custom-input" placeholder="Ej: Universidad Continental" />
+              </label>
+              <label class="lead-edit-field">
+                <span>Nivel académico</span>
+                <select v-model="leadEdit.academicLevel" class="form-select custom-select">
+                  <option v-for="level in ACADEMIC_LEVELS" :key="level" :value="level">{{ level }}</option>
+                </select>
+              </label>
+              <label class="lead-edit-field lead-edit-field--wide">
+                <span>Carrera / especialidad</span>
+                <select v-model="leadEdit.fieldOfStudy" class="form-select custom-select">
+                  <optgroup v-for="group in careerGroupsWith(leadEdit.fieldOfStudy)" :key="group.label" :label="group.label">
+                    <option v-for="career in group.careers" :key="career" :value="career">{{ career }}</option>
+                  </optgroup>
+                </select>
+              </label>
+              <label class="lead-edit-field lead-edit-field--wide">
+                <span>Tema de tesis</span>
+                <input v-model="leadEdit.topic" type="text" class="form-input custom-input" />
+              </label>
+            </div>
+            <p v-if="leadEditError" class="lead-edit-error">{{ leadEditError }}</p>
+            <div class="lead-edit-actions">
+              <button type="button" class="btn-action-ghost" @click="leadEdit = null">Cancelar</button>
+              <button type="submit" class="btn-action-primary" :disabled="leadEditSaving">
+                {{ leadEditSaving ? 'Guardando…' : 'Guardar datos' }}
+              </button>
+            </div>
+          </form>
+
+          <div v-else class="lead-info-grid">
             <div class="info-card-panel">
               <h5 class="panel-subtitle">👤 Contacto</h5>
               <div v-if="selectedLead.full_name" class="info-item">
@@ -634,7 +693,11 @@
               </div>
               <div class="info-item">
                 <span class="info-label">Carrera:</span>
-                <span class="info-value">{{ selectedLead.field_of_study }}</span>
+                <span class="info-value">{{ selectedLead.field_of_study || '—' }}</span>
+              </div>
+              <div class="info-item">
+                <span class="info-label">Universidad:</span>
+                <span class="info-value">{{ selectedLead.university || '—' }}</span>
               </div>
             </div>
           </div>
@@ -748,38 +811,53 @@
           <transition name="fade">
             <form v-if="showQuoteForm" class="quote-form-section" @submit.prevent="submitQuote">
               <h4 class="quote-heading">💰 Nueva Cotización Comercial</h4>
+
               <div class="form-group">
-                <label class="form-label">Concepto del servicio *</label>
-                <input
-                  v-model="quoteConcept"
-                  type="text"
-                  class="form-input custom-input"
-                  placeholder="Ej: TESIS COMPLETA"
-                  required
-                />
+                <label class="form-label">Servicio *</label>
+                <input v-model="quoteConcept" type="text" class="form-input custom-input" required />
               </div>
-              <div style="display: flex; gap: 0.6rem;">
-                <div class="form-group" style="flex: 1;">
-                  <label class="form-label">Monto total *</label>
-                  <input
-                    v-model="quoteAmount"
-                    type="number"
-                    min="1"
-                    step="0.01"
-                    class="form-input custom-input"
-                    placeholder="Ej: 9000"
-                    required
-                  />
+              <div class="form-group">
+                <label class="form-label">Bajada del servicio</label>
+                <input v-model="quoteServiceSubtitle" type="text" class="form-input custom-input" />
+              </div>
+
+              <!-- Entregables: se marcan o desmarcan y así salen impresos. -->
+              <div class="form-group">
+                <label class="form-label">
+                  Entregables incluidos
+                  <span class="quote-check-count">{{ quoteDeliverables.length }} de {{ QUOTE_DELIVERABLES.length }}</span>
+                </label>
+                <div class="quote-check-actions">
+                  <button type="button" class="quote-check-link" @click="toggleAllDeliverables(true)">Marcar todos</button>
+                  <button type="button" class="quote-check-link" @click="toggleAllDeliverables(false)">Ninguno</button>
                 </div>
-                <div class="form-group" style="width: 90px;">
-                  <label class="form-label">Cant.</label>
-                  <input
-                    v-model="quoteQuantity"
-                    type="number"
-                    min="1"
-                    step="1"
-                    class="form-input custom-input"
-                  />
+                <ul class="quote-check-list">
+                  <li v-for="item in QUOTE_DELIVERABLES" :key="item.key">
+                    <label class="quote-check">
+                      <input type="checkbox" :value="item.key" v-model="quoteDeliverables" />
+                      <span>
+                        <strong>{{ item.label }}</strong>
+                        <em>{{ item.description }}</em>
+                      </span>
+                    </label>
+                  </li>
+                </ul>
+                <textarea
+                  v-model="quoteScope"
+                  class="form-textarea custom-input"
+                  rows="2"
+                  placeholder="Otros entregables, uno por línea (Ej: Artículo científico: Redacción para revista indexada.)"
+                ></textarea>
+              </div>
+
+              <div class="quote-field-row">
+                <div class="form-group">
+                  <label class="form-label">Precio regular</label>
+                  <input v-model="quoteRegularAmount" type="number" min="0" step="0.01" class="form-input custom-input" placeholder="Ej: 7000" />
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Precio final acordado *</label>
+                  <input v-model="quoteAmount" type="number" min="1" step="0.01" class="form-input custom-input" placeholder="Ej: 6000" required />
                 </div>
                 <div class="form-group" style="width: 110px;">
                   <label class="form-label">Moneda</label>
@@ -789,14 +867,38 @@
                   </select>
                 </div>
               </div>
+              <p v-if="quoteDiscount > 0" class="quote-discount-hint">
+                Descuento exclusivo que verá el cliente: <strong>{{ formatCurrency(quoteDiscount, quoteCurrency) }}</strong>.
+              </p>
+
+              <div class="quote-field-row">
+                <div class="form-group">
+                  <label class="form-label">Código</label>
+                  <input v-model="quoteCode" type="text" class="form-input custom-input" placeholder="Ej: 51-SET-VL" />
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Tiempo estimado</label>
+                  <input v-model="quoteEstimatedTime" type="text" class="form-input custom-input" placeholder="Ej: 1 mes" />
+                </div>
+              </div>
+              <div class="quote-field-row">
+                <div class="form-group">
+                  <label class="form-label">Estado de la cotización</label>
+                  <input v-model="quoteStatusLabel" type="text" class="form-input custom-input" placeholder="Ej: Aprobada para gestión" />
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Vigencia de la oferta</label>
+                  <input v-model="quoteValidUntil" type="date" class="form-input custom-input" />
+                </div>
+              </div>
+
               <div class="form-group">
-                <label class="form-label">Alcance del servicio (una viñeta por línea)</label>
-                <textarea
-                  v-model="quoteScope"
-                  class="form-textarea custom-input"
-                  rows="4"
-                  placeholder="02 propuestas opcionales de tema&#10;Plan de tesis o proyecto de investigación&#10;Informe final de tesis&#10;Reporte de similitud TURNITIN"
-                ></textarea>
+                <label class="form-label">Garantía y asesoría continua</label>
+                <textarea v-model="quoteWarranty" class="form-textarea custom-input" rows="2"></textarea>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Condiciones comerciales (una por línea)</label>
+                <textarea v-model="quoteTerms" class="form-textarea custom-input" rows="3"></textarea>
               </div>
               <div class="form-group">
                 <label class="form-label">Observaciones (opcional)</label>
@@ -804,7 +906,7 @@
                   v-model="quoteNotes"
                   class="form-textarea custom-input"
                   rows="2"
-                  placeholder="Condiciones particulares, descuentos, etc."
+                  placeholder="Condiciones particulares, acuerdos puntuales, etc."
                 ></textarea>
               </div>
               <div style="display: flex; gap: 0.6rem; justify-content: flex-end;">
@@ -912,6 +1014,8 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { apiFetch } from '../apiClient.js';
+import { QUOTE_DELIVERABLES, QUOTE_SERVICE_DEFAULTS, deliverableLine } from '../data/quoteDeliverables.js';
+import { careerGroupsWith, DEFAULT_CAREER } from '../data/careers.js';
 import { hasPermission } from '../auth.js';
 import WinDealModal from '../components/WinDealModal.vue';
 
@@ -966,7 +1070,7 @@ const selectedViabilityFilter = ref('all');
 
 // Paginación por Columna
 const columnPages = reactive({});
-const itemsPerPage = ref(5);
+const itemsPerPage = ref(10);
 
 function getColumnPage(colKey) {
   return columnPages[colKey] || 1;
@@ -1049,13 +1153,30 @@ const showDeleteColModal = ref(false);
 const deletingColumn = ref(null);
 const targetReassignColKey = ref('nuevo');
 
+// Edición de los datos del lead abierto (null = ficha en modo lectura).
+const leadEdit = ref(null);
+const leadEditSaving = ref(false);
+const leadEditError = ref('');
+
+const ACADEMIC_LEVELS = ['Pregrado (Bachiller/Título)', 'Posgrado (Maestría)', 'Posgrado (Doctorado)'];
+
 // Cotización
 const showQuoteForm = ref(false);
-const quoteConcept = ref('TESIS COMPLETA');
+const quoteConcept = ref(QUOTE_SERVICE_DEFAULTS.conceptTitle);
+const quoteServiceSubtitle = ref(QUOTE_SERVICE_DEFAULTS.serviceSubtitle);
 const quoteAmount = ref('');
-const quoteQuantity = ref(1);
+const quoteRegularAmount = ref('');
 const quoteCurrency = ref('PEN');
+// Entregables marcados (claves del catálogo): arrancan todos incluidos, que es
+// el paquete que se vende; quitar uno es la excepción.
+const quoteDeliverables = ref(QUOTE_DELIVERABLES.map((item) => item.key));
 const quoteScope = ref('');
+const quoteCode = ref('');
+const quoteEstimatedTime = ref(QUOTE_SERVICE_DEFAULTS.estimatedTime);
+const quoteStatusLabel = ref(QUOTE_SERVICE_DEFAULTS.statusLabel);
+const quoteValidUntil = ref('');
+const quoteWarranty = ref(QUOTE_SERVICE_DEFAULTS.warrantyText);
+const quoteTerms = ref(QUOTE_SERVICE_DEFAULTS.commercialTerms);
 const quoteNotes = ref('');
 const quoteSubmitting = ref(false);
 const quoteSuccess = ref(null);
@@ -1080,13 +1201,10 @@ const botChatScrollEl = ref(null);
 let botChatTimer = null;
 
 watch(selectedLead, () => {
+  leadEdit.value = null;
+  leadEditError.value = '';
   showQuoteForm.value = false;
-  quoteConcept.value = 'TESIS COMPLETA';
-  quoteAmount.value = '';
-  quoteQuantity.value = 1;
-  quoteCurrency.value = 'PEN';
-  quoteScope.value = '';
-  quoteNotes.value = '';
+  resetQuoteForm();
   quoteSuccess.value = null;
   quoteMove.value = null;
   quoteHistory.value = [];
@@ -1683,6 +1801,92 @@ async function undoQuoteMove() {
   }
 }
 
+/** Copia editable de los datos del lead: cancelar no debe tocar el tablero. */
+function startLeadEdit() {
+  const lead = selectedLead.value;
+  leadEditError.value = '';
+  leadEdit.value = {
+    fullName: lead.full_name || '',
+    dni: lead.dni || '',
+    email: lead.email || '',
+    phone: lead.phone || '',
+    university: lead.university || '',
+    academicLevel: lead.academic_level || ACADEMIC_LEVELS[0],
+    fieldOfStudy: lead.field_of_study || DEFAULT_CAREER,
+    topic: lead.topic || ''
+  };
+}
+
+async function saveLeadEdit() {
+  leadEditSaving.value = true;
+  leadEditError.value = '';
+  try {
+    const response = await apiFetch(`/api/leads/${selectedLead.value.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(leadEdit.value)
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No se pudo guardar los datos.');
+
+    // El lead abierto y el del tablero son objetos distintos: se actualizan
+    // los dos para que la tarjeta muestre el nombre nuevo sin recargar.
+    Object.assign(selectedLead.value, data.lead);
+    const inBoard = leads.value.find((l) => l.id === data.lead.id);
+    if (inBoard) Object.assign(inBoard, data.lead);
+    leadEdit.value = null;
+  } catch (err) {
+    leadEditError.value = err.message;
+  } finally {
+    leadEditSaving.value = false;
+  }
+}
+
+/** Vigencia por defecto: 10 días calendario, como venía haciendo el backend. */
+function defaultValidUntil() {
+  return new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function resetQuoteForm() {
+  quoteConcept.value = QUOTE_SERVICE_DEFAULTS.conceptTitle;
+  quoteServiceSubtitle.value = QUOTE_SERVICE_DEFAULTS.serviceSubtitle;
+  quoteAmount.value = '';
+  quoteRegularAmount.value = '';
+  quoteCurrency.value = 'PEN';
+  quoteDeliverables.value = QUOTE_DELIVERABLES.map((item) => item.key);
+  quoteScope.value = '';
+  quoteCode.value = '';
+  quoteEstimatedTime.value = QUOTE_SERVICE_DEFAULTS.estimatedTime;
+  quoteStatusLabel.value = QUOTE_SERVICE_DEFAULTS.statusLabel;
+  quoteValidUntil.value = defaultValidUntil();
+  quoteWarranty.value = QUOTE_SERVICE_DEFAULTS.warrantyText;
+  quoteTerms.value = QUOTE_SERVICE_DEFAULTS.commercialTerms;
+  quoteNotes.value = '';
+}
+
+function toggleAllDeliverables(selectAll) {
+  quoteDeliverables.value = selectAll ? QUOTE_DELIVERABLES.map((item) => item.key) : [];
+}
+
+/** El descuento no se escribe: es la diferencia entre el regular y el final. */
+const quoteDiscount = computed(() => {
+  const regular = Number(quoteRegularAmount.value) || 0;
+  const final = Number(quoteAmount.value) || 0;
+  return regular > final ? regular - final : 0;
+});
+
+/**
+ * Alcance que viaja al documento: los entregables marcados en el orden del
+ * catálogo, más las líneas sueltas que se hayan escrito.
+ */
+const quoteScopeItems = computed(() => {
+  const checked = QUOTE_DELIVERABLES
+    .filter((item) => quoteDeliverables.value.includes(item.key))
+    .map(deliverableLine);
+  const extras = quoteScope.value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return [...checked, ...extras].join('\n');
+});
+
 async function submitQuote() {
   if (!selectedLead.value || !quoteAmount.value) return;
   quoteSubmitting.value = true;
@@ -1692,10 +1896,17 @@ async function submitQuote() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         amount: Number(quoteAmount.value),
-        quantity: Number(quoteQuantity.value) || 1,
+        regularAmount: Number(quoteRegularAmount.value) || null,
         currency: quoteCurrency.value,
         conceptTitle: quoteConcept.value,
-        scopeItems: quoteScope.value,
+        serviceSubtitle: quoteServiceSubtitle.value,
+        scopeItems: quoteScopeItems.value,
+        code: quoteCode.value,
+        estimatedTime: quoteEstimatedTime.value,
+        statusLabel: quoteStatusLabel.value,
+        validUntil: quoteValidUntil.value || null,
+        warrantyText: quoteWarranty.value,
+        commercialTerms: quoteTerms.value,
         notes: quoteNotes.value
       })
     });
@@ -1792,6 +2003,121 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* ── Edición de los datos del lead (dentro del modal de detalle) ── */
+.lead-edit-btn {
+  margin-left: 0.6rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--surface-2);
+  color: var(--text-sub);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.lead-edit-btn:hover { border-color: var(--primary); color: var(--primary); }
+
+.lead-edit-form {
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--surface-1);
+  padding: 0.9rem 1rem;
+}
+
+.lead-edit-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.7rem;
+}
+
+.lead-edit-field { display: flex; flex-direction: column; gap: 0.25rem; }
+.lead-edit-field--wide { grid-column: 1 / -1; }
+
+.lead-edit-field > span {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.lead-edit-error {
+  margin-top: 0.6rem;
+  font-size: 0.78rem;
+  color: var(--accent-rose);
+}
+
+.lead-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+}
+
+/* ── Entregables de la cotización (checks) ── */
+.quote-check-count {
+  margin-left: 0.4rem;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.quote-check-actions { display: flex; gap: 0.75rem; margin-bottom: 0.4rem; }
+
+.quote-check-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--primary);
+  cursor: pointer;
+}
+
+.quote-check-list {
+  list-style: none;
+  display: grid;
+  gap: 0.25rem;
+  max-height: 210px;
+  overflow-y: auto;
+  padding: 0.5rem;
+  margin-bottom: 0.5rem;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-card);
+}
+
+.quote-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.3rem 0.35rem;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.quote-check:hover { background: var(--surface-2); }
+.quote-check input { margin-top: 0.15rem; flex-shrink: 0; }
+.quote-check span { display: flex; flex-direction: column; gap: 0.05rem; }
+.quote-check strong { font-size: 0.78rem; color: var(--text-main); font-weight: 600; }
+.quote-check em { font-size: 0.72rem; color: var(--text-muted); font-style: normal; line-height: 1.4; }
+
+.quote-field-row {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.quote-field-row > .form-group { flex: 1; min-width: 140px; }
+
+.quote-discount-hint {
+  margin: -0.4rem 0 0.9rem;
+  font-size: 0.76rem;
+  color: var(--accent-emerald);
+}
+
+
 .kanban-page-wrapper {
   padding: var(--page-py) var(--page-px) var(--page-pb);
   display: flex;
@@ -2298,7 +2624,7 @@ onMounted(() => {
 .kanban-column-body {
   --lead-card-h: 52px;
   --lead-card-gap: 0.5rem;
-  --column-visible-cards: 5;
+  --column-visible-cards: 10;
   flex: 1;
   padding: 0.6rem;
   display: flex;

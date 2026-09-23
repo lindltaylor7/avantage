@@ -2504,7 +2504,16 @@ app.post('/api/leads/:id/quote', requireAuth, requirePermission('leads.view'), a
       notes,
       conceptTitle,
       quantity,
-      scopeItems
+      scopeItems,
+      code,
+      estimatedTime,
+      statusLabel,
+      regularAmount,
+      discount,
+      serviceSubtitle,
+      warrantyText,
+      commercialTerms,
+      validUntil
     } = req.body;
     const parsedAmount = Number(amount);
     const parsedQuantity = Number(quantity) > 0 ? Math.floor(Number(quantity)) : 1;
@@ -2518,8 +2527,9 @@ app.post('/api/leads/:id/quote', requireAuth, requirePermission('leads.view'), a
       return res.status(404).json({ error: 'Lead no encontrado.' });
     }
 
-    // La cotización es válida por 10 días calendario desde su emisión.
-    const validUntil = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    // Vigencia: la que ponga el vendedor; si no la indica, 10 días calendario
+    // desde la emisión, como se venía haciendo.
+    const vigencia = validUntil || new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
     const quote = await quoteService.createQuote({
       leadId: lead.id,
@@ -2529,7 +2539,15 @@ app.post('/api/leads/:id/quote', requireAuth, requirePermission('leads.view'), a
       conceptTitle,
       quantity: parsedQuantity,
       scopeItems,
-      validUntil
+      validUntil: vigencia,
+      code,
+      estimatedTime,
+      statusLabel,
+      regularAmount,
+      discount,
+      serviceSubtitle,
+      warrantyText,
+      commercialTerms
     });
     const emailStatus = await emailService.sendQuoteEmail(lead.email, { quote, lead });
 

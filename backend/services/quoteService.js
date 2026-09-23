@@ -13,8 +13,25 @@ export class QuoteService {
     conceptTitle = 'TESIS COMPLETA',
     quantity = 1,
     scopeItems,
-    validUntil
+    validUntil,
+    code,
+    estimatedTime,
+    statusLabel,
+    regularAmount,
+    discount,
+    serviceSubtitle,
+    warrantyText,
+    commercialTerms
   }) {
+    const optionalAmount = (value) => {
+      const number = Number(value);
+      return Number.isFinite(number) && number > 0 ? number : null;
+    };
+    const optionalText = (value, max) => {
+      const text = String(value ?? '').trim();
+      return text ? text.slice(0, max) : null;
+    };
+
     const [id] = await db('quotes').insert({
       lead_id: leadId,
       amount,
@@ -23,7 +40,18 @@ export class QuoteService {
       concept_title: conceptTitle || 'TESIS COMPLETA',
       quantity: Number(quantity) > 0 ? Number(quantity) : 1,
       scope_items: scopeItems || null,
-      valid_until: validUntil || null
+      valid_until: validUntil || null,
+      code: optionalText(code, 40),
+      estimated_time: optionalText(estimatedTime, 60),
+      status_label: optionalText(statusLabel, 60),
+      // El precio regular solo se guarda si de verdad es mayor al acordado:
+      // si no, el bloque de descuento del documento mostraría un "ahorro"
+      // negativo o de cero.
+      regular_amount: optionalAmount(regularAmount) > Number(amount) ? optionalAmount(regularAmount) : null,
+      discount: optionalAmount(discount),
+      service_subtitle: optionalText(serviceSubtitle, 250),
+      warranty_text: optionalText(warrantyText, 2000),
+      commercial_terms: optionalText(commercialTerms, 2000)
     });
     return this.getQuoteById(id);
   }

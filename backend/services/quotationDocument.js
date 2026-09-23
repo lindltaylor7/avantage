@@ -122,12 +122,47 @@ function formatMoney(amount, currency) {
   return `${symbol} ${number}`;
 }
 
+/**
+ * Cada línea del alcance es un entregable. El texto antes de los dos puntos es
+ * su nombre (va en negrita en el documento, como en la cotización que usa el
+ * equipo) y el resto es la descripción; una línea sin dos puntos se imprime
+ * tal cual.
+ */
 function parseScopeItems(raw) {
   return String(raw || '')
     .split(/\r?\n/)
-    .map((line) => line.replace(/^[\s•*+\-–]+/, '').trim())
+    .map((line) => line.replace(/^[\s•*+\-–✓]+/, '').trim())
+    .filter(Boolean)
+    .map((line) => {
+      const separator = line.indexOf(':');
+      if (separator <= 0) return { label: '', text: line };
+      return { label: line.slice(0, separator).trim(), text: line.slice(separator + 1).trim() };
+    });
+}
+
+/** Condiciones comerciales: una por línea, ya numeradas por el documento. */
+function parseTerms(raw) {
+  return String(raw || '')
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^[\s•*+\-–]*\d*[.)]?\s*/, '').trim())
     .filter(Boolean);
 }
+
+/**
+ * Textos por defecto del documento: una cotización vieja —o una emitida sin
+ * llenar los campos nuevos— se sigue imprimiendo completa.
+ */
+const DEFAULTS = {
+  estimatedTime: 'Según cronograma acordado',
+  statusLabel: 'Propuesta vigente',
+  serviceSubtitle: 'Acompañamiento, tutoría y correcciones continuas hasta la aprobación formal.',
+  warrantyText: 'El servicio asegura acompañamiento constante y revisiones adaptadas a las exigencias y rúbricas de la universidad hasta la aprobación formal de la tesis.',
+  commercialTerms: [
+    'Los entregables y avances se programarán según el cronograma acordado en el contrato de servicio.',
+    'Esta cotización formaliza el alcance de la tesis terminada con las herramientas mencionadas, sin costos adicionales.',
+    'Validez de la propuesta económica sujeta a confirmación antes de la fecha de vigencia indicada.'
+  ]
+};
 
 /* ── Iconografía de línea (16×16, trazo `currentColor`) ─────────────────── */
 const ICONS = {
@@ -203,26 +238,28 @@ export { C as BRAND_COLORS, BRAND_MARK, icon, brandLogo, monogram, formatMoney, 
 export function buildQuotationDocument({ quote, lead, forPrint = false, forEmail = false }) {
   const markSrc = forEmail ? `cid:${BRAND_MARK_CID}` : BRAND_MARK;
   const currency = quote.currency || 'PEN';
-  const quantity = Number(quote.quantity || 1);
   const total = Number(quote.amount || 0);
-  const unitPrice = quantity > 0 ? total / quantity : total;
+  // El precio de lista solo cuenta si es mayor al acordado: de ahí sale el
+  // descuento que se le muestra al cliente.
+  const regularAmount = Number(quote.regular_amount || 0) > total ? Number(quote.regular_amount) : 0;
 
   const scopeItems = parseScopeItems(quote.scope_items);
-  const quoteNumber = formatQuoteNumber(quote);
+  const commercialTerms = parseTerms(quote.commercial_terms);
+  if (commercialTerms.length === 0) commercialTerms.push(...DEFAULTS.commercialTerms);
+
+  const quoteNumber = quote.code || formatQuoteNumber(quote);
   const issueDate = formatLongDate(quote.created_at || new Date());
   const validUntil = formatLongDate(quote.valid_until);
 
   const clientName = lead.full_name || lead.email || 'Cliente';
-  const career = lead.field_of_study || lead.university || '—';
+  const career = lead.field_of_study || '—';
+  const university = lead.university || '—';
   const conceptTitle = quote.concept_title || 'TESIS COMPLETA';
   const observations = quote.notes ? esc(quote.notes) : '';
-
-  const scopeRow = scopeItems.length
-    ? `<tr class="q-scope">
-         <td></td>
-         <td colspan="4"><ul>${scopeItems.map((s) => `<li>${esc(s)}</li>`).join('')}</ul></td>
-       </tr>`
-    : '';
+  const estimatedTime = quote.estimated_time || DEFAULTS.estimatedTime;
+  const statusLabel = quote.status_label || DEFAULTS.statusLabel;
+  const serviceSubtitle = quote.service_subtitle || DEFAULTS.serviceSubtitle;
+  const warrantyText = quote.warranty_text || DEFAULTS.warrantyText;
 
   const printBar = forPrint
     ? `<div class="q-printbar q-noprint">
@@ -303,7 +340,9 @@ export function buildQuotationDocument({ quote, lead, forPrint = false, forEmail
   }
 
   .q-title { display: flex; flex-direction: column; align-items: flex-start; }
-  .q-title h1 { font-size: 30px; font-weight: 800; letter-spacing: 1.5px; color: var(--ink); line-height: 0.95; }
+  .q-title { width: 100%; align-items: flex-end; text-align: right; }
+  .q-title h1 { font-size: 22px; font-weight: 800; letter-spacing: 1.2px; color: var(--olive-deep); line-height: 1.08; }
+  .q-title .q-sub { margin-top: 5px; font-size: 8px; font-weight: 600; font-style: italic; letter-spacing: 0.4px; color: var(--muted); }
   .q-title .q-num {
     margin-top: 9px; font-size: 11px; font-weight: 700; letter-spacing: 2px;
     color: var(--olive-deep); padding-bottom: 4px; border-bottom: 2px solid var(--olive);
@@ -333,63 +372,71 @@ export function buildQuotationDocument({ quote, lead, forPrint = false, forEmail
   }
   .q-body > *:not(.q-watermark) { position: relative; z-index: 1; }
 
-  .q-intro { display: grid; grid-template-columns: 1fr 2px 1.15fr; gap: 26px; margin-bottom: 26px; }
-  .q-rule-v { background: var(--olive); }
+  /* ─── Cabeceras de bloque ─── */
   .q-h {
     display: flex; align-items: center; gap: 7px;
-    font-size: 13px; font-weight: 800; letter-spacing: 0.6px; color: var(--olive-deep);
-    text-transform: uppercase; margin-bottom: 13px;
+    font-size: 10px; font-weight: 800; letter-spacing: 0.6px; color: var(--olive-deep);
+    text-transform: uppercase;
   }
-  .q-h .q-ic { width: 16px; height: 16px; }
+  .q-h .q-ic { width: 14px; height: 14px; }
 
-  .q-client dl { display: grid; gap: 11px; }
-  .q-client .q-field { display: flex; gap: 9px; }
-  .q-client .q-ic { width: 15px; height: 15px; color: var(--olive-deep); flex: none; margin-top: 1px; }
-  .q-client dt { font-size: 9px; font-weight: 700; letter-spacing: 0.4px; color: var(--ink); }
-  .q-client dd { font-size: 10px; color: var(--muted); margin-top: 2px; line-height: 1.35; }
+  /* ─── Datos del cliente + condiciones de la oferta ─── */
+  .q-intro { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+  .q-box { border: 1px solid var(--rule); border-left: 3px solid var(--olive); background: #fff; }
+  .q-box--offer { border-left-color: ${C.brick}; }
+  .q-box--offer .q-h { color: ${C.brick}; }
+  .q-box__head { padding: 7px 11px; background: var(--sand); border-bottom: 1px solid var(--rule); }
+  .q-box__body { padding: 9px 11px; display: grid; gap: 5px; }
+  .q-line { display: flex; gap: 6px; font-size: 9.5px; line-height: 1.45; }
+  .q-line dt { font-weight: 700; color: var(--ink); white-space: nowrap; }
+  .q-line dt::before { content: "▪"; color: var(--olive-deep); margin-right: 4px; }
+  .q-box--offer .q-line dt::before { color: ${C.brick}; }
+  .q-line dd { color: var(--muted); }
 
-  .q-present p { font-size: 10px; line-height: 1.75; color: var(--ink); margin-bottom: 9px; text-align: justify; }
-  .q-present .q-sign { font-weight: 700; }
-
-  /* ─── Tabla de ítems ─── */
-  .q-table { width: 100%; border-collapse: collapse; font-size: 10px; }
-  .q-table thead th {
-    background: var(--olive); color: #fff; font-weight: 700; letter-spacing: 0.5px;
-    padding: 9px 12px; text-align: center; font-size: 9.5px; text-transform: uppercase;
+  /* ─── Servicio y entregables ─── */
+  .q-svc { border: 1px solid var(--rule); margin-bottom: 14px; }
+  .q-svc__head {
+    display: grid; grid-template-columns: 1fr 120px;
+    background: var(--ink); color: #fff;
   }
-  .q-table thead th.q-desc-h { text-align: left; }
-  .q-table tbody td { padding: 13px 12px; border: 1px solid var(--rule); vertical-align: top; }
-  .q-table .q-n { text-align: center; font-weight: 800; font-size: 14px; width: 40px; }
-  .q-table .q-concept { display: flex; align-items: center; gap: 9px; font-weight: 800; letter-spacing: 0.5px; }
-  .q-table .q-concept .q-ic { width: 17px; height: 17px; color: var(--olive-deep); flex: none; }
-  .q-table .q-c { text-align: center; }
-  .q-table .q-r { text-align: right; white-space: nowrap; }
-  .q-scope td { border-top: none; padding-top: 2px; padding-bottom: 16px; }
-  .q-scope ul { list-style: none; display: grid; gap: 6px; }
-  .q-scope li { position: relative; padding-left: 15px; line-height: 1.4; color: var(--ink); }
-  .q-scope li::before { content: "–"; position: absolute; left: 2px; color: var(--olive-deep); font-weight: 700; }
-
-  /* ─── Observaciones + total ─── */
-  .q-summary { display: grid; grid-template-columns: 1fr auto auto; }
-  .q-obs {
-    border: 1px solid var(--rule); border-top: none; padding: 13px 14px;
-    font-size: 9.5px; color: var(--muted); line-height: 1.55;
+  .q-svc__head span {
+    padding: 7px 11px; font-size: 9px; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase;
   }
-  .q-obs h4 { font-size: 11px; font-weight: 800; letter-spacing: 0.5px; color: var(--olive-deep); text-transform: uppercase; margin-bottom: 5px; }
-  .q-total-k {
-    background: var(--ink); color: #fff; font-weight: 700; font-size: 15px; letter-spacing: 1px;
-    display: flex; align-items: center; justify-content: center; padding: 0 30px;
-  }
-  .q-total-v {
-    background: var(--olive); color: #fff; font-weight: 800; font-size: 16px;
-    display: flex; align-items: center; justify-content: center; padding: 0 26px; white-space: nowrap;
+  .q-svc__head span:last-child { background: var(--olive); text-align: center; }
+  .q-svc__body { display: grid; grid-template-columns: 1fr 120px; }
+  .q-svc__items { padding: 11px 13px; border-right: 1px solid var(--rule); }
+  .q-svc__title { font-size: 10.5px; font-weight: 800; color: var(--olive-deep); display: flex; align-items: center; gap: 7px; }
+  .q-svc__title .q-ic { width: 15px; height: 15px; flex: none; }
+  .q-svc__sub { font-size: 8.8px; color: var(--muted); font-style: italic; margin: 3px 0 9px; padding-left: 22px; }
+  .q-svc__list { list-style: none; display: grid; gap: 6px; }
+  .q-svc__list li { position: relative; padding-left: 15px; font-size: 9px; line-height: 1.45; color: var(--muted); }
+  .q-svc__list li::before { content: "✓"; position: absolute; left: 0; color: var(--olive); font-weight: 800; }
+  .q-svc__list strong { color: var(--olive-deep); font-weight: 700; }
+  .q-svc__price {
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 800; color: var(--ink); text-align: center; padding: 10px;
   }
 
-  /* ─── Condiciones ─── */
-  .q-terms { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 26px; text-align: center; }
-  .q-term .q-ic { width: 22px; height: 22px; color: var(--olive-deep); }
-  .q-term h5 { font-size: 9.5px; font-weight: 800; letter-spacing: 0.5px; color: var(--olive-deep); margin: 6px 0 4px; text-transform: uppercase; }
-  .q-term p { font-size: 8.5px; color: var(--muted); line-height: 1.45; }
+  /* ─── Garantía + precios ─── */
+  .q-deal { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+  .q-warranty { border: 1px solid var(--rule); border-left: 3px solid var(--olive); background: #fff; padding: 9px 11px; }
+  .q-warranty p { font-size: 8.8px; line-height: 1.55; color: var(--muted); margin-top: 6px; }
+  .q-prices { border: 1px solid var(--rule); background: var(--sand); padding: 9px 12px; display: grid; gap: 6px; align-content: center; }
+  .q-price { display: flex; justify-content: space-between; gap: 12px; font-size: 9.5px; color: var(--muted); }
+  .q-price dt { font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; }
+  .q-price--off dd, .q-price--off dt { color: ${C.brick}; }
+  .q-price--final {
+    border-top: 1px solid var(--rule); padding-top: 6px; font-size: 12px;
+    color: var(--olive-deep); font-weight: 800;
+  }
+  .q-price--final dd { font-size: 14px; }
+
+  /* ─── Observaciones y condiciones comerciales ─── */
+  .q-terms { border: 1px solid var(--rule); padding: 9px 11px; }
+  .q-terms ol { margin: 6px 0 0; padding-left: 16px; display: grid; gap: 4px; }
+  .q-terms li { font-size: 8.8px; line-height: 1.5; color: var(--muted); }
+  .q-obs { margin-top: 10px; font-size: 8.8px; line-height: 1.55; color: var(--muted); }
+  .q-obs h4 { font-size: 9px; font-weight: 800; letter-spacing: 0.5px; color: var(--olive-deep); text-transform: uppercase; margin-bottom: 4px; }
 
   /* ─── Pie ─── */
   .q-foot {
@@ -452,13 +499,9 @@ ${printBar}
     <div class="q-head__seam"></div>
     <div class="q-head__meta">
       <div class="q-title">
-        <h1>COTIZACIÓN</h1>
-        <span class="q-num">${esc(quoteNumber)}</span>
-      </div>
-      <div class="q-facts">
-        <div class="q-fact"><div class="q-fact__k">${icon('calendar')} FECHA</div><div class="q-fact__v">${esc(issueDate)}</div></div>
-        <div class="q-fact"><div class="q-fact__k">${icon('calendar')} VÁLIDO HASTA</div><div class="q-fact__v">${esc(validUntil)}</div></div>
-        <div class="q-fact"><div class="q-fact__k">${icon('doc')} ELABORADO POR</div><div class="q-fact__v">${esc(COMPANY.brandName)}</div></div>
+        <h1>COTIZACIÓN<br>DE SERVICIOS</h1>
+        <span class="q-num">CÓDIGO: ${esc(quoteNumber)}</span>
+        <span class="q-sub">Propuesta de asesoría integral de tesis</span>
       </div>
     </div>
   </header>
@@ -467,60 +510,62 @@ ${printBar}
     ${monogram('q-watermark', markSrc)}
 
     <div class="q-intro">
-      <div class="q-client">
-        <div class="q-h">${icon('user')} Datos del cliente</div>
-        <dl>
-          <div class="q-field">${icon('user')}<div><dt>Cliente</dt><dd>${esc(clientName)}</dd></div></div>
-          <div class="q-field">${icon('career')}<div><dt>Carrera</dt><dd>${esc(career)}</dd></div></div>
-          <div class="q-field">${icon('mail')}<div><dt>Correo</dt><dd>${esc(lead.email || '—')}</dd></div></div>
-          <div class="q-field">${icon('phone')}<div><dt>Teléfono</dt><dd>${esc(lead.phone || '—')}</dd></div></div>
+      <div class="q-box">
+        <div class="q-box__head"><div class="q-h">${icon('user')} Datos del cliente</div></div>
+        <dl class="q-box__body">
+          <div class="q-line"><dt>Nombre:</dt><dd>${esc(clientName)}</dd></div>
+          <div class="q-line"><dt>Teléfono:</dt><dd>${esc(lead.phone || '—')}</dd></div>
+          <div class="q-line"><dt>Correo:</dt><dd>${esc(lead.email || '—')}</dd></div>
+          <div class="q-line"><dt>Especialidad:</dt><dd>${esc(career)}</dd></div>
+          <div class="q-line"><dt>Universidad:</dt><dd>${esc(university)}</dd></div>
         </dl>
       </div>
-      <div class="q-rule-v"></div>
-      <div class="q-present">
-        <div class="q-h">Presentación</div>
-        <p>Estimados señores,</p>
-        <p>Agradecemos la oportunidad de presentar nuestra propuesta. En ${esc(COMPANY.brandName)} ofrecemos soluciones personalizadas que impulsan su crecimiento. Quedamos atentos a cualquier consulta.</p>
-        <p>Atentamente,<br><span class="q-sign">${esc(COMPANY.brandName)}</span></p>
+      <div class="q-box q-box--offer">
+        <div class="q-box__head"><div class="q-h">${icon('calendar')} Condiciones de la oferta</div></div>
+        <dl class="q-box__body">
+          <div class="q-line"><dt>Fecha emisión:</dt><dd>${esc(issueDate)}</dd></div>
+          <div class="q-line"><dt>Vigencia oferta:</dt><dd>${esc(validUntil)}</dd></div>
+          <div class="q-line"><dt>Tiempo estimado:</dt><dd>${esc(estimatedTime)}</dd></div>
+          <div class="q-line"><dt>Estado cotización:</dt><dd>${esc(statusLabel)}</dd></div>
+        </dl>
       </div>
     </div>
 
-    <table class="q-table">
-      <thead>
-        <tr>
-          <th>N°</th>
-          <th class="q-desc-h">Descripción</th>
-          <th>Cant.</th>
-          <th>Precio unit.</th>
-          <th>Subtotal</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td class="q-n">01</td>
-          <td><span class="q-concept">${icon('doc')} ${esc(conceptTitle)}</span></td>
-          <td class="q-c">${quantity}</td>
-          <td class="q-r">${formatMoney(unitPrice, currency)}</td>
-          <td class="q-r">${formatMoney(total, currency)}</td>
-        </tr>
-        ${scopeRow}
-      </tbody>
-    </table>
-
-    <div class="q-summary">
-      <div class="q-obs">
-        <h4>Observaciones</h4>
-        ${observations || '&nbsp;'}
+    <section class="q-svc">
+      <div class="q-svc__head">
+        <span>Descripción del servicio y entregables incluidos</span>
+        <span>Valor oficial</span>
       </div>
-      <div class="q-total-k">TOTAL</div>
-      <div class="q-total-v">${formatMoney(total, currency)}</div>
+      <div class="q-svc__body">
+        <div class="q-svc__items">
+          <div class="q-svc__title">${icon('doc')} ${esc(conceptTitle)}</div>
+          ${serviceSubtitle ? `<p class="q-svc__sub">${esc(serviceSubtitle)}</p>` : ''}
+          <ul class="q-svc__list">
+            ${scopeItems.map((item) => `<li>${item.label ? `<strong>${esc(item.label)}:</strong> ` : ''}${esc(item.text)}</li>`).join('')}
+          </ul>
+        </div>
+        <div class="q-svc__price">${formatMoney(regularAmount || total, currency)}</div>
+      </div>
+    </section>
+
+    <div class="q-deal">
+      <div class="q-warranty">
+        <div class="q-h">${icon('shield')} Garantía y asesoría continua</div>
+        <p>${esc(warrantyText)}</p>
+      </div>
+      <dl class="q-prices">
+        ${regularAmount ? `
+          <div class="q-price"><dt>Precio regular</dt><dd>${formatMoney(regularAmount, currency)}</dd></div>
+          <div class="q-price q-price--off"><dt>Descuento exclusivo</dt><dd>- ${formatMoney(regularAmount - total, currency)}</dd></div>
+        ` : ''}
+        <div class="q-price q-price--final"><dt>Precio final acordado</dt><dd>${formatMoney(total, currency)}</dd></div>
+      </dl>
     </div>
 
     <div class="q-terms">
-      <div class="q-term">${icon('clock')}<h5>Tiempo de entrega</h5><p>Según cronograma acordado y explicado</p></div>
-      <div class="q-term">${icon('card')}<h5>Forma de pago</h5><p>Medios de pago según convenga al cliente</p></div>
-      <div class="q-term">${icon('shield')}<h5>Garantía</h5><p>Garantizamos todo mediante un contrato</p></div>
-      <div class="q-term">${icon('calendar')}<h5>Validez de la oferta</h5><p>La cotización tiene validez hasta la fecha indicada</p></div>
+      <div class="q-h">${icon('card')} Condiciones comerciales</div>
+      <ol>${commercialTerms.map((term) => `<li>${esc(term)}</li>`).join('')}</ol>
+      ${observations ? `<div class="q-obs"><h4>Observaciones</h4>${observations}</div>` : ''}
     </div>
   </div>
 
