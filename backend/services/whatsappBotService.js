@@ -244,17 +244,18 @@ function isRealWaId(waId) {
 const INACTIVITY_NUDGE_MS = 60 * 60 * 1000;
 const INACTIVITY_FREEZE_MS = 60 * 60 * 1000;
 
-// Los recordatorios salen en este orden, uno por cada intento. El texto
-// CAMBIA a propósito: antes había uno solo, hardcodeado, y un contacto que
-// contestaba algo entre medio reiniciaba el ciclo (clearNudge borra
-// `nudge_sent_at`) y recibía el MISMO mensaje palabra por palabra — que es
-// justo lo que lo delata como bot. El segundo es más suave que el primero:
-// se manda a alguien que ya dejó de contestar una vez, y apurarlo ahí
-// espanta. Ninguno de los dos le reclama al contacto ("seguimos esperando tu
+// Los recordatorios salen en este orden, uno por cada intento. Hoy es uno
+// solo: por decisión del equipo el bot insiste una vez y ya. Insistir dos
+// veces recuperaba algún lead más, pero también es lo que hace que a un bot lo
+// bloqueen. El texto no le reclama nada al contacto ("seguimos esperando tu
 // respuesta" ponía la deuda de su lado).
+//
+// Si algún día vuelven a ser dos, basta con añadir el texto del segundo aquí:
+// MAX_INACTIVITY_NUDGES sale del largo de esta lista, y el mensaje debe ser
+// DISTINTO del primero — repetir el mismo palabra por palabra es justo lo que
+// delata a un bot.
 const INACTIVITY_NUDGE_TEXTS = [
-  '¿Sigues por ahí? Cuando tengas un momento me cuentas 👀',
-  'Te leo cuando puedas, sin apuro 🙌'
+  '¿Sigues por ahí? Cuando tengas un momento me cuentas 👀'
 ];
 
 // Tras este número de recordatorios en la MISMA conversación el bot deja de
@@ -263,15 +264,32 @@ const INACTIVITY_NUDGE_TEXTS = [
 // que el tope vale para toda la conversación y no por racha de silencio.
 const MAX_INACTIVITY_NUDGES = INACTIVITY_NUDGE_TEXTS.length;
 
-// El recordatorio de inactividad solo sale en este rango (hora de Lima,
-// [desde, hasta)).
-// Caso real: leads que escribieron pasada la medianoche recibían el
-// recordatorio a las 2–5 a.m. — invasivo, y a la hora siguiente quedaban
-// congelados sin haber tenido chance real de responder. Fuera del rango el
-// recordatorio se aplaza hasta la mañana; el plazo para congelar corre desde
-// que se manda de verdad (nudge_sent_at), así que también se aplaza.
-const NUDGE_QUIET_END_HOUR = 8;
-const NUDGE_QUIET_START_HOUR = 21;
+// Franja de SILENCIO del recordatorio de inactividad (hora de Lima, [desde,
+// hasta)): entre la 1 y las 5 de la madrugada el bot no manda nada, lo aplaza
+// para cuando termine. El plazo para congelar corre desde que el recordatorio
+// se manda de verdad (nudge_sent_at), así que también se aplaza — un lead que
+// escribió de madrugada no se congela sin haber tenido chance de responder.
+//
+// La franja la fijó el equipo. Es estrecha a propósito: fuera de ella el bot
+// puede escribir, incluso a medianoche. Si algún día aparecen quejas por la
+// hora, estos dos números son lo único que hay que mover.
+const NUDGE_QUIET_START_HOUR = 1;
+const NUDGE_QUIET_END_HOUR = 5;
+
+/**
+ * ¿Esa hora de Lima cae dentro de la franja de silencio?
+ *
+ * La ventana puede cruzar la medianoche (21→8) o no (1→5), y la comparación
+ * correcta es distinta en cada caso: con la fórmula de una sola forma
+ * (`hora < fin || hora >= inicio`), una franja 1→5 da "siempre en silencio" y
+ * el bot dejaría de mandar seguimientos para siempre. Por eso se distinguen
+ * los dos casos en vez de escribir la comparación a mano en cada sitio.
+ */
+export function isWithinQuietHours(hour, start = NUDGE_QUIET_START_HOUR, end = NUDGE_QUIET_END_HOUR) {
+  return start < end
+    ? hour >= start && hour < end
+    : hour >= start || hour < end;
+}
 
 // Estado de una sesión congelada por inactividad. Antes se marcaba como
 // "completed" y el bot ya no le respondía a quien volvía a escribir más
@@ -795,13 +813,47 @@ function formatTimeUntil(startTime) {
  * Pide: solo letras (con tildes/ñ, guion o apóstrofo internos), 2 a 14
  * caracteres, con alguna vocal y sin mezclas tipo "camelCase".
  */
+/**
+ * Palabras que encabezan un "nombre" de perfil sin ser un nombre de pila.
+ * Caso real: el perfil se llamaba "La Vida Continua" y el bot abrió con
+ * "¡Hola, La!". Un saludo sin nombre se lee bien; uno con la palabra
+ * equivocada delata que nadie está leyendo del otro lado.
+ */
+const NOT_A_FIRST_NAME = new Set([
+  'la', 'el', 'los', 'las', 'un', 'una', 'unos', 'unas', 'mi', 'tu', 'su',
+  'de', 'del', 'con', 'por', 'para', 'don', 'dona', 'sr', 'sra', 'srta',
+  'ing', 'lic', 'dr', 'dra', 'prof', 'yo', 'soy', 'hola', 'buenas',
+  'usuario', 'cliente', 'contacto', 'grupo', 'team', 'the'
+]);
+
 function looksLikeRealFirstName(token) {
   const t = String(token || '').trim();
-  if (t.length < 2 || t.length > 14) return false;
+  // Mínimo 3 letras: en español un nombre de pila de dos no existe en la
+  // práctica, y ese umbral es lo que dejaba pasar artículos como "La".
+  if (t.length < 3 || t.length > 14) return false;
   if (!/^[\p{L}][\p{L}'’-]*$/u.test(t)) return false;   // dígitos, @, _, ., espacios, emojis → fuera
   if (/\p{Ll}\p{Lu}/u.test(t)) return false;             // "JulinhoCal", "McLovin"
   if (!/[aeiouáéíóúüAEIOUÁÉÍÓÚÜ]/.test(t)) return false;  // sin vocales no es un nombre
+  if (NOT_A_FIRST_NAME.has(normalize(t))) return false;
   return true;
+}
+
+/**
+ * ¿Ese valor es basura y no un dato? Se usa antes de guardar —y sobre todo
+ * antes de repetirle al contacto— la carrera o la universidad que se extrajo.
+ *
+ * Casos reales: "Perfecto: Yy", "¡Hola, La!". Repetir una respuesta sin
+ * sentido como si se hubiera entendido es peor que no mencionarla: el
+ * contacto ve que el bot no está leyendo.
+ */
+export function looksLikeGarbageValue(text) {
+  const t = normalize(String(text || '').trim());
+  if (!t) return true;
+  if (t.length < 3) return true;                     // "Yy", "xd", "aa"
+  if (!/[aeiou]/.test(t)) return true;               // sin vocales
+  if (/^(.)\1*$/.test(t.replace(/\s/g, ''))) return true;  // "aaa", "yyyy"
+  if (!/[a-z]/.test(t)) return true;                 // solo números/símbolos
+  return false;
 }
 
 function firstNameOf(fullName) {
@@ -1109,6 +1161,11 @@ export class WhatsappBotService {
     // wa_id -> timestamp (reservado) del próximo envío permitido, para respetar
     // la espera mínima estricta entre mensajes incluso con envíos concurrentes.
     this.lastSentAt = new Map();
+    // wa_id -> último texto enviado, para no mandar dos veces seguidas el
+    // mismo mensaje (ver `send`). En memoria a propósito: solo interesa el
+    // mensaje inmediatamente anterior, y tras un reinicio no hay duplicado
+    // que evitar porque tampoco hay turno en curso.
+    this.lastSentText = new Map();
     // wa_id -> Promise del turno en curso. TODO lo que le responde al contacto
     // pasa por esta cola: nunca corren dos turnos en paralelo para el mismo
     // contacto (eso duplicaba mensajes y rompía la espera entre ellos).
@@ -1286,8 +1343,21 @@ export class WhatsappBotService {
 
     if (waitMs > 0) await sleep(waitMs);
 
+    // Nunca dos mensajes seguidos prácticamente idénticos. La conversación
+    // libre ya tenía su propio filtro, pero los pasos del agendamiento mandan
+    // por aquí directo y podían repetir la misma pregunta palabra por palabra
+    // (el contacto escribe en ráfaga, dos turnos se cruzan y recibe la misma
+    // lista de horarios dos veces seguidas). El umbral es alto a propósito:
+    // solo se calla el duplicado real, no una reformulación.
+    const previous = this.lastSentText.get(waId);
+    if (previous && messageSimilarity(text, previous) >= 0.9) {
+      this.logActivity({ type: 'send_skipped_duplicate', waId, text });
+      return;
+    }
+
     try {
       await this.whatsappMessageService.sendTextMessage(waId, text);
+      this.lastSentText.set(waId, text);
       // Ancla el próximo gap al envío real (por si el sleep se desvió), sin
       // bajar de lo ya reservado.
       this.lastSentAt.set(waId, Math.max(Date.now(), sendAt));
@@ -1736,6 +1806,17 @@ export class WhatsappBotService {
     if (extracted.problem) answers.problem = extracted.problem;
     if (extracted.location) answers.location = extracted.location;
     if (extracted.level) answers.level = extracted.level;
+    // Un valor sin sentido no se guarda ni se repite: "Perfecto: Yy" le dice
+    // al contacto que nadie está leyendo lo que escribe.
+    if (extracted.field && looksLikeGarbageValue(extracted.field)) {
+      this.logActivity({ type: 'garbage_value_ignored', waId, campo: 'carrera', valor: extracted.field });
+      delete extracted.field;
+    }
+    if (extracted.university && looksLikeGarbageValue(extracted.university)) {
+      this.logActivity({ type: 'garbage_value_ignored', waId, campo: 'universidad', valor: extracted.university });
+      delete extracted.university;
+    }
+
     if (extracted.field) answers.field = normalizeCareer(extracted.field);
     if (extracted.university && extracted.university !== answers.university) {
       // F4 — Las siglas peruanas se confunden fácil (casos reales: "UNAC"
@@ -3075,7 +3156,6 @@ ${numberedList(fullSlotLabels(offer))}
     delete scheduling.pendingSlot;
     scheduling.slots = orderSlotsForDisplay(slots);
     this._clearStepMisses(scheduling);
-    scheduling.emailAttempts = 0;
 
     await this.updateSession(waId, { status: 'scheduling_time', answers: JSON.stringify(answers) });
     this.logActivity({ type: 'slot_choice_reopened', waId, text: trimmed, date: parsed.date, time: parsed.preferredTime });
@@ -3168,13 +3248,15 @@ ${numberedList(fullSlotLabels(offer))}
       // que aquí se leía como un correo mal escrito.
       if (await this._reopenSlotChoiceIfTimeChange(waId, answers, scheduling, trimmed)) return;
 
-      scheduling.emailAttempts = (scheduling.emailAttempts || 0) + 1;
-      if (scheduling.emailAttempts < 2) {
-        await this.updateSession(waId, { answers: JSON.stringify(answers) });
-        await this.send(waId, 'No parece un correo válido 🤔 ¿me lo confirmas? (ej: nombre@correo.com). Si querías cambiar el horario, dime el día o la hora que prefieres.');
-        return;
-      }
-      // Tras 2 intentos fallidos, se continúa sin correo.
+      // No es un correo y no es un cambio de horario. Antes se le respondía
+      // "No parece un correo válido 🤔" y se le volvía a pedir: respuestas
+      // como "Voy", "Este medio" o "Perdón, pensé que era de noche" chocaban
+      // contra ese muro y la conversación se trababa ahí.
+      //
+      // El correo es un extra —sirve para mandarle la invitación del
+      // calendario—, no un requisito para tener la reunión. Así que no se
+      // pregunta dos veces: se sigue sin él y el link va por WhatsApp.
+      this.logActivity({ type: 'email_skipped_not_an_email', waId, text: trimmed });
       scheduling.emailSkipped = true;
     }
 
@@ -3917,7 +3999,7 @@ ${numberedList(fullSlotLabels(offer))}
     }
 
     const limaHour = Number(LIMA_TIME_FORMATTER.format(new Date(now)).slice(0, 2));
-    const isQuietHours = limaHour < NUDGE_QUIET_END_HOUR || limaHour >= NUDGE_QUIET_START_HOUR;
+    const isQuietHours = isWithinQuietHours(limaHour);
 
     for (const session of awaitingReply) {
       if (withUpcomingMeeting.has(session.wa_id)) continue;
