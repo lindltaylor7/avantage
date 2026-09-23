@@ -17,6 +17,7 @@ import InstagramInteractionsView from '../views/InstagramInteractionsView.vue';
 import CampaignsView from '../views/CampaignsView.vue';
 import FinanceView from '../views/FinanceView.vue';
 import ContractsView from '../views/ContractsView.vue';
+import DocumentsView from '../views/DocumentsView.vue';
 import PortalLoginView from '../views/portal/PortalLoginView.vue';
 import PortalActivateView from '../views/portal/PortalActivateView.vue';
 import PortalForgotPasswordView from '../views/portal/PortalForgotPasswordView.vue';
@@ -49,6 +50,7 @@ const router = createRouter({
     { path: '/admin/campaigns', name: 'campaigns', component: CampaignsView, meta: { requiresAuth: true, permission: 'leads.view' } },
     { path: '/admin/finance', name: 'finance', component: FinanceView, meta: { requiresAuth: true, permission: 'finance.view' } },
     { path: '/admin/contracts', name: 'contracts', component: ContractsView, meta: { requiresAuth: true, permission: 'contracts.manage' } },
+    { path: '/admin/documents', name: 'documents', component: DocumentsView, meta: { requiresAuth: true, permission: 'leads.view' } },
     { path: '/admin/whatsapp', name: 'whatsapp', component: WhatsAppView, meta: { requiresAuth: true, permission: 'leads.view' } },
     { path: '/admin/availability', name: 'availability', component: AvailabilityView, meta: { requiresAuth: true } },
     { path: '/admin/bot-script', name: 'bot-script', component: BotScriptView, meta: { requiresAuth: true, permission: 'leads.view' } },

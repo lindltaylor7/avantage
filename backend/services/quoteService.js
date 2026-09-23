@@ -74,4 +74,17 @@ export class QuoteService {
   async getQuotesByLead(leadId) {
     return db('quotes').where({ lead_id: leadId }).orderBy('created_at', 'desc');
   }
+
+  /**
+   * Todas las cotizaciones con el nombre de su lead, de la más reciente a la
+   * más antigua. La usa el módulo de Documentos, que lista cotizaciones y
+   * contratos juntos (ver `documentService.js`).
+   */
+  async listAll() {
+    return db('quotes')
+      .leftJoin('leads', 'leads.id', 'quotes.lead_id')
+      .select('quotes.*', 'leads.full_name as lead_name')
+      .orderBy('quotes.created_at', 'desc')
+      .orderBy('quotes.id', 'desc');
+  }
 }

@@ -19,6 +19,7 @@ import { buildQuotationDocument } from './services/quotationDocument.js';
 import { buildPaymentReceiptDocument } from './services/paymentReceiptDocument.js';
 import { buildPaymentReceiptPdf, receiptPdfFilename } from './services/paymentReceiptPdf.js';
 import { LeadNoteService } from './services/leadNoteService.js';
+import { DocumentService } from './services/documentService.js';
 import { CampaignService } from './services/campaignService.js';
 import { MetaAdsService } from './services/metaAdsService.js';
 import { TikTokAdsService } from './services/tiktokAdsService.js';
@@ -137,6 +138,7 @@ const financeService = new FinanceService();
 const financeLedgerService = new FinanceLedgerService();
 // El cronograma de pagos del contrato son las cuotas reales de Finanzas.
 const contractService = new ContractService({ financeLedgerService });
+const documentService = new DocumentService({ quoteService, contractService });
 const whatsappBotService = new WhatsappBotService({ ollamaService, emailService, leadService, whatsappMessageService, settingsService: whatsappBotSettingsService, googleCalendarService, scheduledMeetingService, notificationService });
 const whatsappWebhookService = new WhatsappWebhookService({ botService: whatsappBotService });
 const ycloudWebhookService = new YCloudWebhookService({ botService: whatsappBotService });
@@ -2776,6 +2778,29 @@ app.get('/api/contracts/client-leads', requireAuth, requirePermission('contracts
     res.json(await contractService.listClientLeads());
   } catch (error) {
     sendContractError(res, error, 'Error al listar los clientes.');
+  }
+});
+
+/**
+ * Módulo de Documentos: cotizaciones y contratos en una sola lista, de lo más
+ * reciente a lo más antiguo, buscable por el nombre del lead.
+ *
+ * Pide `leads.view` (el mismo permiso que las cotizaciones) y añade los
+ * contratos SOLO si quien pregunta además tiene `contracts.manage`: este
+ * módulo no puede ser la puerta de atrás que se salte ese permiso. La
+ * respuesta dice en `kinds` qué se incluyó, para que la pantalla lo explique
+ * en vez de mostrar una lista incompleta sin avisar.
+ */
+app.get('/api/documents', requireAuth, requirePermission('leads.view'), async (req, res) => {
+  try {
+    const result = await documentService.list({
+      search: req.query.search || null,
+      includeContracts: !!req.user.permissions?.includes('contracts.manage')
+    });
+    res.json(result);
+  } catch (error) {
+    console.error('❌ Error al listar los documentos:', error);
+    res.status(500).json({ error: 'Error al listar los documentos.', details: error.message });
   }
 });
 

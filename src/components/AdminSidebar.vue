@@ -181,6 +181,21 @@
         </router-link>
 
         <router-link
+          v-if="hasPermission('leads.view')"
+          to="/admin/documents"
+          class="nav-item"
+          :class="{ 'is-active': $route.path === '/admin/documents' }"
+          @click="closeMobile"
+        >
+          <svg class="nav-icon" style="color: var(--accent-amber);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+            <rect x="8" y="2" width="8" height="4" rx="1"/>
+            <path d="M8 11h8M8 15h5"/>
+          </svg>
+          <span class="nav-label" v-if="!isCollapsed">Documentos</span>
+        </router-link>
+
+        <router-link
           v-if="hasPermission('contracts.manage')"
           to="/admin/contracts"
           class="nav-item"
