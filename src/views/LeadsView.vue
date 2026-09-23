@@ -929,8 +929,8 @@
               </button>
             </p>
             <p v-else-if="!quotedColumn" class="quote-move-line quote-move-hint">
-              Ninguna columna está marcada como <strong>Etapa de Cotización</strong>, así que el lead no se movió.
-              Puedes marcarla al editar una columna del funnel.
+              Ninguna columna es la etapa de cotización, así que el lead no se movió. Marca una con
+              <strong>💰 Etapa de Cotización</strong> al editarla, o nómbrala "Con cotización" y se usará sola.
             </p>
 
             <button
@@ -1744,7 +1744,21 @@ async function moveLeadToStatus(lead, newStatus) {
 }
 
 /** Columna marcada como etapa de cotización, si el equipo definió alguna. */
-const quotedColumn = computed(() => columns.value.find((c) => c.quoted) || null);
+/**
+ * Columna a la que va un lead recién cotizado: la marcada como etapa de
+ * cotización o, si nadie la marcó, la que se llama así. Es el mismo criterio
+ * que aplica el backend (`funnelColumnService.getQuotedColumn`), replicado acá
+ * solo para saber si hace falta avisar que el lead no se va a mover.
+ */
+const quotedColumn = computed(() => {
+  const flagged = columns.value.find((c) => c.quoted);
+  if (flagged) return flagged;
+  const named = (label) => {
+    const clean = String(label || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    return /cotiza/.test(clean) && !/\bsin\s+cotiza/.test(clean);
+  };
+  return columns.value.find((c) => named(c.label)) || null;
+});
 
 /** Mismo formato que imprime el documento (ver quotationDocument.js). */
 function formatQuoteNumber(quote) {

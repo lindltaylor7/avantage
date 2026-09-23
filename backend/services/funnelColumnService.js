@@ -1,6 +1,21 @@
 import { db } from '../db/connection.js';
 
 /**
+ * ¿El nombre de la columna dice que ahí van los leads ya cotizados? Se ignoran
+ * tildes y mayúsculas ("Con Cotización", "cotizado", "COTIZACION ENVIADA"), y
+ * se excluye "sin cotizar", que significa exactamente lo contrario.
+ */
+export function isQuotedLabel(label) {
+  const clean = String(label || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .trim();
+  if (!clean || /\bsin\s+cotiza/.test(clean)) return false;
+  return /cotiza/.test(clean);
+}
+
+/**
  * Servicio de acceso a datos para las columnas (etapas) del Kanban de Leads.
  * Reemplaza el almacenamiento previo en localStorage del navegador.
  */
@@ -35,9 +50,26 @@ export class FunnelColumnService {
     await db('funnel_columns').whereNot({ key }).update({ quoted: false });
   }
 
-  /** La columna marcada como etapa de cotización, o null si no hay ninguna. */
+  /**
+   * La columna a la que se mueve un lead recién cotizado.
+   *
+   * Primero manda la marca explícita (`quoted`), que es la que el equipo
+   * puede poner en cualquier columna aunque se llame distinto. Si nadie la
+   * marcó —el caso normal en un funnel armado antes de que existiera la
+   * marca—, se cae a la columna cuyo NOMBRE habla de cotización ("Con
+   * cotización", "Cotizado"): es lo que el equipo espera que pase sin haber
+   * configurado nada, y no mover al lead era peor que acertar por el nombre.
+   *
+   * Si hay varias candidatas por nombre se toma la primera del tablero, que
+   * es el orden en que el lead avanza. Devuelve null solo cuando no hay
+   * ninguna, y ahí el panel avisa que el lead se quedó donde estaba.
+   */
   async getQuotedColumn() {
-    return (await db('funnel_columns').where({ quoted: true }).first()) || null;
+    const flagged = await db('funnel_columns').where({ quoted: true }).first();
+    if (flagged) return flagged;
+
+    const columns = await db('funnel_columns').orderBy('position', 'asc');
+    return columns.find((column) => isQuotedLabel(column.label)) || null;
   }
 
   async getColumnByKey(key) {
