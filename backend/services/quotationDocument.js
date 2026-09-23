@@ -108,7 +108,15 @@ export function formatQuoteNumber(quote) {
 
 function formatLongDate(value) {
   if (!value) return '—';
-  const date = value instanceof Date ? value : new Date(value);
+  // Una fecha "YYYY-MM-DD" la interpreta `new Date` como medianoche UTC, que
+  // en Perú (UTC-5) cae el día anterior: el papel decía un día menos que la
+  // fila de Finanzas. Se arma en horario local.
+  const dateOnly = typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value);
+  const date = value instanceof Date
+    ? value
+    : (dateOnly
+      ? new Date(Number(value.slice(0, 4)), Number(value.slice(5, 7)) - 1, Number(value.slice(8, 10)))
+      : new Date(value));
   if (Number.isNaN(date.getTime())) return '—';
   return date.toLocaleDateString('es-PE', { day: 'numeric', month: 'long', year: 'numeric' });
 }

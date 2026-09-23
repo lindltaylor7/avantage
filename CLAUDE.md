@@ -128,6 +128,12 @@ antes de tocar el arranque de producción.
   texto plano, extraído solo con `zlib`, sin dependencias nuevas — o los primeros bytes si es una
   imagen. El recorte se hace en el servidor: el archivo completo nunca viaja al navegador antes de
   que el pago esté verificado.
+- Los **documentos de marca** (cotización, contrato, comprobante de pago) comparten paleta, logo e
+  iconos desde `quotationDocument.js`: si cambia la marca, cambian los tres juntos. El comprobante
+  tiene además una versión **PDF** (`paymentReceiptPdf.js`, dibujada con `pdf-lib` en JavaScript
+  puro porque el hosting compartido no corre un navegador headless): es la que se adjunta al correo
+  del cliente y la que muestra la vista previa antes de enviarlo, así que lo que se ve es
+  exactamente lo que se manda.
 - **RBAC**: `roles` ↔ `permissions` (N:N vía `role_permissions`) ↔ `users` (N:1 vía `role_id`). Los
   permisos son "herramientas" habilitables (`leads.view`, `projects.view`, `roles.manage`,
   `finance.view`, ...); se resuelven una vez en el login y se embeben en el JWT.

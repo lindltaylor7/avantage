@@ -2,7 +2,8 @@ import { fileURLToPath } from 'url';
 import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
 import { BRAND_MARK_CID, BRAND_MARK_PATH, buildQuotationDocument, formatQuoteNumber } from './quotationDocument.js';
-import { buildPaymentReceiptDocument, formatReceiptNumber } from './paymentReceiptDocument.js';
+import { formatReceiptNumber } from './paymentReceiptDocument.js';
+import { buildPaymentReceiptPdf, receiptPdfFilename } from './paymentReceiptPdf.js';
 dotenv.config();
 
 /** Escapa la nota libre del asesor antes de meterla en el cuerpo HTML. */
@@ -227,15 +228,35 @@ export class EmailService {
 
     const fromAddress = process.env.SMTP_FROM || '"Avantage Group" <tesis@avantagegroup.pe>';
     const number = formatReceiptNumber(income);
-    const document = includeDocument ? buildPaymentReceiptDocument({ income, forEmail: true }) : '';
-    // La nota del asesor va ANTES del comprobante: es lo que el cliente lee
-    // primero, y el documento queda como constancia debajo.
+
+    // El comprobante va como PDF adjunto, no incrustado en el cuerpo: así el
+    // cliente se queda con un archivo que puede guardar, reenviar o presentar
+    // en un trámite. Si el dibujado falla, el correo sale igual con la nota y
+    // los adjuntos del asesor — quedarse sin avisar del pago es peor.
+    let receiptPdf = null;
+    if (includeDocument) {
+      try {
+        receiptPdf = {
+          filename: receiptPdfFilename(income),
+          content: await buildPaymentReceiptPdf({ income }),
+          contentType: 'application/pdf'
+        };
+      } catch (error) {
+        console.error('❌ No se pudo generar el PDF del comprobante:', error.message);
+      }
+    }
+
+    // La nota del asesor va primero: es lo que el cliente lee al abrir.
     const note = (message || '').trim();
     const noteHtml = note
-      ? `<p style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5">${escapeHtml(note).replace(/\n/g, '<br>')}</p>`
+      ? `<p style="font-family:Arial,sans-serif;font-size:14px;line-height:1.55">${escapeHtml(note).replace(/\n/g, '<br>')}</p>`
       : '';
-    const htmlContent = `${noteHtml}${document}` ||
-      `<p style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5">Adjuntamos el comprobante de tu pago ${escapeHtml(number)}.</p>`;
+    const bodyLine = receiptPdf
+      ? `Adjuntamos el comprobante de tu pago <strong>${escapeHtml(number)}</strong> en formato PDF.`
+      : 'Adjuntamos la documentación de tu pago.';
+    const htmlContent = `${noteHtml}<p style="font-family:Arial,sans-serif;font-size:14px;line-height:1.55">${bodyLine}</p>` +
+      '<p style="font-family:Arial,sans-serif;font-size:13px;line-height:1.55;color:#5d5e51">' +
+      'Gracias por tu confianza.<br><strong>Avantage Group</strong></p>';
 
     const mailOptions = {
       from: fromAddress,
@@ -243,13 +264,7 @@ export class EmailService {
       subject: `🧾 Comprobante de pago ${number} — Avantage Group`,
       html: htmlContent,
       attachments: [
-        // El logo va embebido por CID y solo lo referencia el documento
-        // generado: sin él sería un adjunto fantasma en el correo.
-        ...(includeDocument ? [{
-          filename: 'avantage-group.png',
-          path: fileURLToPath(BRAND_MARK_PATH),
-          cid: BRAND_MARK_CID
-        }] : []),
+        ...(receiptPdf ? [receiptPdf] : []),
         ...attachments
       ]
     };

@@ -17,6 +17,7 @@ import { ContractTemplateService } from './services/contractTemplateService.js';
 import { buildContractDocument } from './services/contractDocument.js';
 import { buildQuotationDocument } from './services/quotationDocument.js';
 import { buildPaymentReceiptDocument } from './services/paymentReceiptDocument.js';
+import { buildPaymentReceiptPdf, receiptPdfFilename } from './services/paymentReceiptPdf.js';
 import { CampaignService } from './services/campaignService.js';
 import { MetaAdsService } from './services/metaAdsService.js';
 import { CampaignExportService } from './services/campaignExportService.js';
@@ -1028,6 +1029,49 @@ function assertVerifiedIncome(income, res) {
   return true;
 }
 
+/**
+ * Datos de contacto del cliente de un cierre, para verlos y corregirlos desde
+ * Finanzas.
+ *
+ * Existe aparte de `/api/leads/:id` porque el permiso es otro: quien lleva la
+ * caja no necesariamente puede entrar al funnel de ventas, y estos son los
+ * datos que salen impresos en el comprobante que él mismo emite (nombre, DNI
+ * y correo). Solo se tocan esos cuatro campos.
+ */
+app.get('/api/finance/leads/:id/contact', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const lead = await leadService.getLeadById(req.params.id);
+    if (!lead) return res.status(404).json({ error: 'Cliente no encontrado.' });
+    res.json({
+      lead: {
+        id: lead.id,
+        full_name: lead.full_name,
+        dni: lead.dni,
+        email: lead.email,
+        phone: lead.phone
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error al obtener los datos del cliente:', error);
+    res.status(500).json({ error: 'Error al obtener los datos del cliente.', details: error.message });
+  }
+});
+
+app.patch('/api/finance/leads/:id/contact', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const { fullName, dni, email, phone } = req.body || {};
+    const lead = await leadService.updateLead(req.params.id, { fullName, dni, email, phone });
+    if (!lead) return res.status(404).json({ error: 'Cliente no encontrado.' });
+    console.log(`✏️ [Finanzas] Datos de contacto del cliente #${lead.id} actualizados por ${req.user.email}`);
+    res.json({
+      lead: { id: lead.id, full_name: lead.full_name, dni: lead.dni, email: lead.email, phone: lead.phone }
+    });
+  } catch (error) {
+    console.error('❌ Error al actualizar los datos del cliente:', error);
+    res.status(400).json({ error: error.message || 'Error al actualizar los datos del cliente.' });
+  }
+});
+
 app.get('/api/finance/income/:id/receipt', requireAuth, requirePermission('finance.view'), async (req, res) => {
   try {
     const income = await financeLedgerService.getIncomeById(req.params.id);
@@ -1039,6 +1083,26 @@ app.get('/api/finance/income/:id/receipt', requireAuth, requirePermission('finan
   } catch (error) {
     console.error('❌ Error al generar el comprobante de pago:', error);
     res.status(500).json({ error: 'Error al generar el comprobante de pago.', details: error.message });
+  }
+});
+
+/**
+ * El mismo comprobante en PDF: es EXACTAMENTE el archivo que se adjunta al
+ * correo, así que la vista previa de "Enviar comprobante" muestra esto y no
+ * una versión parecida.
+ */
+app.get('/api/finance/income/:id/receipt.pdf', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const income = await financeLedgerService.getIncomeById(req.params.id);
+    if (!assertVerifiedIncome(income, res)) return;
+
+    const pdf = await buildPaymentReceiptPdf({ income });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${receiptPdfFilename(income)}"`);
+    res.send(pdf);
+  } catch (error) {
+    console.error('❌ Error al generar el PDF del comprobante:', error);
+    res.status(500).json({ error: 'Error al generar el comprobante en PDF.', details: error.message });
   }
 });
 

@@ -26,3 +26,25 @@ export async function openIncomeReceipt(incomeId) {
   }
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
+
+/**
+ * Abre el comprobante en PDF: es el mismo archivo que se adjunta al correo,
+ * así que la vista previa de "Enviar comprobante" muestra exactamente lo que
+ * va a recibir el cliente.
+ */
+export async function openIncomeReceiptPdf(incomeId) {
+  const response = await apiFetch(`/api/finance/income/${incomeId}/receipt.pdf`);
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || "No se pudo generar el comprobante en PDF.");
+  }
+  const url = URL.createObjectURL(await response.blob());
+  const win = window.open(url, "_blank");
+  if (!win) {
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `comprobante-${incomeId}.pdf`;
+    link.click();
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}

@@ -17,6 +17,15 @@
         {{ group.code }}
       </span>
       <span class="deal-name">{{ group.leadName }}</span>
+      <!-- Los datos del cliente salen impresos en su comprobante: se revisan y
+           corrigen acá mismo, sin salir del libro de Finanzas. -->
+      <button
+        v-if="group.leadId"
+        type="button"
+        class="deal-contact-btn"
+        title="Ver y editar los datos del cliente (nombre, DNI, correo)"
+        @click.stop="showContact = true"
+      >👤</button>
       <span class="deal-meta">
         <span v-if="group.leadDni && !collapsed">DNI {{ group.leadDni }}</span>
         <span>{{ group.payments.length }} {{ group.payments.length === 1 ? "cuota" : "cuotas" }}</span>
@@ -97,6 +106,13 @@
 
   <p v-if="errorMessage" class="deal-alert">⚠️ {{ errorMessage }}</p>
 
+  <LeadContactModal
+    v-if="showContact"
+    :lead-id="group.leadId"
+    @close="showContact = false"
+    @saved="onContactSaved"
+  />
+
   <form v-if="isAdding" class="deal-add" @submit.prevent="addPayment">
     <div class="deal-add-grid">
       <label class="deal-field">
@@ -150,6 +166,7 @@ import { computed, reactive, ref } from "vue";
 import { apiFetch } from "../../apiClient.js";
 import { formatAmount } from "./format.js";
 import { BANCOS, CUOTAS, EMITIR_OPCIONES, calcItf } from "./incomeOptions.js";
+import LeadContactModal from "./LeadContactModal.vue";
 
 const props = defineProps({
   /** Cierre (lead) con su plan de cobro y las cuotas que se están listando. */
@@ -173,6 +190,17 @@ const pctCubierto = computed(() => {
   if (total <= 0) return 0;
   return Math.min(100, Math.round((props.group.registered / total) * 100));
 });
+
+const showContact = ref(false);
+
+/**
+ * El libro se recarga tras guardar: el nombre del cierre y el correo al que se
+ * manda el comprobante vienen del lead, así que la tabla tiene que reflejarlo.
+ */
+function onContactSaved(lead) {
+  showContact.value = false;
+  emit("saved", { message: `Datos de ${lead.full_name || 'el cliente'} actualizados.` });
+}
 
 const itfPreview = computed(() => calcItf(draft.monto));
 
@@ -420,6 +448,19 @@ async function addPayment() {
   font-size: 0.78rem;
   line-height: 1.5;
 }
+
+.deal-contact-btn {
+  margin-left: 0.35rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: var(--surface-2);
+  font-size: 0.72rem;
+  line-height: 1.3;
+  cursor: pointer;
+}
+
+.deal-contact-btn:hover { border-color: var(--primary); }
 
 .deal-gate-chip {
   padding: 0.1rem 0.45rem;

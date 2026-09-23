@@ -89,8 +89,11 @@
           Sin el comprobante generado ni archivos adjuntos, el correo lleva solo tu mensaje.
         </p>
 
+        <p v-if="includeDocument" class="send-hint">
+          Se adjunta como PDF (<strong>{{ pdfName }}</strong>), para que el cliente lo guarde o lo presente donde se lo pidan.
+        </p>
         <button v-if="includeDocument" type="button" class="preview-link" @click="openDocument">
-          👁️ Ver el comprobante antes de enviarlo
+          👁️ Ver el PDF antes de enviarlo
         </button>
 
         <p v-if="errorMessage" class="info-box send-alert">⚠️ {{ errorMessage }}</p>
@@ -119,7 +122,7 @@
 <script setup>
 import { computed, ref } from "vue";
 import { apiFetch } from "../../apiClient.js";
-import { openIncomeReceipt } from "./receiptDocument.js";
+import { openIncomeReceiptPdf } from "./receiptDocument.js";
 
 const props = defineProps({
   income: { type: Object, required: true },
@@ -144,6 +147,12 @@ const result = ref(null);
 // sobre un ingreso verificado: si no lo está, el correo nace sin él.
 const isVerified = props.income.estado === "verificado";
 const includeDocument = ref(isVerified);
+
+/** Mismo nombre que arma el backend: CP-<año>-<id a 4 dígitos>. */
+const pdfName = computed(() => {
+  const year = new Date(props.income.fecha || Date.now()).getFullYear();
+  return `Comprobante-CP-${year}-${String(props.income.id).padStart(4, "0")}.pdf`;
+});
 
 const conceptLabel = computed(() => CUOTA_LABELS[props.income.cuota] || props.income.cuota || "Pago");
 const amountLabel = computed(() => Number(props.income.monto || 0).toFixed(2));
@@ -201,7 +210,7 @@ function close() {
 
 async function openDocument() {
   try {
-    await openIncomeReceipt(props.income.id);
+    await openIncomeReceiptPdf(props.income.id);
   } catch (error) {
     errorMessage.value = error.message;
   }
