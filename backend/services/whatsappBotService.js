@@ -862,6 +862,32 @@ function firstNameOf(fullName) {
   return looksLikeRealFirstName(first) ? first : null;
 }
 
+/**
+ * Título del evento de Google Calendar de una reunión agendada por el bot.
+ *
+ * Antes era "Asesoría de tesis - {tema}", y como el tema de la mayoría de los
+ * leads es el mismo texto genérico ("Tema de tesis por definir: Caso de
+ * estudio y propuesta en Perú"), el calendario del closer mostraba varias
+ * reuniones seguidas con el título IDÉNTICO: no había forma de saber con quién
+ * era cada una sin abrirlas una por una.
+ *
+ * Por eso el identificador del lead va PRIMERO: en la vista de día y en la de
+ * agenda Google corta el título, y lo que tiene que sobrevivir al corte es con
+ * quién es la reunión. El tema pasa a la descripción, a un clic de distancia.
+ *
+ * Se usa el nombre completo y no el de pila: dos "María" en la misma semana
+ * vuelven a ser indistinguibles. Si no hay nombre utilizable se cae al
+ * teléfono y, en último caso, al id de WhatsApp — incluso un alias raro
+ * ("Julinho_Cal🤗") distingue mejor que nada.
+ */
+export function meetingEventTitle({ leadName, contactPhone = null, waId = '', isPhone = false } = {}) {
+  const name = String(leadName || '').trim();
+  const who = (name && name !== GENERIC_CONTACT_NAME)
+    ? name
+    : (contactPhone || (waIdIsPhone(waId) ? formatPhoneForAdvisor(waId) : null) || waId || 'Contacto');
+  return `${isPhone ? '📞' : '💻'} ${who} — Asesoría de tesis`;
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -3681,12 +3707,17 @@ ${numberedList(fullSlotLabels(offer))}
     const modalidadLabel = isPhone ? 'Llamada telefónica' : 'Videollamada por Google Meet';
     const discountText = scheduling.discount ? ` | Descuento aplicado: ${scheduling.discount}%` : '';
 
+    // El lead se busca ANTES de crear el evento porque su nombre va en el
+    // título (ver `meetingEventTitle`).
+    const lead = await this.leadService.findByPhone(waId);
+
     try {
       const event = await this.googleCalendarService.createMeetEvent(BOOKING_ADVISOR_USER_ID, {
-        summary: `${isPhone ? '📞' : '💻'} Asesoría de tesis - ${scheduling.topic}`,
+        summary: meetingEventTitle({ leadName: lead?.full_name, contactPhone, waId, isPhone }),
         description:
           `Agendada automáticamente por Avan (WhatsApp) con el contacto ${waId}.\n` +
           `Modalidad: ${modalidadLabel}${discountText}\n` +
+          (scheduling.topic ? `Tema: ${scheduling.topic}\n` : '') +
           (isPhone && contactPhone ? `Teléfono del lead para la llamada: ${contactPhone}\n` : '') +
           (scheduling.email ? `Correo del lead: ${scheduling.email}\n` : ''),
         startTime: slot.startTime,
@@ -3700,7 +3731,6 @@ ${numberedList(fullSlotLabels(offer))}
       delete answers.__scheduling;
       await this.updateSession(waId, { status: 'completed', answers: JSON.stringify(answers) });
 
-      const lead = await this.leadService.findByPhone(waId);
       if (lead) {
         const noteAppend = `\nReunión agendada (${isPhone ? 'telefónica' : 'Meet'}${scheduling.discount ? `, ${scheduling.discount}% dto` : ''}): ${slot.label}` +
           (isPhone && contactPhone ? ` — Tel: ${contactPhone}` : '') +
