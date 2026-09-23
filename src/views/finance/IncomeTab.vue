@@ -278,7 +278,7 @@
             </thead>
             <tbody v-for="group in paged" :key="group.key" class="deal-group">
               <tr class="deal-head-row" :class="{ 'is-collapsed': !isExpanded(group) }">
-                <td class="deal-head-cell" :colspan="8">
+                <td class="deal-head-cell" colspan="9">
                   <DealPlanHeader
                     :group="group"
                     :collapsed="!isExpanded(group)"
@@ -286,131 +286,134 @@
                     @toggle="toggleGroup(group)"
                   />
                 </td>
-                <td class="ledger-col-actions"></td>
               </tr>
               <tr
                 v-for="row in (isExpanded(group) ? group.payments : [])"
                 :key="row.id"
                 class="deal-payment-row"
-                :class="row.estado === 'pagado' ? 'ledger-row-in' : 'ledger-row-pending'"
+                :class="row.estado === 'verificado' ? 'ledger-row-in' : (row.estado === 'pagado' ? 'ledger-row-in' : 'ledger-row-pending')"
               >
                 <td class="ledger-date">
-                  {{ formatDate(row.fecha) }}
+                  <span class="cell-date-main">{{ formatDate(row.fecha) }}</span>
                   <span v-if="isOverdue(row)" class="ledger-overdue" title="La cuota venció y sigue sin cobrarse">vencida</span>
                 </td>
                 <td>
-                  <span class="ledger-eyebrow">{{ row.emitir }}</span>
-                  <span class="ledger-stack-main">{{ row.cuota }}</span>
-                  <span v-if="row.due_date" class="ledger-eyebrow">vence {{ formatDate(row.due_date) }}</span>
+                  <div class="cuota-cell">
+                    <span v-if="row.emitir" class="cuota-tag">{{ row.emitir }}</span>
+                    <span class="cuota-title">{{ row.cuota }}</span>
+                    <span v-if="row.due_date" class="cuota-due" :class="{ 'is-overdue': isOverdue(row) }">
+                      vence {{ formatDate(row.due_date) }}
+                    </span>
+                  </div>
                 </td>
                 <td class="ledger-num">
-                  <span class="ledger-amount-cur">S/</span>
-                  <span class="ledger-amount">{{ formatAmount(row.monto) }}</span>
+                  <div class="monto-cell">
+                    <span class="ledger-amount-cur">S/</span>
+                    <span class="ledger-amount">{{ formatAmount(row.monto) }}</span>
+                  </div>
                 </td>
                 <td class="ledger-num">
-                  <span v-if="Number(row.itf) > 0">{{ formatAmount(row.itf) }}</span>
+                  <span v-if="Number(row.itf) > 0" class="itf-value">{{ formatAmount(row.itf) }}</span>
                   <span v-else class="ledger-muted">—</span>
                 </td>
-                <td>{{ row.banco }}</td>
                 <td>
-                  <div class="estado-cell">
-                    <span v-if="row.estado === 'verificado'" class="pill pill-success" title="Verificado por Finanzas">
-                      ✅ verificado
+                  <span class="bank-badge">{{ row.banco }}</span>
+                </td>
+                <td>
+                  <div class="estado-clean-cell">
+                    <!-- Status pill: Verificado -->
+                    <button
+                      v-if="row.estado === 'verificado' && canVerify"
+                      type="button"
+                      class="clean-status-pill is-verificado"
+                      :disabled="verifySaving === row.id"
+                      title="Verificado por Finanzas. Clic para quitar verificación"
+                      @click="toggleVerificacion(row)"
+                    >
+                      <span class="pill-dot"></span>
+                      <span>{{ verifySaving === row.id ? '…' : 'Verificado' }}</span>
+                    </button>
+                    <span
+                      v-else-if="row.estado === 'verificado'"
+                      class="clean-status-pill is-verificado"
+                      title="Verificado por Finanzas"
+                    >
+                      <span class="pill-dot"></span>
+                      <span>Verificado</span>
                     </span>
+
+                    <!-- Status pill: Pagado / Por verificar -->
+                    <button
+                      v-else-if="row.estado === 'pagado'"
+                      type="button"
+                      class="clean-status-pill is-porverificar"
+                      :disabled="verifySaving === row.id"
+                      :title="canVerify ? 'Cobrado por el cliente. Clic para verificar' : 'Por verificar'"
+                      @click="canVerify ? toggleVerificacion(row) : toggleEstado(row)"
+                    >
+                      <span class="pill-dot"></span>
+                      <span>{{ verifySaving === row.id ? '…' : 'Por verificar' }}</span>
+                    </button>
+
+                    <!-- Status pill: Pendiente -->
                     <button
                       v-else
                       type="button"
-                      class="pill pill-toggle"
-                      :class="row.estado === 'pagado' ? 'pill-info' : 'pill-warning'"
+                      class="clean-status-pill is-pendiente"
                       :disabled="estadoSaving === row.id"
-                      title="Clic para marcarlo como cobrado o devolverlo a pendiente"
+                      title="Pendiente de pago. Clic para marcar como cobrado"
                       @click="toggleEstado(row)"
                     >
-                      {{ row.estado }}
+                      <span class="pill-dot"></span>
+                      <span>{{ estadoSaving === row.id ? '…' : 'Pendiente' }}</span>
                     </button>
 
-                    <!-- El visto bueno es exclusivo de Finanzas (finance.verify) -->
-                    <button
-                      v-if="canVerify && row.estado !== 'pendiente'"
-                      type="button"
-                      class="verify-btn"
-                      :class="{ 'is-verified': row.estado === 'verificado' }"
-                      :disabled="verifySaving === row.id"
-                      :title="row.estado === 'verificado'
-                        ? 'Quitar la verificación (vuelve a bloquear el proyecto)'
-                        : 'Verificar: empieza a sumar en Finanzas y activa el proyecto'"
-                      @click="toggleVerificacion(row)"
-                    >
-                      {{ verifySaving === row.id ? '…' : (row.estado === 'verificado' ? '✓ Verificado' : 'Verificar') }}
-                    </button>
-                    <!-- La cuota que desbloquea el proyecto tiene que gritarlo:
-                         mientras no esté verificada, el proyecto del cliente no
-                         se puede trabajar, y eso no se ve desde Proyectos. -->
+                    <!-- Warning chip only if 1st payment is NOT verified -->
                     <span
-                      v-if="row.is_initial_payment"
-                      class="initial-payment-tag"
-                      :class="row.estado === 'verificado' ? 'is-open' : 'is-blocking'"
-                      :title="row.estado === 'verificado'
-                        ? 'Primera cuota verificada: el proyecto de este cliente ya está activo.'
-                        : 'Primera cuota del cronograma: hasta que la verifiques, el proyecto de este cliente sigue bloqueado.'"
+                      v-if="row.is_initial_payment && row.estado !== 'verificado'"
+                      class="initial-blocking-chip"
+                      title="1ra cuota sin verificar: el proyecto está bloqueado"
                     >
-                      {{ row.estado === 'verificado' ? '🔓 1er pago · proyecto activo' : '🔒 1er pago · proyecto bloqueado' }}
+                      🔒 Bloquea proyecto
                     </span>
-
-                    <!-- El comprobante certifica un pago: solo se emite una
-                         vez que Finanzas verificó el voucher. -->
-                    <template v-if="row.estado === 'verificado'">
-                      <button
-                        type="button"
-                        class="receipt-btn"
-                        :disabled="receiptLoading === row.id"
-                        title="Ver el comprobante de pago (para imprimir o guardar como PDF)"
-                        @click="openReceipt(row)"
-                      >{{ receiptLoading === row.id ? '…' : '🧾 Comprobante' }}</button>
-                      <button
-                        type="button"
-                        class="receipt-btn"
-                        title="Enviar el comprobante al correo del cliente"
-                        @click="receiptModalRow = row"
-                      >📧</button>
-                    </template>
                   </div>
                 </td>
                 <td>
                   <div class="tributario-cell">
-                    <span class="ledger-stack-main">{{ row.tributario || "—" }}</span>
-                    <div class="tributario-file">
+                    <span v-if="row.tributario" class="tributario-name">{{ row.tributario }}</span>
+                    <div v-if="row.tributario_filename" class="tributario-file-chip">
                       <a
-                        v-if="row.tributario_filename && tributarioUrls[row.id]"
+                        v-if="tributarioUrls[row.id]"
                         :href="tributarioUrls[row.id]"
                         target="_blank"
                         rel="noopener"
                         class="tributario-link"
                         :title="row.tributario_original_name || 'Archivo tributario'"
-                      >📎 {{ row.tributario_original_name || "ver archivo" }}</a>
-                      <span v-else-if="row.tributario_filename" class="tributario-link">📎 …</span>
+                      >
+                        📄 {{ row.tributario_original_name || "Ver archivo" }}
+                      </a>
+                      <span v-else class="tributario-link">📄 …</span>
                       <button
-                        v-if="row.tributario_filename"
                         type="button"
-                        class="tributario-btn"
+                        class="tributario-icon-btn"
                         title="Enviar al cliente por correo o WhatsApp"
                         @click="sendModalRow = row"
                       >📤</button>
                       <button
-                        v-if="row.tributario_filename"
                         type="button"
-                        class="tributario-btn is-danger"
+                        class="tributario-icon-btn is-danger"
                         title="Eliminar archivo tributario"
                         @click="removeTributarioFile(row.id)"
                       >✕</button>
-                      <label
-                        class="tributario-btn"
-                        :title="row.tributario_filename ? 'Reemplazar archivo' : 'Subir archivo'"
-                      >
-                        <input type="file" hidden @change="(e) => uploadTributarioFile(row.id, e)" />
-                        {{ row.tributario_filename ? "↻" : "+" }}
-                      </label>
                     </div>
+                    <label
+                      v-else
+                      class="tributario-upload-btn"
+                      title="Subir archivo tributario"
+                    >
+                      <input type="file" hidden @change="(e) => uploadTributarioFile(row.id, e)" />
+                      <span>+ Subir</span>
+                    </label>
                   </div>
                 </td>
                 <td>
@@ -454,13 +457,40 @@
                 </td>
                 <td class="ledger-col-actions">
                   <div class="ledger-row-actions">
-                    <button type="button" class="ledger-icon-btn" title="Editar ingreso" aria-label="Editar ingreso" @click="startEdit(row)">
+                    <template v-if="row.estado === 'verificado'">
+                      <button
+                        type="button"
+                        class="ledger-icon-btn is-receipt"
+                        :disabled="receiptLoading === row.id"
+                        title="Ver / imprimir comprobante oficial"
+                        aria-label="Ver comprobante de pago"
+                        @click="openReceipt(row)"
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M14 2H6a2 2 0 0 0-2 2v16l3-1.5 3 1.5 3-1.5 3 1.5 3-1.5 3 1.5V4a2 2 0 0 0-2-2z" />
+                          <path d="M8 7h8M8 11h8M8 15h4" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        class="ledger-icon-btn"
+                        title="Enviar comprobante al cliente por correo"
+                        aria-label="Enviar comprobante"
+                        @click="receiptModalRow = row"
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                          <rect width="20" height="16" x="2" y="4" rx="2" />
+                          <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+                        </svg>
+                      </button>
+                    </template>
+                    <button type="button" class="ledger-icon-btn" title="Editar cuota" aria-label="Editar cuota" @click="startEdit(row)">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <path d="M12 20h9" />
                         <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
                       </svg>
                     </button>
-                    <button type="button" class="ledger-icon-btn is-danger" title="Eliminar ingreso" aria-label="Eliminar ingreso" @click="removeRow(row.id)">
+                    <button type="button" class="ledger-icon-btn is-danger" title="Eliminar cuota" aria-label="Eliminar cuota" @click="removeRow(row.id)">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />
                         <path d="M10 11v6M14 11v6" />
@@ -1087,9 +1117,9 @@ onBeforeUnmount(releaseUrls);
    del cobro) y debajo las cuotas que lo componen, alineadas con las columnas
    del resto de la tabla. */
 .ledger-tab :deep(.ledger-table) tbody.deal-group > tr.deal-head-row > td {
-  padding: 0.8rem 1.05rem;
-  background: var(--surface-1);
-  border-top: 1px solid var(--border-strong);
+  padding: 0.75rem 1rem;
+  background: var(--surface-2, #f8fafc);
+  border-top: 2px solid var(--border-color, #e2e8f0);
 }
 
 .ledger-tab :deep(.ledger-table) tbody.deal-group:first-of-type > tr.deal-head-row > td {
@@ -1099,13 +1129,13 @@ onBeforeUnmount(releaseUrls);
 /* Plegado, el bloque es una fila más de la lista: menos alto y sin el relleno
    de una cabecera de sección. */
 .ledger-tab :deep(.ledger-table) tbody.deal-group > tr.deal-head-row.is-collapsed > td {
-  padding: 0.5rem 1.05rem;
+  padding: 0.45rem 1rem;
   background: transparent;
   cursor: pointer;
 }
 
 .ledger-tab :deep(.ledger-table) tbody.deal-group > tr.deal-head-row.is-collapsed:hover > td {
-  background: var(--surface-1);
+  background: var(--surface-1, #ffffff);
 }
 
 /* Barra de "expandir / contraer todos", sobre la tabla. */
@@ -1180,137 +1210,260 @@ onBeforeUnmount(releaseUrls);
   font-size: 0.75rem;
 }
 
+/* Date & Cuota */
+.cell-date-main {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.8rem;
+  color: var(--text-main, #0f172a);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.cuota-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.cuota-tag {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted, #94a3b8);
+}
+
+.cuota-title {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--text-main, #0f172a);
+}
+
+.cuota-due {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.68rem;
+  color: var(--text-muted, #94a3b8);
+}
+
+.cuota-due.is-overdue {
+  color: #e11d48;
+  font-weight: 600;
+}
+
+/* Monto & ITF */
+.monto-cell {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  font-family: var(--font-mono, monospace);
+}
+
+.itf-value {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.78rem;
+  color: var(--text-muted, #64748b);
+}
+
+/* Bank badge */
+.bank-badge {
+  display: inline-flex;
+  padding: 0.2rem 0.55rem;
+  border-radius: 6px;
+  background: var(--surface-2, #f1f5f9);
+  color: var(--text-main, #1e293b);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* Estado Pill & Micro-badge */
+.estado-clean-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+}
+
+.clean-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 9999px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.clean-status-pill:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.clean-status-pill.is-verificado {
+  background: rgba(16, 185, 129, 0.08);
+  border-color: rgba(16, 185, 129, 0.25);
+  color: #059669;
+}
+
+.clean-status-pill.is-verificado .pill-dot {
+  background: #10b981;
+}
+
+.clean-status-pill.is-verificado:hover:not(:disabled) {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
+.clean-status-pill.is-porverificar {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.25);
+  color: #2563eb;
+}
+
+.clean-status-pill.is-porverificar .pill-dot {
+  background: #3b82f6;
+}
+
+.clean-status-pill.is-porverificar:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.clean-status-pill.is-pendiente {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.25);
+  color: #d97706;
+}
+
+.clean-status-pill.is-pendiente .pill-dot {
+  background: #f59e0b;
+}
+
+.clean-status-pill.is-pendiente:hover:not(:disabled) {
+  background: rgba(245, 158, 11, 0.15);
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.initial-blocking-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.12rem 0.45rem;
+  border-radius: 4px;
+  background: rgba(225, 29, 72, 0.08);
+  border: 1px solid rgba(225, 29, 72, 0.2);
+  color: #e11d48;
+  font-size: 0.65rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Tributario */
 .tributario-cell {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
-  min-width: 150px;
+  gap: 0.25rem;
+  min-width: 140px;
 }
 
-.tributario-file {
-  display: flex;
+.tributario-name {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--text-main, #0f172a);
+}
+
+.tributario-file-chip {
+  display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.3rem;
+  padding: 0.18rem 0.45rem;
+  border-radius: 6px;
+  background: var(--surface-2, #f8fafc);
+  border: 1px solid var(--border-color, #e2e8f0);
 }
 
 .tributario-link {
   font-size: 0.7rem;
-  color: var(--primary);
-  max-width: 120px;
+  color: var(--primary, #0ea5e9);
+  max-width: 110px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-decoration: none;
 }
 
-.tributario-btn {
-  width: 20px;
-  height: 20px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-color);
-  background: var(--surface-2);
-  color: var(--text-muted);
-  font-size: 0.7rem;
-  line-height: 1;
-  cursor: pointer;
+.tributario-link:hover {
+  text-decoration: underline;
+}
+
+.tributario-icon-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted, #64748b);
+  font-size: 0.68rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
 }
 
-.tributario-btn:hover {
-  color: var(--text-main);
-  border-color: var(--primary);
+.tributario-icon-btn:hover {
+  background: var(--surface-3, #f1f5f9);
+  color: var(--text-main, #0f172a);
 }
 
-.tributario-btn.is-danger:hover {
-  color: #fff;
-  background: var(--accent-rose);
-  border-color: var(--accent-rose);
+.tributario-icon-btn.is-danger:hover {
+  background: rgba(225, 29, 72, 0.1);
+  color: #e11d48;
 }
 
-.estado-cell {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
+.tributario-upload-btn {
+  display: inline-flex;
+  align-items: center;
   gap: 0.25rem;
-}
-
-/* Verificar es la acción de Finanzas que confirma el dinero y activa el
-   proyecto: se separa del pill de estado para que no parezca otro toggle. */
-.verify-btn {
-  font-family: var(--font-mono);
-  font-size: 0.62rem;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  padding: 0.18rem 0.45rem;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--accent-emerald);
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  border: 1px dashed var(--border-color, #cbd5e1);
   background: transparent;
-  color: var(--accent-emerald);
+  color: var(--text-muted, #64748b);
+  font-size: 0.7rem;
+  font-weight: 500;
   cursor: pointer;
-  white-space: nowrap;
+  transition: all 0.15s ease;
+  width: fit-content;
 }
 
-.verify-btn:hover:not(:disabled) {
-  background: var(--accent-emerald);
-  color: #fff;
+.tributario-upload-btn:hover {
+  border-color: var(--primary, #0ea5e9);
+  color: var(--primary, #0ea5e9);
+  background: rgba(14, 165, 233, 0.04);
 }
 
-.verify-btn.is-verified {
-  border-style: dashed;
-  border-color: var(--border-color);
-  color: var(--text-muted);
+/* Receipt action button in actions column */
+.ledger-icon-btn.is-receipt {
+  color: #059669;
 }
 
-.verify-btn.is-verified:hover:not(:disabled) {
-  background: transparent;
-  border-color: var(--accent-rose);
-  color: var(--accent-rose);
-}
-
-.verify-btn:disabled { opacity: 0.6; cursor: wait; }
-
-.initial-payment-tag {
-  font-family: var(--font-mono);
-  font-size: 0.6rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  font-weight: 700;
-  padding: 0.18rem 0.5rem;
-  border-radius: 9999px;
-  white-space: nowrap;
-}
-
-/* Bloqueando el proyecto: el mismo naranja de "pendiente", para que se lea
-   como algo que falta hacer y no como una etiqueta decorativa. */
-.initial-payment-tag.is-blocking {
-  background: rgba(200, 85, 50, 0.14);
-  color: var(--accent-rose);
-  border: 1px solid rgba(200, 85, 50, 0.35);
-}
-
-.initial-payment-tag.is-open {
-  background: rgba(46, 125, 70, 0.12);
-  color: var(--accent-emerald);
-  border: 1px solid rgba(46, 125, 70, 0.3);
-}
-
-.pill-toggle {
-  cursor: pointer;
-  text-transform: capitalize;
-  font: inherit;
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  font-weight: 600;
-}
-
-.pill-toggle:hover {
-  filter: brightness(0.97);
-}
-
-.pill-toggle:disabled {
-  opacity: 0.6;
-  cursor: wait;
+.ledger-icon-btn.is-receipt:hover {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: #10b981;
 }
 </style>
