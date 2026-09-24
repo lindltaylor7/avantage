@@ -82,14 +82,21 @@ export class WhatsappWebhookService {
     const changes = entry?.changes || [];
     for (const change of changes) {
       // En coexistencia, lo que el asesor escribe desde la app de WhatsApp
-      // Business del celular NO llega por "messages" sino por su propio campo
-      // ("message_echoes"). Hasta que se empezó a leer, esos mensajes se
+      // Business del celular NO llega por "messages" sino por su propio campo,
+      // "smb_message_echoes" ("smb" por small business: es el eco de la APP,
+      // no el de la Cloud API). Hasta que se empezó a leer, esos mensajes se
       // descartaban acá mismo y el bot nunca se enteraba de que había un
       // humano atendiendo: le seguía mandando recordatorios por encima y, si
       // la conversación no tenía fila de sesión, _recoverOrphanInbounds() la
       // revivía con un "Perdona la demora" porque el último mensaje guardado
       // seguía siendo el del contacto.
-      if (change.field === 'message_echoes') {
+      //
+      // OJO con el nombre: el campo hermano "message_echoes" (sin "smb") es
+      // otra cosa —el eco de lo que sale por la Cloud API— y suscribirlo en el
+      // panel de Meta da error en una cuenta de coexistencia. Se acepta igual
+      // por si alguna versión lo entrega así; el filtro de duplicados de abajo
+      // hace que, aun en ese caso, los mensajes del propio bot no pausen nada.
+      if (change.field === 'smb_message_echoes' || change.field === 'message_echoes') {
         await this.handleEchoes(change.value || {});
         continue;
       }
@@ -155,8 +162,9 @@ export class WhatsappWebhookService {
 
   /**
    * Mensajes que salieron del número SIN pasar por este panel: el asesor
-   * respondiendo desde la app de WhatsApp Business vinculada (coexistencia).
-   * Meta los reenvía por el campo "message_echoes".
+   * respondiendo desde la app de WhatsApp Business vinculada, o desde un
+   * dispositivo enlazado (coexistencia). Meta los reenvía por el campo
+   * "smb_message_echoes".
    *
    * Hacen dos cosas: se guardan en el hilo (sin esto el panel mostraba la
    * conversación con huecos, porque lo que el asesor escribía no estaba en
@@ -164,13 +172,17 @@ export class WhatsappWebhookService {
    * "Enviar" del panel. Sin esa pausa, Avan le seguía mandando "¿Sigues por
    * ahí?" por encima de un humano que ya estaba atendiendo.
    *
-   * OJO con lo que hace segura esta pausa: Meta también hace eco de los
-   * mensajes que manda el PROPIO bot por la API, así que pausar con cada eco
-   * apagaría el bot apenas manda su primer mensaje. Lo que lo evita es que
-   * `recordOutboundEcho` inserta con onConflict(message_id).ignore(): el eco
-   * de un mensaje del bot choca con la fila que ya guardó sendTextMessage()
-   * con ese mismo wamid, devuelve isNew=false y no pausa nada. Solo pausa lo
-   * que de verdad no conocíamos, que es lo que escribió una persona.
+   * Que este eco sea señal limpia de "hay un humano" no es casualidad: según
+   * la documentación de Meta, "smb_message_echoes" trae SOLO lo enviado desde
+   * la app o un dispositivo enlazado, nunca lo que sale por la Cloud API. Es
+   * decir, los mensajes del propio bot no aparecen acá y no hay riesgo de que
+   * se apague solo.
+   *
+   * Aun así se pausa únicamente cuando `recordOutboundEcho` devuelve isNew:
+   * inserta con onConflict(message_id).ignore(), así que un reenvío del mismo
+   * evento (Meta reintenta) no vuelve a pausar, y si alguna vez llegara por
+   * acá un eco de la Cloud API, chocaría con la fila que ya guardó
+   * sendTextMessage() con ese mismo wamid y tampoco pausaría.
    */
   async handleEchoes(value) {
     // Según la versión de la API el array viene como "message_echoes" o,
