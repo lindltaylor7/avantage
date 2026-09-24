@@ -156,6 +156,50 @@ export function missedReplyHandoff() {
 }
 
 /**
+ * Primera pregunta a un lead que llegó del formulario de un anuncio.
+ *
+ * Antes acá salía directamente el menú de horarios: saludo, pitch y lista de
+ * 4–5 franjas, los tres en el mismo minuto. El 23/09 lo recibieron cuatro
+ * leads y no respondió ninguno — la primera pregunta de la conversación era
+ * la decisión más cara de todo el funnel (comprometer un horario con un
+ * asesor), pedida a alguien que todavía no sabe cuánto cuesta ni con quién
+ * hablaría, y encima detrás de un muro de texto de un desconocido.
+ *
+ * Esto es lo que va en su lugar: UNA pregunta cerrada, que se contesta con
+ * un "sí". Los horarios recién salen cuando ese "sí" llegó. Dos cosas se
+ * dicen antes de pedir nada, porque las dos bajan el costo de contestar:
+ *  - que la reunión es GRATIS y no compromete (el motivo más común para no
+ *    contestar es no saber en qué se está metiendo), y
+ *  - lo que entendimos de su formulario, que es lo único que prueba que
+ *    alguien leyó lo que escribió.
+ *
+ * NO se menciona acá el descuento por Google Meet: es un 10% sobre un precio
+ * que todavía no se le dijo, así que no incentiva nada e introduce el tema
+ * del costo justo antes de pedirle el sí. Se dice al elegir la modalidad.
+ */
+export function warmupAsk({ understood = '', purpose = '', durationLabel = '' } = {}) {
+  const opener = understood ? `Perfecto: ${understood}. ` : '';
+  const duration = durationLabel ? ` de ${durationLabel}` : ' corta';
+  return (
+    `${opener}Te cuento: lo siguiente sería una reunión${duration} con uno de nuestros asesores para ${purpose}. ` +
+    'Es *totalmente gratis* y no te compromete a nada 🙌\n\n' +
+    '¿Te parece si la coordinamos? Respóndeme *sí* y te paso los horarios disponibles.'
+  );
+}
+
+/**
+ * El lead contestó que no al paso de arriba. No se insiste con horarios —
+ * acaba de decir que no— pero tampoco se cierra la conversación como en
+ * `notInterestedFarewell`: dijo que no a la REUNIÓN, no al servicio. Se le
+ * deja la pregunta abierta más barata que hay, que es contar qué necesita.
+ */
+export function warmupDeclined(contactName) {
+  const name = contactName ? `, ${contactName}` : '';
+  return `Sin problema${name} 🙌 Si prefieres, cuéntame por acá en qué estás y te oriento sin necesidad de agendar nada. ` +
+    'Y si más adelante quieres la reunión, me dices y la coordinamos.';
+}
+
+/**
  * El lead dijo que ya no le interesa. Se le agradece, se cierra y NO se le
  * vuelve a escribir: la conversación queda marcada como terminada para que el
  * barrido de inactividad no le mande "¿Sigues por ahí?" una hora después

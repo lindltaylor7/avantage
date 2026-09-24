@@ -129,6 +129,14 @@ const MAX_STEP_TURNS = 4;
 // Estados del flujo de agendamiento (todos "esperan respuesta del contacto").
 const SCHEDULING_STATUSES = ['scheduling_mode', 'scheduling_phone', 'scheduling_email', 'scheduling_date', 'scheduling_time', 'scheduling_confirm'];
 
+// Paso previo al agendamiento para los leads que llegan del formulario de un
+// anuncio: se les hace UNA pregunta cerrada ("¿coordinamos?") y los horarios
+// salen recién cuando contestan. Ver `whatsappBotCopy.warmupAsk`. No entra en
+// SCHEDULING_STATUSES porque todavía no hay nada que agendar: no existe
+// `answers.__scheduling`, y todo lo que cuelga de esa lista (el debounce del
+// agendamiento, el reenrutado a handleSchedulingTurn) lo da por hecho.
+const WARMUP_STATUS = 'warmup';
+
 /** Cómo se le nombra al contacto la modalidad que eligió. */
 export function modeLabel(mode) {
   return mode === 'phone' ? 'llamada telefónica' : 'videollamada por Google Meet';
@@ -147,6 +155,22 @@ export function isAffirmative(text) {
   if (!clean) return false;
   if (SCHEDULE_CHANGE_HINT_RE.test(text || '')) return false;
   return AFFIRMATIVE_RE.test(clean);
+}
+
+/**
+ * ¿El contacto dijo que no, y solo eso? Se exige la negación SUELTA ("no",
+ * "ahora no", "por ahora no gracias") y no la palabra "no" en cualquier
+ * parte: "no sé si el jueves me alcance" o "no entendí" son justo lo
+ * contrario de un rechazo — son un lead que sigue conversando. Ante la duda
+ * devuelve false, y quien llama lo manda a la conversación libre, que sabe
+ * interpretarlo mejor que una regex.
+ */
+const EXPLICIT_NO_RE = /^(?:(?:por\s*)?(?:ahora|hoy|ahorita)\s*)?no+(?:\s*(?:gracias|por\s*ahora|por\s*el\s*momento|ahora|ahorita|todav[ií]a|quiero|me\s*interesa))?$/i;
+
+export function isExplicitNo(text) {
+  const clean = normalize((text || '').trim()).replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+  if (!clean) return false;
+  return EXPLICIT_NO_RE.test(clean);
 }
 
 // Descuento que se aplica si el lead elige reunión por Google Meet en vez de
@@ -445,6 +469,14 @@ function mapAcademicLevel(value) {
 const FORM_LEVEL_LABEL_RE = /sacando|nivel\s+acad[eé]mico|grado\s+acad[eé]mico/i;
 const FORM_UNIVERSITY_LABEL_RE = /universidad/i;
 const FORM_FIELD_LABEL_RE = /carrera/i;
+// El formulario trae el nombre REAL ("Full name: Luis B. Palomino Rodriguez"),
+// que casi siempre es mejor que el del perfil de WhatsApp. Los perfiles reales
+// del 23/09 eran "La Vida Continua...." y "😎": de ninguno sale un nombre de
+// pila utilizable, así que los dos leads recibieron un "¡Hola!" pelado
+// teniendo el nombre escrito dos líneas más abajo. Va anclado (^...$) a
+// propósito, al revés que los demás: sin anclar, "nombre" aparece dentro de
+// otras preguntas del formulario ("¿A nombre de quién va la factura?").
+const FORM_NAME_LABEL_RE = /^(?:full\s*name|name|nombres?(?:\s+(?:completos?|y\s+apellidos?))?|apellidos?\s+y\s+nombres?)$/i;
 // "¿En qué punto estás (con tu tesis)?" / "¿En qué etapa de tu tesis estás?"
 // — pregunta de avance del formulario.
 const FORM_PROGRESS_LABEL_RE = /en\s+qu[eé]\s+punto|en\s+qu[eé]\s+etapa|etapa\s+(?:de\s+)?(?:tu\s+)?tesis|qu[eé]\s+tan\s+avanzado|avance\s+(?:de\s+)?(?:tu\s+)?tesis|estado\s+de\s+(?:tu\s+)?tesis/i;
@@ -559,7 +591,11 @@ const FORM_PHONE_LABEL_RE = /phone|tel[eé]fono|celular/i;
 export function extractLeadFormFields(text) {
   const fields = {};
   for (const { label, value } of parseFormAnswerLines(text)) {
-    if (!fields.level && FORM_LEVEL_LABEL_RE.test(label)) {
+    if (!fields.fullName && FORM_NAME_LABEL_RE.test(label)) {
+      // Solo se acepta si de ahí sale un nombre de pila saludable: el campo
+      // es de texto libre y llega con cualquier cosa ("...", "xd", un correo).
+      if (firstNameOf(value)) fields.fullName = value;
+    } else if (!fields.level && FORM_LEVEL_LABEL_RE.test(label)) {
       const level = mapAcademicLevel(value);
       if (level) fields.level = level;
     } else if (!fields.university && FORM_UNIVERSITY_LABEL_RE.test(label)) {
@@ -1523,7 +1559,10 @@ export class WhatsappBotService {
    * bitácora y el buffer usen siempre el mismo criterio.
    */
   debounceForStatus(status) {
-    if (SCHEDULING_STATUSES.includes(status)) return SCHEDULING_DEBOUNCE_MS;
+    // El calentamiento espera un "sí" suelto, del mismo tamaño que la
+    // respuesta a cualquier paso del agendamiento: le toca la misma espera
+    // corta y no la de la conversación libre.
+    if (status === WARMUP_STATUS || SCHEDULING_STATUSES.includes(status)) return SCHEDULING_DEBOUNCE_MS;
     if (status === 'completed') return POST_BOOKING_DEBOUNCE_MS;
     return MESSAGE_DEBOUNCE_MS;
   }
@@ -1554,6 +1593,7 @@ export class WhatsappBotService {
       case 'scheduling_confirm': return this.handleSchedulingConfirmReply(waId, session, text);
       case 'scheduling_date': return this.handleSchedulingDateReply(waId, session, text);
       case 'scheduling_time': return this.handleSchedulingTimeReply(waId, session, text);
+      case WARMUP_STATUS: return this.handleWarmupTurn(waId, session, text);
       case 'active': return this.runConversationTurn(waId, text);
       default: return; // 'completed' u otro: no se hace nada aquí.
     }
@@ -1700,6 +1740,7 @@ export class WhatsappBotService {
     // mensaje al handler que corresponde al estado real.
     if (session && session.status !== 'active') {
       if (SCHEDULING_STATUSES.includes(session.status)) return this.handleSchedulingTurn(waId, session, incomingText);
+      if (session.status === WARMUP_STATUS) return this.handleWarmupTurn(waId, session, incomingText, { inboundMark });
       if (session.status === 'completed') {
         // Sesión cerrada pero con reunión agendada: el mensaje (ya agrupado)
         // se clasifica en vez de ignorarse. Sin reunión no se responde nada,
@@ -1773,9 +1814,26 @@ export class WhatsappBotService {
         if (formFields.urgency) answers.urgency = formFields.urgency;
         await this.updateSession(waId, { answers: JSON.stringify(answers) });
 
+        // El nombre del formulario gana sobre el del perfil de WhatsApp, que
+        // en los anuncios es casi siempre un alias del que no sale un nombre
+        // de pila ("La Vida Continua....", "😎"). Solo se pisa el que ya
+        // había si ese no daba ninguno: un nombre real guardado a mano por un
+        // asesor no lo tiene que sobrescribir el formulario.
+        const formName = formFields.fullName || null;
+        const greetName = contactName || firstNameOf(formName);
+        if (formName && !contactName && lead?.id) {
+          try {
+            await this.leadService.updateLead(lead.id, { fullName: formName });
+          } catch (error) {
+            // El saludo ya sale bien con `greetName`; que la ficha se quede
+            // con el alias no justifica tumbar el turno de apertura.
+            console.error(`❌ [WhatsApp Bot] No se pudo guardar el nombre del formulario de ${waId}:`, error.message);
+          }
+        }
+
         this.logActivity({ type: 'ad_form_lead_fast_track', waId, formFields });
-        await this.send(waId, `¡Hola${contactName ? `, ${contactName}` : ''}! Gracias por completar el formulario 🙌`);
-        return this.finalize(waId, answers);
+        await this.send(waId, `¡Hola${greetName ? `, ${greetName}` : ''}! Gracias por completar el formulario 🙌`);
+        return this.startWarmup(waId, answers, settings);
       }
     }
 
@@ -2032,7 +2090,7 @@ export class WhatsappBotService {
    * equipo tenga un reporte de respaldo. Un fallo en la evaluación con IA no
    * debe impedir ofrecer la llamada, que es lo que realmente importa aquí.
    */
-  async finalize(waId, answers) {
+  async finalize(waId, answers, { warmedUp = false } = {}) {
     if (await this._qualificationGate(waId, answers, { askMissing: true })) return;
 
     const settings = await this.settingsService.get();
@@ -2112,7 +2170,119 @@ export class WhatsappBotService {
       console.error(`❌ [WhatsApp Bot] Error al registrar el lead de ${waId}:`, error);
     }
 
-    await this.offerScheduling(waId, { topic: synthesizedTopic, email, when: answers.__when || null });
+    await this.offerScheduling(waId, { topic: synthesizedTopic, email, when: answers.__when || null, warmedUp });
+  }
+
+  /**
+   * Texto del recordatorio de inactividad, según en qué paso se quedó callado.
+   *
+   * El genérico ("¿Sigues por ahí?") se sigue usando en conversación libre,
+   * donde no hay nada concreto que ofrecer. Pero al lead que se quedó mudo
+   * frente a la LISTA de horarios, repetírsela —o preguntarle si sigue ahí,
+   * que lo deja frente a la misma lista— es insistir con lo que ya ignoró
+   * una vez. El 23/09 los cuatro leads que la recibieron la ignoraron.
+   *
+   * A ese se le nombra UN horario y se le pide un sí: la sesión pasa a
+   * `scheduling_confirm` con ese horario pendiente, así que el "sí" lo reserva
+   * por el mismo camino que cualquier otra confirmación (y cualquier otra
+   * respuesta se sigue tratando como corrección, no como confirmación).
+   *
+   * Si algo falla al buscar el horario, cae al texto genérico: el recordatorio
+   * ya está reservado en la fila y quedarse sin mandar nada es peor.
+   */
+  async _inactivityNudgeText(session, nudgesSent) {
+    const generic = INACTIVITY_NUDGE_TEXTS[Math.min(nudgesSent, INACTIVITY_NUDGE_TEXTS.length - 1)];
+    if (!['scheduling_date', 'scheduling_time'].includes(session.status)) return generic;
+
+    try {
+      const { answers, scheduling } = this._readScheduling(session);
+      if (!scheduling) return generic;
+
+      const [slot] = await this.googleCalendarService.getUpcomingFreeSlots(
+        BOOKING_ADVISOR_USER_ID, { limit: 1, days: BOOKING_WINDOW_DAYS }
+      );
+      if (!slot) return generic;
+
+      scheduling.awaitingConfirm = slot;
+      await this.updateSession(session.wa_id, { status: 'scheduling_confirm', answers: JSON.stringify(answers) });
+      this.logActivity({ type: 'inactivity_nudge_slot_offer', waId: session.wa_id, slot: slot.label });
+
+      return `¿Te reservo *${slot.label}* con el asesor? Respóndeme *sí* y te llega la confirmación 🙌 ` +
+        'Si te viene mejor otro día u hora, dímelo y lo busco.';
+    } catch (error) {
+      console.error(`❌ [WhatsApp Bot] No se pudo armar el recordatorio con horario para ${session.wa_id}:`, error.message);
+      return generic;
+    }
+  }
+
+  /**
+   * Paso de calentamiento para el lead que llega del formulario de un anuncio:
+   * en vez del menú de horarios de entrada, UNA pregunta cerrada. Los horarios
+   * salen en `handleWarmupTurn`, cuando contestó. El porqué está en
+   * `whatsappBotCopy.warmupAsk`.
+   *
+   * El filtro de calificación corre ACÁ y no solo en finalize(): si al lead
+   * hay que rechazarlo (instituto, ciclo muy temprano), tiene que enterarse
+   * ahora y no después de que le ofrecimos una reunión y dijo que sí. Como
+   * `_qualificationGate` deja anotado lo que ya preguntó, finalize() lo vuelve
+   * a llamar sin repetirle nada.
+   */
+  async startWarmup(waId, answers, settings = null) {
+    if (await this._qualificationGate(waId, answers, { askMissing: true })) return;
+
+    const resolved = settings || await this.settingsService.get();
+
+    // Mismo criterio que offerScheduling(): devolverle lo que entendimos es lo
+    // único que le prueba que alguien leyó su formulario. `looksLikeGarbageValue`
+    // evita el "Perfecto: Yy" cuando el campo llegó con basura.
+    const understood = [answers.field, answers.university]
+      .filter((value) => value && !looksLikeGarbageValue(value))
+      .join(' en ');
+    const hasTopic = !!answers.problem && !/sin tema definido/i.test(answers.problem);
+    const purpose = schedulingPurpose({ stage: answers.stage, need: answers.need, hasTopic });
+
+    await this.updateSession(waId, { status: WARMUP_STATUS, answers: JSON.stringify(answers) });
+    this.logActivity({ type: 'warmup_ask', waId });
+    await this.send(waId, whatsappBotCopy.warmupAsk({
+      understood,
+      purpose,
+      durationLabel: meetingDurationLabel(resolved)
+    }));
+  }
+
+  /**
+   * Respuesta del lead a la pregunta de `startWarmup`.
+   *
+   * Tres caminos, y el tercero es el que importa: cualquier cosa que no sea
+   * un sí ni un no limpio (una pregunta, "¿cuánto cuesta?", "estoy en Cusco")
+   * NO se fuerza al agendamiento — la sesión vuelve a 'active' y el turno se
+   * reprocesa como conversación libre, que es la que sabe responder eso. Un
+   * lead que rompió el silencio para preguntar algo y recibe un menú de
+   * horarios como respuesta es exactamente el bot que este cambio quita.
+   */
+  async handleWarmupTurn(waId, session, incomingText, { inboundMark = null } = {}) {
+    const answers = typeof session.answers === 'string' ? JSON.parse(session.answers) : (session.answers || {});
+    const text = String(incomingText || '').trim();
+
+    if (isAffirmative(text)) {
+      this.logActivity({ type: 'warmup_accepted', waId });
+      await this.updateSession(waId, { status: 'active', answers: JSON.stringify(answers) });
+      return this.finalize(waId, answers, { warmedUp: true });
+    }
+
+    if (isExplicitNo(text)) {
+      this.logActivity({ type: 'warmup_declined', waId });
+      const lead = await this.leadService.findByPhone(waId);
+      // Vuelve a conversación libre, NO a 'completed': dijo que no a la
+      // reunión, no al servicio. Si después cuenta qué necesita, el flujo
+      // normal puede volver a ofrecérsela.
+      await this.updateSession(waId, { status: 'active', answers: JSON.stringify(answers) });
+      await this.send(waId, whatsappBotCopy.warmupDeclined(firstNameOf(lead?.full_name)));
+      return;
+    }
+
+    await this.updateSession(waId, { status: 'active', answers: JSON.stringify(answers) });
+    return this.runConversationTurn(waId, incomingText, inboundMark);
   }
 
   /**
@@ -2395,7 +2565,7 @@ export class WhatsappBotService {
    * Si Calendar no está listo o no hay bloques libres, se transfiere a
    * seguimiento manual sin bloquear la conversación.
    */
-  async offerScheduling(waId, { topic, email, when = null }) {
+  async offerScheduling(waId, { topic, email, when = null, warmedUp = false }) {
     try {
       if (!this.googleCalendarService?.isConfigured()) throw new Error('Google Calendar no configurado en el servidor');
 
@@ -2433,10 +2603,17 @@ export class WhatsappBotService {
       // que ya dijo mandan sobre el texto genérico.
       const hasTopic = !!answers.problem && !/sin tema definido/i.test(answers.problem);
       const purpose = schedulingPurpose({ stage: answers.stage, need: answers.need, hasTopic });
+      // `warmedUp`: el lead viene de contestar que sí al paso de calentamiento,
+      // donde ya se le devolvió lo que entendimos y para qué es la reunión.
+      // Repetírselo acá palabra por palabra sería el mismo muro de texto que
+      // este cambio vino a quitar, así que solo queda lo que ahí NO se dijo:
+      // la modalidad y su descuento.
       await this.send(
         waId,
-        `${opener}${urgencyOpener(answers.urgency)} una reunión por Google Meet con nuestro asesor para ${purpose} 🙌 ` +
-        `Por Google Meet tienes ${MEET_DISCOUNT_PCT}% de descuento sobre el precio final; si prefieres una llamada telefónica, solo dímelo.`
+        warmedUp
+          ? `¡Genial! La hacemos por Google Meet, que además te da ${MEET_DISCOUNT_PCT}% de descuento sobre el precio final; si prefieres una llamada telefónica, solo dímelo 🙌`
+          : `${opener}${urgencyOpener(answers.urgency)} una reunión por Google Meet con nuestro asesor para ${purpose} 🙌 ` +
+            `Por Google Meet tienes ${MEET_DISCOUNT_PCT}% de descuento sobre el precio final; si prefieres una llamada telefónica, solo dímelo.`
       );
       await this.promptForDate(waId);
     } catch (error) {
@@ -3972,12 +4149,12 @@ ${numberedList(fullSlotLabels(offer))}
     const now = Date.now();
 
     const awaitingReply = await db('whatsapp_bot_sessions')
-      .whereIn('status', ['active', ...SCHEDULING_STATUSES])
+      .whereIn('status', ['active', WARMUP_STATUS, ...SCHEDULING_STATUSES])
       .where('bot_enabled', true)
       .whereNull('nudge_sent_at');
 
     const awaitingFreeze = await db('whatsapp_bot_sessions')
-      .whereIn('status', ['active', ...SCHEDULING_STATUSES])
+      .whereIn('status', ['active', WARMUP_STATUS, ...SCHEDULING_STATUSES])
       .where('bot_enabled', true)
       .whereNotNull('nudge_sent_at');
 
@@ -4078,7 +4255,8 @@ ${numberedList(fullSlotLabels(offer))}
       if (!claimed) continue;
 
       try {
-        await this.send(session.wa_id, INACTIVITY_NUDGE_TEXTS[nudgesSent], { requireOpenWindow: true });
+        const nudgeText = await this._inactivityNudgeText(session, nudgesSent);
+        await this.send(session.wa_id, nudgeText, { requireOpenWindow: true });
         this.logActivity({ type: 'inactivity_nudge', waId: session.wa_id, attempt: nudgesSent + 1 });
       } catch (error) {
         // Incluye la ventana de 24 h cerrada: el seguimiento se da por

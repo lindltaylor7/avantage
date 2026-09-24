@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractLeadFormFields, detectRedundantAsk, daysMatchingPreferredTime, spreadSlotsAcrossDays, schedulingPurpose, asksForPhoneCall, slotMenuFooter, urgencyOpener } from '../whatsappBotService.js';
+import { extractLeadFormFields, detectRedundantAsk, daysMatchingPreferredTime, spreadSlotsAcrossDays, schedulingPurpose, asksForPhoneCall, slotMenuFooter, urgencyOpener, isAdFormMessage, isExplicitNo } from '../whatsappBotService.js';
+import { warmupAsk } from '../../copy/whatsappBotCopy.js';
 
 // Mensaje real (anonimizado) de un lead de Meta Ads con formulario propio:
 // llega como líneas "¿Pregunta?: Respuesta" que el LLM de conversación a
@@ -240,4 +241,87 @@ test('spreadSlotsAcrossDays no repite un día con un solo horario ni pasa del to
   const slots = [offerSlot('2026-09-18', '10:00'), offerSlot('2026-09-19', '11:00'), offerSlot('2026-09-19', '18:00')];
   assert.equal(spreadSlotsAcrossDays(slots, 5, 2).length, 3);
   assert.equal(spreadSlotsAcrossDays(slots, 2, 2).length, 2);
+});
+
+// ---------------------------------------------------------------------------
+// Nombre del formulario y paso de calentamiento (leads de anuncios).
+//
+// Conversaciones reales del 23/09: seis contactos, cero respuestas. Dos de los
+// perfiles de WhatsApp eran alias ("La Vida Continua....", "😎"), así que el
+// bot abría con un "¡Hola!" pelado teniendo el nombre real escrito en el
+// formulario; y a los cuatro que llegaron del formulario se les mandó saludo,
+// pitch y lista de horarios en el mismo minuto.
+// ---------------------------------------------------------------------------
+
+const AD_FORM_ALIAS_PROFILE = `¡Hola! Completé el formulario y me gustaría obtener más información sobre tu negocio.
+
+¿Qué necesitas resolver?: Asesoría por etapas
+Full name: Luis B. Palomino Rodriguez
+¿En qué etapa de tu tesis estás?: Proyecto / plan de tesis
+Phone number: +51952353225
+Carrera: ciencias físico matematicas
+¿Para cuándo necesitas avanzar?: Lo antes posible`;
+
+test('extractLeadFormFields lee el nombre real del formulario', () => {
+  assert.equal(extractLeadFormFields(AD_FORM_ALIAS_PROFILE).fullName, 'Luis B. Palomino Rodriguez');
+});
+
+test('extractLeadFormFields no confunde "Phone number" con el campo de nombre', () => {
+  const fields = extractLeadFormFields(AD_FORM_ALIAS_PROFILE);
+  assert.equal(fields.phone, '51952353225');
+  assert.notEqual(fields.fullName, '+51952353225');
+});
+
+// El campo es de texto libre: llega con emojis, puntos sueltos o un correo.
+// Saludar con eso se lee peor que no saludar con nombre.
+test('extractLeadFormFields descarta un nombre del que no sale un nombre de pila', () => {
+  assert.equal(extractLeadFormFields('Full name: 😎').fullName, undefined);
+  assert.equal(extractLeadFormFields('Full name: ...').fullName, undefined);
+  assert.equal(extractLeadFormFields('Nombre completo: xd').fullName, undefined);
+});
+
+test('extractLeadFormFields acepta las variantes en español del campo de nombre', () => {
+  assert.equal(extractLeadFormFields('Nombre completo: Erika Merino').fullName, 'Erika Merino');
+  assert.equal(extractLeadFormFields('Nombres y apellidos: Andy Basurto Vargas').fullName, 'Andy Basurto Vargas');
+});
+
+// "Full name" solo no convierte un mensaje cualquiera en un formulario de
+// anuncio: el atajo que se salta la pregunta de apertura no se debe disparar
+// por un nombre suelto.
+test('isAdFormMessage no se dispara solo con el nombre', () => {
+  assert.equal(isAdFormMessage('Full name: Erika Merino'), false);
+  assert.equal(isAdFormMessage(AD_FORM_ALIAS_PROFILE), true);
+});
+
+test('isExplicitNo reconoce la negación suelta', () => {
+  for (const text of ['no', 'No', 'no gracias', 'ahora no', 'por ahora no', 'nooo', 'no, gracias']) {
+    assert.equal(isExplicitNo(text), true, `debería ser un no: ${text}`);
+  }
+});
+
+// Lo importante del clasificador: "no" DENTRO de una frase no es un rechazo.
+// Quien escribe "no entendí" o "no sé si el jueves pueda" sigue conversando,
+// y cerrarle el paso de agendamiento ahí lo pierde.
+test('isExplicitNo no toma por rechazo un "no" en medio de una frase', () => {
+  for (const text of ['no entendí', 'no sé si el jueves me alcance', 'no tengo tema todavía', 'no, mejor el viernes']) {
+    assert.equal(isExplicitNo(text), false, `no debería ser un rechazo: ${text}`);
+  }
+});
+
+test('warmupAsk hace UNA pregunta cerrada y no menciona el descuento', () => {
+  const text = warmupAsk({ understood: 'Economía', purpose: 'revisar tu proyecto de tesis', durationLabel: '30 min' });
+  assert.match(text, /Perfecto: Economía/);
+  assert.match(text, /revisar tu proyecto de tesis/);
+  assert.match(text, /gratis/i);
+  // El descuento es sobre un precio que todavía no se le dijo: se guarda para
+  // el paso de modalidad.
+  assert.doesNotMatch(text, /descuento/i);
+  // Ni un solo horario: los horarios salen cuando conteste.
+  assert.doesNotMatch(text, /\d{1,2}:\d{2}/);
+});
+
+test('warmupAsk se sostiene sin el dato de lo que entendimos', () => {
+  const text = warmupAsk({ understood: '', purpose: 'ayudarte a definir tu tema' });
+  assert.doesNotMatch(text, /Perfecto:/);
+  assert.match(text, /ayudarte a definir tu tema/);
 });
