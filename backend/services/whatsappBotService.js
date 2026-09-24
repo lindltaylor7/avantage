@@ -4331,9 +4331,26 @@ ${numberedList(fullSlotLabels(offer))}
       .whereIn('id', rows.map((r) => r.last_id))
       .select('wa_id', 'direction', 'body', 'received_at');
 
+    // Conversaciones donde YA salió algo alguna vez. Mirar solo el ÚLTIMO
+    // mensaje no alcanzaba: si el asesor contestaba desde la app de WhatsApp
+    // Business y el contacto escribía después, el último volvía a ser
+    // entrante y el bot "revivía" encima de una conversación que ya estaba
+    // atendiendo una persona — con un "Perdona la demora" y un turno entero.
+    // Esto es una red de seguridad del arreglo de verdad (leer el campo
+    // "message_echoes" en whatsappWebhookService): si esa suscripción se cae
+    // en el panel de Meta, o el eco llega tarde, el bot igual no se mete.
+    //
+    // La recuperación que este barrido existe para hacer —un turno que se
+    // perdió y dejó al contacto SIN ninguna respuesta— no tiene ningún
+    // saliente por definición, así que esta condición no le quita nada.
+    const answeredRows = await db('whatsapp_messages')
+      .whereIn('wa_id', lastRows.map((r) => r.wa_id))
+      .where('direction', 'outbound')
+      .distinct('wa_id');
+    const answeredWaIds = new Set(answeredRows.map((r) => r.wa_id));
+
     for (const row of lastRows) {
-      // Un saliente al final sin sesión es un asesor respondiendo a mano
-      // desde WhatsApp Business: ahí ya hay una persona, el bot no entra.
+      if (answeredWaIds.has(row.wa_id)) continue;
       if (row.direction !== 'inbound' || !isRealWaId(row.wa_id)) continue;
       if (now - new Date(row.received_at).getTime() < MISSED_REPLY_RECOVERY_MS) continue;
 

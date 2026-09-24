@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { WhatsappMessageService, detectWhatsappChannel } from './whatsappMessageService.js';
+import { WhatsappMessageService, detectWhatsappChannel, extractBody } from './whatsappMessageService.js';
 import { LeadService } from './leadService.js';
 
 const MAX_RECENT_EVENTS = 50;
@@ -81,6 +81,18 @@ export class WhatsappWebhookService {
   async handleEntry(entry) {
     const changes = entry?.changes || [];
     for (const change of changes) {
+      // En coexistencia, lo que el asesor escribe desde la app de WhatsApp
+      // Business del celular NO llega por "messages" sino por su propio campo
+      // ("message_echoes"). Hasta que se empezó a leer, esos mensajes se
+      // descartaban acá mismo y el bot nunca se enteraba de que había un
+      // humano atendiendo: le seguía mandando recordatorios por encima y, si
+      // la conversación no tenía fila de sesión, _recoverOrphanInbounds() la
+      // revivía con un "Perdona la demora" porque el último mensaje guardado
+      // seguía siendo el del contacto.
+      if (change.field === 'message_echoes') {
+        await this.handleEchoes(change.value || {});
+        continue;
+      }
       if (change.field !== 'messages') continue;
       const value = change.value || {};
 
@@ -137,6 +149,56 @@ export class WhatsappWebhookService {
         } catch (error) {
           console.error(`❌ [WhatsApp Webhook] Error al actualizar el estado del mensaje ${status.id}:`, error);
         }
+      }
+    }
+  }
+
+  /**
+   * Mensajes que salieron del número SIN pasar por este panel: el asesor
+   * respondiendo desde la app de WhatsApp Business vinculada (coexistencia).
+   * Meta los reenvía por el campo "message_echoes".
+   *
+   * Hacen dos cosas: se guardan en el hilo (sin esto el panel mostraba la
+   * conversación con huecos, porque lo que el asesor escribía no estaba en
+   * ninguna parte) y PAUSAN el bot para ese contacto, igual que el botón
+   * "Enviar" del panel. Sin esa pausa, Avan le seguía mandando "¿Sigues por
+   * ahí?" por encima de un humano que ya estaba atendiendo.
+   *
+   * OJO con lo que hace segura esta pausa: Meta también hace eco de los
+   * mensajes que manda el PROPIO bot por la API, así que pausar con cada eco
+   * apagaría el bot apenas manda su primer mensaje. Lo que lo evita es que
+   * `recordOutboundEcho` inserta con onConflict(message_id).ignore(): el eco
+   * de un mensaje del bot choca con la fila que ya guardó sendTextMessage()
+   * con ese mismo wamid, devuelve isNew=false y no pausa nada. Solo pausa lo
+   * que de verdad no conocíamos, que es lo que escribió una persona.
+   */
+  async handleEchoes(value) {
+    // Según la versión de la API el array viene como "message_echoes" o,
+    // reusando el nombre de siempre, como "messages" dentro de este campo.
+    const echoes = value.message_echoes || value.messages || [];
+
+    for (const echo of echoes) {
+      // "to" es el contacto; "from" es el número del negocio. Un eco sin
+      // destinatario no se puede atribuir a ninguna conversación.
+      const waId = echo.to || echo.recipient_id;
+      if (!waId) continue;
+
+      try {
+        const { isNew } = await this.messageService.recordOutboundEcho({
+          waId,
+          messageId: echo.id,
+          messageType: echo.type,
+          body: extractBody(echo),
+          sentAt: echo.timestamp ? new Date(Number(echo.timestamp) * 1000) : new Date(),
+          rawPayload: echo
+        });
+
+        if (isNew && this.botService) {
+          console.log(`🙋 [WhatsApp Webhook] Eco saliente de ${waId} desde la app de Business: se pausa Avan.`);
+          await this.botService.setBotEnabled(waId, false);
+        }
+      } catch (error) {
+        console.error(`❌ [WhatsApp Webhook] Error al guardar el eco saliente ${echo.id}:`, error);
       }
     }
   }
