@@ -321,14 +321,18 @@ export function isWithinQuietHours(hour, start = NUDGE_QUIET_START_HOUR, end = N
 // distingue de "completed" para poder reactivarla en el siguiente mensaje.
 const FROZEN_STATUS = 'frozen';
 
-// Recordatorio previo a la reunión: se manda cuando faltan menos de estas dos
-// horas. `MIN_AGE` deja fuera las reuniones recién agendadas: con solo 1 hora
-// de anticipación mínima entre los bloques ofrecidos y ahora, es normal
-// reservar dentro de esta ventana de 2 horas, y sin este margen el
-// recordatorio saldría a los minutos de confirmar en vez de más cerca de la
-// hora real de la reunión.
-const MEETING_REMINDER_LEAD_MS = 2 * 60 * 60 * 1000;
-const MEETING_REMINDER_MIN_AGE_MS = 30 * 60 * 1000;
+// Recordatorio previo a la reunión: se manda cuando faltan menos de estos 45
+// minutos. Antes salía con 2 horas de anticipación, demasiado lejos de la hora
+// real: a 45 minutos el lead todavía está a tiempo de acomodarse y el aviso le
+// llega cuando la reunión ya es lo siguiente en su día. `MIN_AGE` deja fuera
+// las reuniones recién agendadas, para que el recordatorio no salga a los
+// minutos de confirmarlas; con la anticipación mínima de reserva
+// (`MIN_BOOKING_LEAD_MINUTES`, 1 hora por defecto) ninguna cita entra en esta
+// ventana apenas se confirma, así que basta un margen corto — del tamaño del
+// barrido — para cubrir el caso de que esa anticipación se baje por variable
+// de entorno.
+const MEETING_REMINDER_LEAD_MS = 45 * 60 * 1000;
+const MEETING_REMINDER_MIN_AGE_MS = 10 * 60 * 1000;
 
 // Agenda diaria al vendedor: sale a partir de las 8 de la mañana (hora de
 // Lima). El barrido que la dispara corre cada diez minutos, así que llega
@@ -4001,7 +4005,7 @@ ${numberedList(fullSlotLabels(offer))}
 
   /**
    * Barrido periódico (server.js, mismo setInterval que el de conversaciones
-   * inactivas) del recordatorio previo: dos horas antes de la reunión se le
+   * inactivas) del recordatorio previo: 45 minutos antes de la reunión se le
    * reenvía la hora y el link. Es lo más barato que hay contra el no-show —
    * la cita se agenda para hoy o mañana y en el medio no recibía nada.
    */

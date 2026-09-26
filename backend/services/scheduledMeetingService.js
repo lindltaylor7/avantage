@@ -69,7 +69,7 @@ export class ScheduledMeetingService {
    * Reuniones que ya toca recordarle al contacto: empiezan dentro de las
    * próximas `leadMs` (pero todavía no empezaron) y aún no tienen
    * recordatorio. `minAgeMs` deja fuera las que se acaban de agendar: si
-   * alguien reserva para dentro de dos horas y diez minutos, mandarle un
+   * alguien reserva para dentro de cincuenta minutos, mandarle un
    * "te recuerdo tu reunión" a los cinco minutos de confirmarla sobra.
    */
   async getPendingReminders({ leadMs, minAgeMs = 0 } = {}) {
