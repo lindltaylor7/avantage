@@ -24,6 +24,7 @@ import { buildPaymentReceiptPdf, receiptPdfFilename } from './services/paymentRe
 import { LeadNoteService } from './services/leadNoteService.js';
 import { LeadStageChangeService } from './services/leadStageChangeService.js';
 import { LeadReportService } from './services/leadReportService.js';
+import { GeneralReportService } from './services/generalReportService.js';
 import { MetaConversionsService } from './services/metaConversionsService.js';
 import { DocumentService } from './services/documentService.js';
 import { CampaignService } from './services/campaignService.js';
@@ -196,6 +197,9 @@ const scheduledMeetingService = new ScheduledMeetingService({ googleCalendarServ
 const calendarSyncService = new CalendarSyncService({ googleCalendarService, userService });
 const financeService = new FinanceService();
 const financeLedgerService = new FinanceLedgerService();
+// El Reporte General lee la caja del mismo resumen que Finanzas: así las dos
+// pantallas no pueden decir cifras distintas.
+const generalReportService = new GeneralReportService({ financeLedgerService });
 // Avisa al equipo de Entregables cuando Finanzas verifica una cuota: es el
 // momento en que el trabajo atado a ella se puede entregar, y ocurre en otra
 // pantalla y a cargo de otra persona. El destinatario sale de la configuración
@@ -2275,6 +2279,23 @@ app.get('/api/lead-report', requireAuth, requirePermission('leads.report'), asyn
   } catch (error) {
     console.error('❌ Error al armar el Reporte de Leads:', error);
     res.status(500).json({ error: 'Error al armar el Reporte de Leads.', details: error.message });
+  }
+});
+
+/**
+ * Reporte General: la pantalla de gerencia — ventas, caja, cartera, embudo y
+ * canales en un solo lugar, comparados contra el período anterior.
+ *
+ * Permiso propio (`reports.general`) y no `finance.view`: es un botón del menú
+ * como cualquier otro. Muestra importes, así que la migración lo reparte de
+ * entrada solo a quien ya veía Finanzas.
+ */
+app.get('/api/general-report', requireAuth, requirePermission('reports.general'), async (req, res) => {
+  try {
+    res.json(await generalReportService.report(req.query));
+  } catch (error) {
+    console.error('❌ Error al armar el Reporte General:', error);
+    res.status(500).json({ error: 'Error al armar el Reporte General.', details: error.message });
   }
 });
 

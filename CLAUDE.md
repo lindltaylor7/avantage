@@ -944,6 +944,20 @@ antes de tocar el arranque de producción.
   setter por **venta**, así que dos cuotas del mismo lead comisionan las dos, y el mismo cobro
   marcado dos veces no paga dos veces. `lead_id` admite nulos porque hay ingresos que no cuelgan de
   ningún lead y también se cobran.
+- El **Reporte General** (`/admin/reporte-general`, `GeneralReportView.vue`, permiso `reports.general`,
+  `generalReportService.js`, `GET /api/general-report?months=3|6|12`) es la pantalla de gerencia y
+  **no tiene tabla propia**: ventas, caja, cartera, embudo y canales, cada KPI comparado con el
+  período anterior de la misma duración. La caja (cobrado, egresos, resultado) **no se vuelve a
+  sumar**: sale de `financeLedgerService.getOverview()`, la misma fuente que Finanzas, para que las
+  dos pantallas no digan cifras distintas. Lo **vendido** es el `total_amount` de los leads ganados,
+  fechado por el `created_at` de su proyecto (nace al ganar). La cartera son las cuotas `pendiente`
+  por antigüedad de `due_date`; las `pagado` van aparte («falta verificar»), no son deuda. Las ventas
+  no concretadas (`deal_cancelled_at`) no cuentan ni como vendido ni como cartera. El embudo y los
+  canales se miden por **cohorte** (los leads que entraron en el período y hasta dónde llegaron),
+  acumulativo: un ganado sin sello también cuenta como "pasó a Ventas". El permiso se copia de
+  entrada solo a quien ya tenía `finance.view`, porque muestra importes. Los gráficos son SVG propios
+  (`src/components/report/`), sin librería, y su paleta (oliva + azul) es la que pasó el chequeo de
+  daltonismo: el naranja de marca junto al oliva no se distingue con deuteranopía.
 - Los botones de barra y de fila del panel (`.btn-action-primary` / `-secondary` / `-ghost`), el
   encabezado de los modales (`.modal-title`, `.modal-close-btn`) y `.heading-icon` viven en
   `src/style.css`. Estaban copiados dentro del `<style scoped>` de cada vista, así que una pantalla

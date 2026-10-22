@@ -242,6 +242,22 @@
         </router-link>
 
         <router-link
+          v-if="hasPermission('reports.general')"
+          to="/admin/reporte-general"
+          class="nav-item"
+          :class="{ 'is-active': $route.path === '/admin/reporte-general' }"
+          @click="closeMobile"
+        >
+          <svg class="nav-icon" style="color: var(--primary);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 3v18h18"/>
+            <rect x="7" y="12" width="3" height="5" rx="1"/>
+            <rect x="12" y="8" width="3" height="9" rx="1"/>
+            <rect x="17" y="5" width="3" height="12" rx="1"/>
+          </svg>
+          <span class="nav-label" v-if="!isCollapsed">Reporte General</span>
+        </router-link>
+
+        <router-link
           v-if="hasPermission('documents.view')"
           to="/admin/documents"
           class="nav-item"
