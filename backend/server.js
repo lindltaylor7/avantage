@@ -26,6 +26,7 @@ import { LeadStageChangeService } from './services/leadStageChangeService.js';
 import { LeadReportService } from './services/leadReportService.js';
 import { GeneralReportService } from './services/generalReportService.js';
 import { SetterReportService } from './services/setterReportService.js';
+import { SignedContractService } from './services/signedContractService.js';
 import { MetaConversionsService } from './services/metaConversionsService.js';
 import { DocumentService } from './services/documentService.js';
 import { CampaignService } from './services/campaignService.js';
@@ -70,7 +71,7 @@ import { buildAttachmentPreview, readImagePreviewBytes, resolveAttachmentKind } 
 import { planWinDeal } from './services/winDeal.js';
 import { signToken, requireAuth, requirePermission, requireAnyPermission, signGoogleOAuthState, verifyGoogleOAuthState, signClientToken, requireClientAuth } from './middleware/auth.js';
 
-import { uploadProjectUpdateAttachment, uploadDir, uploadDeliverableAttachment, deliverableDir, uploadFinanceReceipt, uploadFinanceFile, uploadEmailAttachments, financeReceiptDir, whatsappMediaDir, campaignAdImageDir } from './middleware/upload.js';
+import { uploadProjectUpdateAttachment, uploadDir, uploadDeliverableAttachment, deliverableDir, uploadFinanceReceipt, uploadFinanceFile, uploadEmailAttachments, uploadSignedContract, financeReceiptDir, whatsappMediaDir, campaignAdImageDir, signedContractDir } from './middleware/upload.js';
 import { db } from './db/connection.js';
 
 // Estado del funnel Kanban que marca el fin del proceso comercial: al llegar
@@ -202,6 +203,7 @@ const financeLedgerService = new FinanceLedgerService();
 // pantallas no pueden decir cifras distintas.
 const generalReportService = new GeneralReportService({ financeLedgerService });
 const setterReportService = new SetterReportService({ leadService, userService });
+const signedContractService = new SignedContractService();
 // Avisa al equipo de Entregables cuando Finanzas verifica una cuota: es el
 // momento en que el trabajo atado a ella se puede entregar, y ocurre en otra
 // pantalla y a cargo de otra persona. El destinatario sale de la configuración
@@ -2239,6 +2241,102 @@ app.post('/api/leads/:id/notes', requireAuth, requireAnyPermission('leads.view',
     if (error.code === 'LEAD_NOT_FOUND') return res.status(404).json({ error: error.message });
     console.error('❌ Error al guardar la nota del lead:', error);
     res.status(500).json({ error: 'Error al guardar la nota.', details: error.message });
+  }
+});
+
+/*
+ * =====================================================================
+ * CONTRATO FIRMADO DE UN LEAD (/api/leads/:id/signed-contracts)
+ * =====================================================================
+ *
+ * El PDF, el Word o el enlace de Drive que vuelve con la firma del cliente.
+ *
+ * Cuelgan del LEAD —como las notas y el historial de etapas— y no de
+ * `/api/signed-contracts/:id`, por dos motivos: así reusan `requireLeadVisible`
+ * (cada quien ve sus leads, también sus documentos) y así el id del lead viaja
+ * en la ruta, que es lo que permite comprobar que el documento sea de ESE lead
+ * y no solo que exista — el mismo cuidado que la ruta de adjuntos de WhatsApp.
+ *
+ * El permiso es el del funnel (`leads.view`/`setter.view`) y no
+ * `contracts.manage`: aquel es para EMITIR contratos —la plantilla, las
+ * cláusulas, los importes— y esto es parte de cerrar la venta, que lo hace
+ * quien trabaja el lead. Subir el firmado no deja editar nada del contrato.
+ */
+app.get('/api/leads/:id/signed-contracts', requireAuth, requireAnyPermission('leads.view', 'setter.view'), requireLeadVisible, async (req, res) => {
+  try {
+    const [documents, contracts] = await Promise.all([
+      signedContractService.listByLead(req.params.id),
+      signedContractService.listContractOptions(req.params.id)
+    ]);
+    // Los contratos emitidos viajan en la misma respuesta porque son las
+    // opciones del desplegable "¿a cuál corresponde?": pedirlos aparte serían
+    // dos llamadas para dibujar un formulario.
+    res.json({ documents, contracts });
+  } catch (error) {
+    console.error('❌ Error al obtener los contratos firmados del lead:', error);
+    res.status(500).json({ error: 'Error al obtener los contratos firmados.', details: error.message });
+  }
+});
+
+app.post('/api/leads/:id/signed-contracts', requireAuth, requireAnyPermission('leads.view', 'setter.view'), requireLeadVisible, uploadSignedContract, async (req, res) => {
+  try {
+    const { title, contractId, externalUrl, signedAt, notes } = req.body || {};
+    const document = await signedContractService.create(req.params.id, {
+      title,
+      contractId: contractId ? Number(contractId) : null,
+      externalUrl,
+      signedAt,
+      notes,
+      file: req.file || null,
+      uploadedBy: req.user.id
+    });
+    console.log(`[Contratos] Contrato firmado registrado en el lead #${req.params.id} por ${req.user.email}`);
+    res.status(201).json({ document });
+  } catch (error) {
+    // Multer ya dejó el archivo en disco antes de llegar acá: si el registro no
+    // se guarda, ese archivo no lo referencia nadie.
+    if (req.file) fs.unlink(path.join(signedContractDir, req.file.filename), () => {});
+    if (error.status === 400) return res.status(400).json({ error: error.message });
+    console.error('❌ Error al registrar el contrato firmado:', error);
+    res.status(500).json({ error: 'Error al registrar el contrato firmado.', details: error.message });
+  }
+});
+
+/** Descarga del documento firmado guardado en disco. */
+app.get('/api/leads/:id/signed-contracts/:docId/file', requireAuth, requireAnyPermission('leads.view', 'setter.view'), requireLeadVisible, async (req, res) => {
+  try {
+    const document = await signedContractService.getById(req.params.docId);
+    // Que exista no alcanza: tiene que ser de ESTE lead, que es el que acaba de
+    // pasar el control de visibilidad.
+    if (!document || Number(document.lead_id) !== Number(req.params.id)) {
+      return res.status(404).json({ error: 'Documento no encontrado.' });
+    }
+    if (!document.file_filename) {
+      return res.status(404).json({ error: 'Este contrato firmado está guardado como enlace, no como archivo.' });
+    }
+    res.download(
+      path.join(signedContractDir, document.file_filename),
+      document.file_original_name || document.file_filename
+    );
+  } catch (error) {
+    console.error('❌ Error al descargar el contrato firmado:', error);
+    res.status(500).json({ error: 'Error al descargar el contrato firmado.', details: error.message });
+  }
+});
+
+app.delete('/api/leads/:id/signed-contracts/:docId', requireAuth, requireAnyPermission('leads.view', 'setter.view'), requireLeadVisible, async (req, res) => {
+  try {
+    const document = await signedContractService.getById(req.params.docId);
+    if (!document || Number(document.lead_id) !== Number(req.params.id)) {
+      return res.status(404).json({ error: 'Documento no encontrado.' });
+    }
+    await signedContractService.remove(req.params.docId);
+    if (document.file_filename) fs.unlink(path.join(signedContractDir, document.file_filename), () => {});
+    console.log(`[Contratos] Contrato firmado #${req.params.docId} eliminado por ${req.user.email}`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error al eliminar el contrato firmado:', error);
+    res.status(500).json({ error: 'Error al eliminar el contrato firmado.', details: error.message });
   }
 });
 

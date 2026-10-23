@@ -118,6 +118,66 @@ export function uploadDeliverableAttachment(req, res, next) {
 
 export { deliverableDir };
 
+/**
+ * El contrato firmado que devuelve el cliente.
+ *
+ * Carpeta propia por lo mismo que la de Entregables: son cosas con ciclos de
+ * vida distintos —el entregable es trabajo que sale, el contrato firmado es el
+ * respaldo legal de la venta— y mezcladas no hay forma de saber qué se puede
+ * borrar al limpiar el disco. De estas, la respuesta es "nada".
+ *
+ * El filtro acepta PDF, Word y ODT —lo que se pidió— y además **imágenes**: el
+ * contrato firmado llega muchas veces como la foto que el cliente mandó por
+ * WhatsApp, y rechazarla obligaría a convertirla a PDF antes de guardarla, que
+ * es justo el paso en el que el archivo se queda en el escritorio de alguien.
+ */
+const signedContractDir = path.join(uploadsBase, 'signed-contracts');
+fs.mkdirSync(signedContractDir, { recursive: true });
+
+const SIGNED_CONTRACT_MIMES = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.oasis.opendocument.text',
+  'application/rtf',
+  'text/rtf'
+]);
+
+const signedContractStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, signedContractDir),
+  filename: (req, file, cb) => {
+    const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    cb(null, `${unique}${path.extname(file.originalname)}`);
+  }
+});
+
+const signedContractUpload = multer({
+  storage: signedContractStorage,
+  // 25 MB: acá llega un documento completo escaneado, no un comprobante.
+  limits: { fileSize: 25 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const mime = file.mimetype || '';
+    if (mime.startsWith('image/') || SIGNED_CONTRACT_MIMES.has(mime)) return cb(null, true);
+    cb(new Error('El contrato firmado debe ser un PDF, un Word o una imagen del documento.'));
+  }
+}).single('file');
+
+/**
+ * Middleware para la ruta que registra un contrato firmado: sube
+ * (opcionalmente, porque la otra forma es el enlace) el documento en el campo
+ * "file".
+ */
+export function uploadSignedContract(req, res, next) {
+  signedContractUpload(req, res, (err) => {
+    if (err) {
+      return res.status(400).json({ error: 'Error al subir el contrato firmado: ' + err.message });
+    }
+    next();
+  });
+}
+
+export { signedContractDir };
+
 const financeReceiptStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, financeReceiptDir),
   filename: (req, file, cb) => {

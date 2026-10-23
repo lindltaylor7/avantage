@@ -958,6 +958,39 @@ antes de tocar el arranque de producción.
   entrada solo a quien ya tenía `finance.view`, porque muestra importes. Los gráficos son SVG propios
   (`src/components/report/`), sin librería, y su paleta (oliva + azul) es la que pasó el chequeo de
   daltonismo: el naranja de marca junto al oliva no se distingue con deuteranopía.
+- El **contrato firmado** de un lead (`signed_contracts`, `signedContractService.js`, botón
+  "📝 Contrato firmado" en la ficha del Funnel de Ventas, `SignedContractModal.vue`) es el PDF, el
+  Word o el **enlace de Drive** que vuelve con la firma del cliente. Tiene **tabla propia** y no unas
+  columnas en `contracts` por dos razones que se ven apenas se abre una ficha: hay contratos
+  firmados que el sistema **nunca emitió** —se arman en Word por fuera y vuelven escaneados, y son
+  justo los que más falta hace guardar porque no están en ningún otro lado—, y un lead puede tener
+  **más de uno** (el contrato y después su adenda, o la versión corregida que se volvió a firmar).
+  Cuelga del **lead** y no del proyecto: se firma antes de que el proyecto exista, y es lo que
+  habilita abrirlo.
+  Cada fila es **un archivo o un enlace, nunca los dos ni ninguno** (`validateSource()`). Las dos
+  formas conviven porque el equipo usa las dos: el escaneo que llega por WhatsApp se sube, y el que
+  ya vive en la carpeta de Drive del cliente se enlaza — copiarlo sería tener dos originales y no
+  saber cuál manda. El enlace se valida de verdad (`normalizeExternalUrl()`: solo `http`/`https`),
+  porque lo guardado termina siendo un `href` en la ficha y un `javascript:` pegado ahí se
+  ejecutaría al hacer clic. El archivo acepta PDF, Word, ODT **e imágenes**: el contrato firmado
+  llega muchas veces como la foto que el cliente mandó por WhatsApp, y rechazarla obliga a
+  convertirla antes, que es el paso en el que el archivo se queda en el escritorio de alguien.
+  `contract_id` ata el documento al contrato **emitido** cuando lo hay (el desplegable se
+  preselecciona solo si hay uno), y atarlo **marca ese contrato como `firmado`**. No es editar el
+  contrato —su contenido, sus cláusulas y sus importes quedan intactos—: es anotar un hecho que el
+  documento recién subido ya prueba, y sin eso el contrato quedaría en "borrador" en su pantalla con
+  su copia firmada adjunta en la otra. Quitar el documento **no** lo devuelve a borrador: se firmó
+  igual, y borrar la copia no deshace la firma.
+  Las rutas cuelgan del lead (`/api/leads/:id/signed-contracts`), como las notas y el historial de
+  etapas: así reusan `requireLeadVisible` —cada quien ve sus leads, también sus documentos— y el id
+  del lead viaja en la ruta, que es lo que permite comprobar que el documento sea de ESE lead y no
+  solo que exista (mismo cuidado que la ruta de adjuntos de WhatsApp). El permiso es el del funnel y
+  **no `contracts.manage`**: aquel es para EMITIR contratos y esto es parte de cerrar la venta, que
+  lo hace quien trabaja el lead. Los contratos emitidos que viajan como opciones del desplegable van
+  **sin importes**, por la misma regla de siempre.
+  `signed_contracts` está en **CASCADE** sobre el lead, así que `deletionBlockReason()` impide
+  borrar una ficha que tenga uno: de todo lo que cuelga de un lead, el respaldo de la firma es lo
+  único que no se puede volver a generar desde el sistema.
 - El **Reporte de Setters** (`/admin/reporte-setters`, `SetterReportView.vue`, permiso
   `reports.setters`, `setterReportService.js`, `GET /api/setter-report?months=3|6|12`) contesta cómo
   le fue a cada setter: leads atribuidos, reuniones conseguidas, cierres y en qué etapa quedaron los

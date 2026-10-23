@@ -1254,7 +1254,7 @@ ${note}` : note;
    */
   async workloadByLead(ids = []) {
     const unicos = [...new Set(ids.map(Number).filter(Boolean))];
-    const mapa = new Map(unicos.map((id) => [id, { projects: 0, income: 0, contracts: 0, quotes: 0, commissions: 0 }]));
+    const mapa = new Map(unicos.map((id) => [id, { projects: 0, income: 0, contracts: 0, quotes: 0, commissions: 0, signedContracts: 0 }]));
     if (unicos.length === 0) return mapa;
 
     const contar = async (tabla, campo) => {
@@ -1270,7 +1270,8 @@ ${note}` : note;
       contar('finance_income', 'income'),
       contar('contracts', 'contracts'),
       contar('quotes', 'quotes'),
-      contar('sales_commissions', 'commissions')
+      contar('sales_commissions', 'commissions'),
+      contar('signed_contracts', 'signedContracts')
     ]);
     return mapa;
   }
@@ -1333,6 +1334,13 @@ export function deletionBlockReason(workload) {
   if (workload.income > 0) tiene.push(`${workload.income} cuota(s) en Finanzas`);
   if (workload.contracts > 0) tiene.push(`${workload.contracts} contrato(s)`);
   if (workload.income > 0 || workload.contracts > 0) pasaria.push('el dinero quedaría sin cliente');
+  // El contrato firmado está en CASCADE y es el respaldo legal de la venta: de
+  // todo lo que cuelga de una ficha, es lo único que no se puede volver a
+  // generar desde el sistema.
+  if (workload.signedContracts > 0) {
+    tiene.push(`${workload.signedContracts} contrato(s) firmado(s)`);
+    pasaria.push('se borraría el respaldo de la firma');
+  }
 
   if (tiene.length === 0) return null;
 

@@ -938,6 +938,18 @@
               📄 Generar contrato
             </router-link>
             <button
+              type="button"
+              class="btn-action-secondary"
+              :class="{ 'has-signed': signedContracts.length > 0 }"
+              :title="signedContracts.length
+                ? 'Ya hay contrato firmado guardado. Puedes agregar otro (una adenda, una versión corregida).'
+                : 'Guardar el PDF, el Word o el enlace de Drive del contrato que el cliente devolvió firmado'"
+              @click="showSignedModal = true"
+            >
+              {{ signedContracts.length ? '✅' : '📝' }} Contrato firmado
+              <span v-if="signedContracts.length > 1" class="signed-count">{{ signedContracts.length }}</span>
+            </button>
+            <button
               v-if="hasPermission('calendar.view')"
               type="button"
               class="btn-action-secondary"
@@ -1145,6 +1157,54 @@
             </ul>
           </div>
           <p v-else-if="quoteHistoryLoading" class="quote-history-empty">Cargando cotizaciones…</p>
+
+          <!-- Contratos firmados: el respaldo de la venta, en la misma ficha -->
+          <div v-if="signedContracts.length" class="quote-history signed-history">
+            <h4 class="quote-history-title">Contratos firmados ({{ signedContracts.length }})</h4>
+            <ul class="quote-history-list">
+              <li v-for="doc in signedContracts" :key="doc.id" class="quote-history-item signed-item">
+                <div class="quote-history-main">
+                  <span class="quote-history-number">
+                    {{ doc.source === 'archivo' ? '📎' : '🔗' }} {{ doc.title }}
+                  </span>
+                </div>
+                <div class="quote-history-meta">
+                  <span>{{ doc.signed_at ? `Firmado ${formatDateShort(doc.signed_at)}` : `Subido ${formatDateShort(doc.created_at)}` }}</span>
+                  <span v-if="doc.uploaded_by_name">· {{ doc.uploaded_by_name }}</span>
+                  <span v-if="doc.contract_title">· {{ doc.contract_title }}</span>
+                  <span v-if="doc.notes" class="signed-note">· {{ doc.notes }}</span>
+                </div>
+                <div class="signed-actions">
+                  <!--
+                    El enlace se abre en una pestaña y el archivo se descarga por
+                    la API: el `src` directo no lleva el token de sesión, así que
+                    un <a href> al archivo respondería 401.
+                  -->
+                  <a
+                    v-if="doc.source === 'enlace'"
+                    :href="doc.external_url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="quote-history-open"
+                  >🔗 Abrir</a>
+                  <button
+                    v-else
+                    type="button"
+                    class="quote-history-open"
+                    :disabled="signedDownloading === doc.id"
+                    @click="downloadSignedContract(doc)"
+                  >{{ signedDownloading === doc.id ? 'Abriendo…' : '📄 Descargar' }}</button>
+                  <button
+                    type="button"
+                    class="signed-delete"
+                    title="Quitar este documento de la ficha"
+                    @click="removeSignedContract(doc)"
+                  >🗑️</button>
+                </div>
+              </li>
+            </ul>
+            <p v-if="signedError" class="signed-error">{{ signedError }}</p>
+          </div>
          </div>
 
           <!-- Panel lateral: la conversación de WhatsApp del lead, para leerla y
@@ -1154,6 +1214,15 @@
         </div>
       </div>
     </div>
+
+    <!-- Contrato firmado: el PDF/Word/enlace que devuelve el cliente -->
+    <SignedContractModal
+      v-if="showSignedModal && selectedLead"
+      :lead="selectedLead"
+      :contracts="leadContracts"
+      @close="showSignedModal = false"
+      @saved="onSignedContractSaved"
+    />
 
     <!-- Cierre de venta: monto del primer pago al pasar el lead a la etapa ganadora -->
     <WinDealModal
@@ -1174,6 +1243,7 @@ import { hasPermission } from '../auth.js';
 import { cameFromForm } from '../leadOrigin.js';
 import WinDealModal from '../components/WinDealModal.vue';
 import LeadNotes from '../components/LeadNotes.vue';
+import SignedContractModal from '../components/SignedContractModal.vue';
 import LeadConversation from '../components/LeadConversation.vue';
 import MetaReconciliationModal from '../components/MetaReconciliationModal.vue';
 import LeadAssignee from '../components/LeadAssignee.vue';
@@ -1361,6 +1431,19 @@ const quoteDocLoading = ref(false);
 // Historial de cotizaciones del lead abierto. El registro siempre existió en
 // la base; lo que faltaba era traerlo al panel.
 const quoteHistory = ref([]);
+
+/*
+ * Contrato firmado: el PDF, el Word o el enlace de Drive que devuelve el
+ * cliente. `leadContracts` son los contratos EMITIDOS del lead, que vienen en
+ * la misma respuesta porque son las opciones del desplegable "¿a cuál
+ * corresponde?" — pedirlos aparte serían dos llamadas para dibujar un
+ * formulario.
+ */
+const signedContracts = ref([]);
+const leadContracts = ref([]);
+const showSignedModal = ref(false);
+const signedDownloading = ref(null);
+const signedError = ref('');
 const quoteHistoryLoading = ref(false);
 // Movimiento de etapa que disparó la última cotización, con la etapa previa
 // para poder deshacerlo. Se ofrece deshacer mientras el aviso siga visible en
@@ -1393,7 +1476,14 @@ watch(selectedLead, () => {
   quoteSuccess.value = null;
   quoteMove.value = null;
   quoteHistory.value = [];
-  if (selectedLead.value) loadQuoteHistory();
+  signedContracts.value = [];
+  leadContracts.value = [];
+  showSignedModal.value = false;
+  signedError.value = '';
+  if (selectedLead.value) {
+    loadQuoteHistory();
+    loadSignedContracts();
+  }
 
   showStageHistory.value = false;
   stageHistory.value = [];
@@ -2123,6 +2213,85 @@ async function loadQuoteHistory() {
   }
 }
 
+/**
+ * Trae los contratos firmados del lead abierto y, de paso, sus contratos
+ * emitidos (las opciones del desplegable del modal).
+ */
+async function loadSignedContracts() {
+  const lead = selectedLead.value;
+  if (!lead) return;
+  try {
+    const response = await apiFetch(`/api/leads/${lead.id}/signed-contracts`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Error al obtener los contratos firmados.');
+    // El lead pudo cambiar mientras la petición viajaba.
+    if (selectedLead.value?.id !== lead.id) return;
+    signedContracts.value = data.documents || [];
+    leadContracts.value = data.contracts || [];
+  } catch {
+    // Como el historial de cotizaciones: es informativo y no bloquea la ficha.
+    if (selectedLead.value?.id === lead.id) {
+      signedContracts.value = [];
+      leadContracts.value = [];
+    }
+  }
+}
+
+/** Lo recién guardado entra arriba sin volver a pedir la lista entera. */
+function onSignedContractSaved(doc) {
+  showSignedModal.value = false;
+  signedError.value = '';
+  if (doc) signedContracts.value = [doc, ...signedContracts.value];
+  // El contrato emitido pudo quedar marcado como firmado: se recarga para que
+  // el desplegable lo diga la próxima vez que se abra el modal.
+  loadSignedContracts();
+}
+
+/**
+ * Descarga el archivo por la API y no con un `<a href>`: la ruta exige el token
+ * de sesión, que un enlace directo del navegador no manda.
+ */
+async function downloadSignedContract(doc) {
+  const lead = selectedLead.value;
+  if (!lead || signedDownloading.value) return;
+  signedDownloading.value = doc.id;
+  signedError.value = '';
+  try {
+    const response = await apiFetch(`/api/leads/${lead.id}/signed-contracts/${doc.id}/file`);
+    if (!response.ok) throw new Error('No se pudo descargar el documento.');
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = window.document.createElement('a');
+    link.href = url;
+    link.download = doc.file_original_name || doc.title;
+    link.click();
+    // Se libera después del clic: revocarlo antes cancela la descarga.
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  } catch (error) {
+    signedError.value = error.message;
+  } finally {
+    signedDownloading.value = null;
+  }
+}
+
+async function removeSignedContract(doc) {
+  const lead = selectedLead.value;
+  if (!lead) return;
+  const aviso = doc.source === 'enlace'
+    ? `¿Quitar "${doc.title}" de la ficha? El documento en Drive no se toca.`
+    : `¿Quitar "${doc.title}" de la ficha? El archivo guardado se borra y no se puede recuperar.`;
+  if (!window.confirm(aviso)) return;
+  signedError.value = '';
+  try {
+    const response = await apiFetch(`/api/leads/${lead.id}/signed-contracts/${doc.id}`, { method: 'DELETE' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No se pudo quitar el documento.');
+    signedContracts.value = signedContracts.value.filter((row) => row.id !== doc.id);
+  } catch (error) {
+    signedError.value = error.message;
+  }
+}
+
 /** Devuelve el lead a la etapa en la que estaba antes de cotizarlo. */
 async function undoQuoteMove() {
   const move = quoteMove.value;
@@ -2422,7 +2591,17 @@ function normalizePhone(phone) {
 
 function formatDateShort(dateStr) {
   if (!dateStr) return '—';
-  const d = new Date(dateStr);
+  /*
+   * Un día suelto ("2026-10-20", como vienen `signed_at` o `valid_until`) lo
+   * parsea `new Date()` a medianoche UTC, y en Lima (UTC-5) eso se muestra como
+   * el día ANTERIOR. Se arma como fecha local para que el día que se escribió
+   * sea el día que se lee. Una marca de tiempo completa no tiene ese problema y
+   * se deja pasar tal cual.
+   */
+  const soloDia = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStr));
+  const d = soloDia
+    ? new Date(Number(soloDia[1]), Number(soloDia[2]) - 1, Number(soloDia[3]))
+    : new Date(dateStr);
   return d.toLocaleDateString('es-PE', { day: '2-digit', month: 'short' });
 }
 
@@ -3751,6 +3930,50 @@ onMounted(() => {
 .quote-history-open:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .quote-history-empty { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.8rem; }
+
+/*
+ * Contratos firmados. Reusan la lista de las cotizaciones —es el mismo tipo de
+ * fila en la misma ficha— y solo agregan lo que es distinto: dos acciones en
+ * vez de una (abrir y quitar) y el borde verde que dice de un vistazo que la
+ * venta tiene su respaldo.
+ */
+.signed-history .quote-history-item { border-left: 3px solid var(--accent-emerald, #2e7d46); }
+.signed-item { grid-template-columns: 1fr auto; }
+.signed-note { font-style: italic; }
+.signed-actions { grid-column: 2; grid-row: 1 / span 2; display: flex; align-items: center; gap: 0.35rem; }
+.signed-actions .quote-history-open { grid-column: auto; grid-row: auto; text-decoration: none; }
+
+.signed-delete {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+  line-height: 1;
+}
+.signed-delete:hover { border-color: var(--accent-rose); }
+
+.signed-error { margin: 0.5rem 0 0; font-size: 0.76rem; color: var(--accent-rose); }
+
+/* El botón cambia de cara cuando ya hay contrato guardado: el ✅ solo no
+   alcanza para notarlo en una fila de seis botones. */
+.btn-action-secondary.has-signed {
+  border-color: var(--accent-emerald, #2e7d46);
+  color: var(--accent-emerald, #2e7d46);
+}
+.signed-count {
+  display: inline-block;
+  min-width: 1.1rem;
+  margin-left: 0.3rem;
+  padding: 0 0.25rem;
+  border-radius: 999px;
+  background: var(--accent-emerald, #2e7d46);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-align: center;
+}
 
 .final-tag {
   color: var(--accent-emerald);
