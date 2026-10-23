@@ -41,6 +41,7 @@ const PERMISOS = [
   { key: 'finance.view', label: 'Finanzas (Ingresos y Egresos)' },
   { key: 'finance.verify', label: 'Verificar ingresos (Finanzas)' },
   { key: 'reports.general', label: 'Reporte General (gerencia)' },
+  { key: 'reports.setters', label: 'Reporte de Setters (desempeño del equipo)' },
   { key: 'contracts.manage', label: 'Contratos' },
   { key: 'careers.manage', label: 'Catálogo de Carreras' },
   { key: 'roles.manage', label: 'Roles y Permisos' }

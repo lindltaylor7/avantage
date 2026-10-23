@@ -958,6 +958,55 @@ antes de tocar el arranque de producción.
   entrada solo a quien ya tenía `finance.view`, porque muestra importes. Los gráficos son SVG propios
   (`src/components/report/`), sin librería, y su paleta (oliva + azul) es la que pasó el chequeo de
   daltonismo: el naranja de marca junto al oliva no se distingue con deuteranopía.
+- El **Reporte de Setters** (`/admin/reporte-setters`, `SetterReportView.vue`, permiso
+  `reports.setters`, `setterReportService.js`, `GET /api/setter-report?months=3|6|12`) contesta cómo
+  le fue a cada setter: leads atribuidos, reuniones conseguidas, cierres y en qué etapa quedaron los
+  demás. **No tiene tabla propia** —como Cobranzas y el Reporte de Leads—: guardar esas cifras
+  obligaría a reescribirlas en cada movimiento de lead.
+  **Un lead se le atribuye a `leads.setter_user_id` y, si no hay sello, a `assigned_user_id`**
+  (`attributedSetterId()`). El sello se escribe una vez, al graduar, con quien tenía el lead
+  entonces, y es lo que sobrevive a que la ficha pase al closer: mirando solo el responsable actual,
+  cada venta cerrada se le atribuiría al closer. Es la misma pareja de columnas de la que cuelga la
+  comisión de la setter, así que el reporte y lo que se le paga no pueden discrepar. Se resuelve en
+  JavaScript y no con un COALESCE en SQL para que la regla exista una sola vez.
+  **Los resultados se miden por cohorte y la actividad por fecha del hecho**, y son dos cosas
+  distintas con dos nombres distintos en pantalla. "Leads de octubre" son los que ENTRARON en
+  octubre, y su reunión y su cierre cuentan en octubre aunque hayan ocurrido después: es la única
+  forma de que las tasas compartan denominador (contar reuniones del mes contra leads del mes da
+  porcentajes mayores al 100%). El precio es que el trabajo hecho este mes sobre leads viejos no
+  aparece, y por eso va aparte la **actividad registrada** (`lead_stage_changes` del período,
+  agrupada por `actor_id`), que es lo único que contesta "¿qué trabajó esta persona este mes?".
+  Asignar no deja rastro en la bitácora, así que "cuándo se le asignó" no existe como dato: la
+  cohorte por `leads.created_at` es lo que sí se puede medir.
+  Qué significa cada desenlace se pregunta donde ya está contestado: `loadWinningStatuses()` (con el
+  proyecto abierto como respaldo, igual que en Campañas), `LOST_STATUSES`, `leadHasGraduated()` y
+  `buildStatusLabeler()` — ninguna lista propia, porque las columnas de los dos tableros las crea el
+  equipo. Por eso `LOST_STATUSES`/`isLostStatus()` pasaron a vivir en `salesFunnelStage.js`, el
+  módulo del vocabulario de `leads.status`, y Campañas los importa de ahí en vez de tener su copia.
+  **Una reunión cancelada en Google no es una reunión conseguida** (va a su propio contador), y el
+  **cierre por reunión** se calcula con `wonWithMeeting / withMeeting` y no con `won / withMeeting`:
+  hay ventas que se cierran sin reunión cargada y con el total de ganados arriba la tasa daba 200%
+  (se vio al correr el reporte contra la base). Una tasa que supera el 100% no es un dato, es un
+  aviso de que el numerador no pertenece al denominador. Los plazos son **medianas** y no promedios:
+  un lead que se agendó seis meses después corre el promedio de todo el equipo.
+  **La visibilidad es la del funnel, no una propia**: reusa `leadService.visibilityQueryFor()` +
+  `applyLeadVisibility()`, así que quien ve solo lo suyo ve una sola fila —la de su propio
+  desempeño— y `scope` viaja a la pantalla para que lo explique. De acá solo salen conteos, pero un
+  conteo sobre los leads de otra persona también es información sobre esos leads. **No muestra
+  importes**, por la misma razón que Proyectos y Entregables: lo que mide a un setter es cuántos
+  leads trabajó y cuántos cerraron, no cuánto facturó cada venta. Los leads **sin responsable** se
+  informan aparte y no se reparten entre las filas (repartidos inflarían a quien no los trabajó),
+  pero sí cuentan en el total del equipo y en el desglose de etapas, que por eso cuadra con las
+  tarjetas de arriba.
+  La **barra de composición** (`ReportStackedBars.vue`) va al 100% y no a escala: lo que se compara
+  es quién tiene la cartera trabada y quién la cierra, y a escala la fila del que más leads tiene
+  tapa al resto — el tamaño va escrito al lado del nombre. Su orden es **Ganado · En proceso ·
+  Perdido** a propósito: así el oliva y el rojo nunca se tocan (con deuteranopía son el mismo color,
+  ΔE 1,5) y el peor par adyacente sube a ΔE 16,8. El trío del gráfico mensual (azul · magenta ·
+  oliva) pasa los seis chequeos de la guía de visualización en los dos temas y en todos los pares.
+  La aritmética del período (`reportPeriod.js`) y los formatos de cifra y de variación
+  (`src/components/report/reportFormat.js`) se comparten con el Reporte General: con una copia por
+  pantalla, el mismo mes se leería distinto según desde dónde se mire.
 - Los botones de barra y de fila del panel (`.btn-action-primary` / `-secondary` / `-ghost`), el
   encabezado de los modales (`.modal-title`, `.modal-close-btn`) y `.heading-icon` viven en
   `src/style.css`. Estaban copiados dentro del `<style scoped>` de cada vista, así que una pantalla

@@ -3,7 +3,7 @@ import path from 'path';
 import { db } from '../db/connection.js';
 import { campaignAdImageDir } from '../middleware/upload.js';
 import { PHONE_MATCH_KEY_SQL, phoneMatchKey } from './leadService.js';
-import { loadWinningStatuses } from './salesFunnelStage.js';
+import { LOST_STATUSES, loadWinningStatuses } from './salesFunnelStage.js';
 
 /**
  * Campañas de marketing digital: definición manual (nombre, presupuesto,
@@ -62,7 +62,6 @@ const AD_IMAGE_MIME_TYPES = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image
  * la misma pregunta con tres listas propias es exactamente como se llega a que
  * cada una diga un número distinto.
  */
-const LOST_STATUSES = new Set(['perdido', 'descartado']);
 const APPOINTMENT_STATUSES = new Set(['cita_agendada']);
 
 /**

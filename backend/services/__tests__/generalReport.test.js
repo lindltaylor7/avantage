@@ -3,15 +3,19 @@ import assert from 'node:assert/strict';
 import {
   agingBucket,
   buildFunnel,
+  sumSeries,
+  topWithOther
+} from '../generalReportService.js';
+// La aritmética del período se comparte con el Reporte de Setters desde que
+// existen los dos (ver `reportPeriod.js`).
+import {
   lastMonthKeys,
   nextMonthKeys,
   normalizeMonths,
   percentChange,
   ratio,
-  sumSeries,
-  toDayKey,
-  topWithOther
-} from '../generalReportService.js';
+  toDayKey
+} from '../reportPeriod.js';
 
 /**
  * Reporte General: las reglas que deciden qué cifra ve la gerencia, probadas

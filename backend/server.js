@@ -25,6 +25,7 @@ import { LeadNoteService } from './services/leadNoteService.js';
 import { LeadStageChangeService } from './services/leadStageChangeService.js';
 import { LeadReportService } from './services/leadReportService.js';
 import { GeneralReportService } from './services/generalReportService.js';
+import { SetterReportService } from './services/setterReportService.js';
 import { MetaConversionsService } from './services/metaConversionsService.js';
 import { DocumentService } from './services/documentService.js';
 import { CampaignService } from './services/campaignService.js';
@@ -200,6 +201,7 @@ const financeLedgerService = new FinanceLedgerService();
 // El Reporte General lee la caja del mismo resumen que Finanzas: así las dos
 // pantallas no pueden decir cifras distintas.
 const generalReportService = new GeneralReportService({ financeLedgerService });
+const setterReportService = new SetterReportService({ leadService, userService });
 // Avisa al equipo de Entregables cuando Finanzas verifica una cuota: es el
 // momento en que el trabajo atado a ella se puede entregar, y ocurre en otra
 // pantalla y a cargo de otra persona. El destinatario sale de la configuración
@@ -2296,6 +2298,28 @@ app.get('/api/general-report', requireAuth, requirePermission('reports.general')
   } catch (error) {
     console.error('❌ Error al armar el Reporte General:', error);
     res.status(500).json({ error: 'Error al armar el Reporte General.', details: error.message });
+  }
+});
+
+/**
+ * Reporte de Setters: cómo le fue a cada setter en el período — leads
+ * atribuidos, reuniones conseguidas, cierres y en qué etapa quedaron sus leads.
+ *
+ * Permiso propio (`reports.setters`) porque es supervisión y no trabajar leads,
+ * pero NO amplía lo que cada quien ve: el servicio reusa la regla de
+ * visibilidad del funnel, así que quien ve solo sus leads ve una sola fila, la
+ * suya (`scope` viaja en la respuesta para que la pantalla lo diga).
+ *
+ * Es su propia ruta y no `/api/leads/setters`, que Express resolvería contra
+ * `/api/leads/:id` tomando "setters" como un id — el mismo motivo que
+ * `/api/lead-report`.
+ */
+app.get('/api/setter-report', requireAuth, requirePermission('reports.setters'), async (req, res) => {
+  try {
+    res.json(await setterReportService.report(req.user, req.query));
+  } catch (error) {
+    console.error('❌ Error al armar el Reporte de Setters:', error);
+    res.status(500).json({ error: 'Error al armar el Reporte de Setters.', details: error.message });
   }
 });
 

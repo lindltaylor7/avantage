@@ -283,6 +283,15 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { apiFetch } from '../apiClient.js';
 import ReportBarChart from '../components/report/ReportBarChart.vue';
 import ReportBarList from '../components/report/ReportBarList.vue';
+import {
+  delta,
+  integer,
+  longMonth,
+  pct,
+  periodLabel,
+  pointDelta,
+  shortMonth as shortMonthOf
+} from '../components/report/reportFormat.js';
 
 const PERIODS = [3, 6, 12];
 const STORAGE_KEY = 'reporteGeneral.months';
@@ -324,9 +333,7 @@ onMounted(load);
 
 // --- Formatos ---
 const moneyFmt = new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN', maximumFractionDigits: 0 });
-const intFmt = new Intl.NumberFormat('es-PE');
 const money = (v) => moneyFmt.format(Number(v) || 0);
-const integer = (v) => intFmt.format(Number(v) || 0);
 function moneyCompact(v) {
   const n = Number(v) || 0;
   const abs = Math.abs(n);
@@ -335,20 +342,9 @@ function moneyCompact(v) {
   if (abs >= 1e3) return `${sign}S/ ${(abs / 1e3).toFixed(1).replace(/\.0$/, '')}k`;
   return `${sign}S/ ${Math.round(abs)}`;
 }
-const pct = (v) => (v === null || v === undefined ? '—' : `${String(v).replace('.', ',')}%`);
-
-const MONTHS_SHORT = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
-const MONTHS_LONG = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
-const splitKey = (key) => key.split('-').map(Number);
-const shortMonth = (key) => {
-  const [y, m] = splitKey(key);
-  return m === 1 || months.value === 12 ? `${MONTHS_SHORT[m - 1]} ${String(y).slice(2)}` : MONTHS_SHORT[m - 1];
-};
-const longMonth = (key) => {
-  const [y, m] = splitKey(key);
-  return `${MONTHS_LONG[m - 1]} ${y}`;
-};
-const periodLabel = (keys) => (keys?.length ? `${longMonth(keys[0])} – ${longMonth(keys[keys.length - 1])}` : '');
+// Con doce barras en el eje, el año va en todas: sin él no se sabe si la
+// primera "oct" es la de este año o la del anterior.
+const shortMonth = (key) => shortMonthOf(key, months.value === 12);
 
 const monthLabels = computed(() => report.value.monthly.months.map(shortMonth));
 const monthTitles = computed(() => report.value.monthly.months.map(longMonth));
@@ -358,32 +354,6 @@ const generatedLabel = computed(() => new Date(report.value.generatedAt).toLocal
 }));
 
 // --- KPIs ---
-/**
- * La flecha dice si subió o bajó; el color, si eso es bueno. Que los egresos
- * suban es una flecha hacia arriba en rojo, y por eso son dos cosas distintas.
- */
-function delta(change, { higherIsBetter = true } = {}) {
-  if (change === null || change === undefined) return null;
-  if (change === 0) return { arrow: '→', text: 'sin cambio', tone: 'neutral' };
-  const up = change > 0;
-  const good = up === higherIsBetter;
-  return {
-    arrow: up ? '▲' : '▼',
-    text: `${up ? '+' : ''}${String(change).replace('.', ',')}%`,
-    tone: good ? 'good' : 'bad'
-  };
-}
-function pointDelta(current, previous) {
-  if (current === null || previous === null || current === undefined || previous === undefined) return null;
-  const diff = Math.round((current - previous) * 10) / 10;
-  if (diff === 0) return { arrow: '→', text: 'sin cambio', tone: 'neutral' };
-  return {
-    arrow: diff > 0 ? '▲' : '▼',
-    text: `${diff > 0 ? '+' : ''}${String(diff).replace('.', ',')} pts`,
-    tone: diff > 0 ? 'good' : 'bad'
-  };
-}
-
 const kpiTiles = computed(() => {
   const k = report.value.kpis;
   const r = report.value.receivables;

@@ -1,5 +1,17 @@
 import { db } from '../db/connection.js';
 import { loadWinningStatuses } from './salesFunnelStage.js';
+import {
+  dayKeyOf,
+  firstDayAfter,
+  firstDayOf,
+  lastMonthKeys,
+  nextMonthKeys,
+  normalizeMonths,
+  percentChange,
+  ratio,
+  round2,
+  toDayKey
+} from './reportPeriod.js';
 
 /**
  * Reporte General: la pantalla de gerencia. No es otro módulo de datos sino
@@ -27,74 +39,8 @@ import { loadWinningStatuses } from './salesFunnelStage.js';
  * sola no dice si las cosas van mejor o peor.
  */
 
-export const ALLOWED_MONTHS = [3, 6, 12];
-export const DEFAULT_MONTHS = 6;
 const TOP_CHANNELS = 7;
 const PROJECTION_MONTHS = 6;
-
-export function normalizeMonths(value) {
-  const n = Number(value);
-  return ALLOWED_MONTHS.includes(n) ? n : DEFAULT_MONTHS;
-}
-
-const pad = (n) => String(n).padStart(2, '0');
-export const monthKeyOf = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}`;
-const dayKeyOf = (date) => `${monthKeyOf(date)}-${pad(date.getDate())}`;
-
-/** Las claves `YYYY-MM` de los últimos `count` meses, el actual incluido. */
-export function lastMonthKeys(count, now = new Date()) {
-  const keys = [];
-  for (let i = count - 1; i >= 0; i--) {
-    keys.push(monthKeyOf(new Date(now.getFullYear(), now.getMonth() - i, 1)));
-  }
-  return keys;
-}
-
-/** Las claves `YYYY-MM` de los próximos `count` meses, el actual incluido. */
-export function nextMonthKeys(count, now = new Date()) {
-  const keys = [];
-  for (let i = 0; i < count; i++) {
-    keys.push(monthKeyOf(new Date(now.getFullYear(), now.getMonth() + i, 1)));
-  }
-  return keys;
-}
-
-/** El primer día del mes `YYYY-MM` como `YYYY-MM-01`. */
-const firstDayOf = (monthKey) => `${monthKey}-01`;
-
-/** El primer día del mes siguiente a `YYYY-MM`. */
-function firstDayAfter(monthKey) {
-  const [y, m] = monthKey.split('-').map(Number);
-  return dayKeyOf(new Date(y, m, 1));
-}
-
-/** Normaliza lo que devuelve mysql2 (Date o texto) a `YYYY-MM-DD`. */
-export function toDayKey(value) {
-  if (!value) return null;
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : dayKeyOf(value);
-  const text = String(value);
-  return /^\d{4}-\d{2}-\d{2}/.test(text) ? text.slice(0, 10) : null;
-}
-
-/**
- * Variación porcentual contra el período anterior. `null` cuando no hay base:
- * pasar de 0 a algo no es "+∞%", es que antes no había nada que comparar.
- */
-export function percentChange(current, previous) {
-  const cur = Number(current) || 0;
-  const prev = Number(previous) || 0;
-  if (prev === 0) return null;
-  return Math.round(((cur - prev) / Math.abs(prev)) * 1000) / 10;
-}
-
-/** División que no explota: sin denominador no hay tasa. */
-export function ratio(part, total) {
-  const t = Number(total) || 0;
-  if (t === 0) return null;
-  return Math.round(((Number(part) || 0) / t) * 1000) / 10;
-}
-
-const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 /**
  * El tramo de antigüedad de una cuota pendiente según su fecha pactada.
