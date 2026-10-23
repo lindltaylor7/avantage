@@ -429,15 +429,26 @@
 .receipt-cell {
   display: flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: 0.35rem;
   flex-wrap: wrap;
+  /* Dos miniaturas y el botón de agregar entran en una línea: con el ancho
+     justo, el "+" caía solo a un segundo renglón y estiraba la fila al doble.
+     Son 46 px cada uno más los dos huecos de 0,35rem. */
+  min-width: 150px;
 }
 
+/*
+ * La miniatura es VERTICAL y no cuadrada: un comprobante es la captura de un
+ * Yape o de una transferencia, siempre más alta que ancha. En un cuadrado de
+ * 34 px recortado al centro (`object-fit: cover`) lo que se veía era una tira
+ * del medio —ni el monto, ni la fecha, ni a quién se le pagó—, que es lo que
+ * el equipo reportó como "se ve cortado".
+ */
 .receipt-thumb {
   position: relative;
   display: inline-flex;
-  width: 34px;
-  height: 34px;
+  width: 46px;
+  height: 60px;
   border-radius: var(--radius-sm);
   overflow: hidden;
   border: 1px solid var(--border-color);
@@ -446,8 +457,17 @@
   background: var(--surface-2);
 }
 
-.receipt-thumb-link { display: block; width: 100%; height: 100%; }
-.receipt-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.receipt-thumb-link {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+}
+/* `contain` y no `cover`: entra el comprobante entero aunque sobre fondo. */
+.receipt-thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
 
 .receipt-thumb-pdf {
   display: flex;
@@ -501,8 +521,8 @@
 .receipt-thumb:hover .receipt-remove { display: block; }
 
 .receipt-add {
-  width: 34px;
-  height: 34px;
+  width: 46px;
+  height: 60px;
   border-radius: var(--radius-sm);
   border: 1px dashed var(--border-color);
   display: flex;

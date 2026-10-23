@@ -251,43 +251,12 @@
                   <span class="ledger-stack-main">{{ row.asiento_por_destino || '—' }}</span>
                 </td>
                 <td>
-                  <div class="receipt-cell">
-                    <span
-                      v-for="rcpt in row.receipts"
-                      :key="rcpt.id"
-                      class="receipt-thumb"
-                      :title="receiptTitle(rcpt)"
-                    >
-                      <a
-                        v-if="receiptUrls[rcpt.id]"
-                        :href="receiptUrls[rcpt.id]"
-                        target="_blank"
-                        rel="noopener"
-                        class="receipt-thumb-link"
-                      >
-                        <span v-if="isPdfReceipt(rcpt.mime_type, rcpt.original_name)" class="receipt-thumb-pdf">PDF</span>
-                        <img v-else :src="receiptUrls[rcpt.id]" alt="Comprobante" />
-                      </a>
-                      <span v-else-if="rcpt.missing" class="receipt-thumb-missing">!</span>
-                      <span v-else class="receipt-thumb-loading">…</span>
-                      <button
-                        type="button"
-                        class="receipt-remove"
-                        title="Eliminar comprobante"
-                        @click="removeReceipt(rcpt.id)"
-                      >✕</button>
-                    </span>
-                    <label class="receipt-add" title="Agregar comprobantes (imágenes o PDF)">
-                      <input
-                        type="file"
-                        accept="image/*,application/pdf"
-                        multiple
-                        hidden
-                        @change="(e) => uploadReceipts(row.id, e)"
-                      />
-                      +
-                    </label>
-                  </div>
+                  <ReceiptCell
+                    :receipts="row.receipts"
+                    :urls="receiptUrls"
+                    @upload="(e) => uploadReceipts(row.id, e)"
+                    @remove="removeReceipt"
+                  />
                 </td>
                 <td class="ledger-col-actions">
                   <div class="ledger-row-actions">
@@ -325,11 +294,12 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { apiFetch } from '../../apiClient.js';
-import { isPdfReceipt, loadReceiptUrl } from './receiptImage.js';
+import { loadReceiptUrl } from './receiptImage.js';
 import { BANCOS, calcItf } from './incomeOptions.js';
 import { currencySymbol, dayOnly, formatAmount, formatDate } from './format.js';
 import { useLedgerTable } from './useLedgerTable.js';
 import LedgerPagination from './LedgerPagination.vue';
+import ReceiptCell from './ReceiptCell.vue';
 import './ledger.css';
 
 const props = defineProps({
@@ -461,12 +431,6 @@ function resetForm() {
   itfTocado.value = false;
   pendingFiles = [];
   if (fileInput.value) fileInput.value.value = '';
-}
-
-/** Texto del tooltip de una miniatura, avisando si el archivo ya no está. */
-function receiptTitle(rcpt) {
-  const name = rcpt.original_name || 'Comprobante';
-  return rcpt.missing ? `${name} — el archivo ya no está en el servidor` : name;
 }
 
 function openCreate() {

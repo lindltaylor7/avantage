@@ -363,6 +363,27 @@ antes de tocar el arranque de producción.
   puro porque el hosting compartido no corre un navegador headless): es la que se adjunta al correo
   del cliente y la que muestra la vista previa antes de enviarlo, así que lo que se ve es
   exactamente lo que se manda.
+  Los datos de la empresa viven en `COMPANY` (en `quotationDocument.js`) y tiene **tres campos de
+  domicilio y teléfono que no son intercambiables**: `address`/`addressCity` es el **domicilio
+  legal** —el que firma el contrato (`domicilio_empresa`), el que da el bot y el que figura en la
+  ficha RUC—, `offices` son las **sedes de atención** que se imprimen al pie de la cotización (LIMA
+  y HUANCAYO), y `contactPhones` son los números que van en el encabezado del **contrato**, el
+  documento que el cliente se queda y al que recurre para reclamar. Abrir una sede comercial no
+  cambia el domicilio inscrito, así que pisar `address` con la dirección de Lima haría que el
+  contrato dijera una dirección que no es la de SUNAT. El **RUC va en el encabezado** de la
+  cotización y no solo al pie: es el dato con el que el cliente comprueba que la empresa existe, y
+  al pie llega recén después de haber leído el precio. Los cuatro los guarda
+  `__tests__/documentBrandData.test.js`, porque están escritos en el HTML y no en una tabla.
+- La **celda de comprobantes del libro de Finanzas** es `ReceiptCell.vue`, compartida por INGRESOS,
+  el Libro Diario y las dos filas de Salarios (el acuerdo y sus pagos). Estaba copiada **cuatro
+  veces**, idéntica hasta el último atributo, así que arreglar la miniatura en una dejaba las otras
+  tres mostrando un pedazo del comprobante. Dos decisiones: la miniatura es **vertical** (46×60) y
+  con `object-fit: contain`, porque un comprobante es la captura de un Yape o de una transferencia
+  —siempre más alta que ancha— y en un cuadrado recortado al centro lo que se veía era una tira del
+  medio, sin el monto ni la fecha ni a quién se le pagó (lo que el equipo reportó como «se ve
+  cortado» en los pagos hijos); y el clic **abre un visor** teleportado al `body` en vez de una
+  pestaña nueva, porque un comprobante se mira para comprobar un dato y después se vuelve a la
+  fila. El enlace a la pestaña queda dentro del visor para quien lo quiera.
 - El **catálogo de carreras** (`career_groups` + `careers`, `careerCatalogService.js`) es lo que
   alimenta todos los desplegables de "Carrera", incluido el evaluador público. Se administra en
   `/admin/carreras` (`CareersView.vue`, permiso `careers.manage`) y se lee en `GET /api/careers`,
