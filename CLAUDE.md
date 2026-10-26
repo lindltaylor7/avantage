@@ -449,6 +449,21 @@ antes de tocar el arranque de producción.
   un borrado que sale bien con una reasignación que falla deja leads con un `status` que ya no es
   columna de nadie), y la clave de una etapa nueva la genera el **servidor**: dos personas creándola
   a la vez en dos máquinas es justo lo que esto vino a arreglar.
+- El **Setter Funnel tiene dos vistas sobre los mismos leads** (conmutador en la cabecera,
+  `viewMode` en `SetterFunnelView.vue`): el **tablero** por etapas, que contesta cómo va el funnel,
+  y la **tabla**, que contesta a quién hay que llamar — la otra mitad del trabajo, que en el tablero
+  obliga a recorrer columna por columna. Es el mismo recurso y las mismas razones que las dos
+  pestañas de Entregables: la tabla **no pide otra ruta ni vuelve a filtrar por su cuenta**, se arma
+  sobre `filteredLeadsByColumn`, así que la búsqueda, el canal, la viabilidad, el responsable y el
+  rango de fechas de la barra filtran las dos por igual — dos listas con criterios propios es como
+  se llega a que cada pantalla diga un número distinto. Cada fila recuerda la **columna en la que el
+  tablero la ubica** y no el `status` crudo: un estado que no es ninguna columna cae en la primera
+  (misma regla que el tablero) y el desplegable de etapa tiene que decir dónde está de verdad en vez
+  de quedarse en blanco. Ese desplegable escribe por el mismo camino que arrastrar una tarjeta
+  (`updateLeadStatusFromSelect`) y existe porque en una tabla no se puede arrastrar. La vista
+  elegida se recuerda en `localStorage` (`setterFunnel.view`), entre `try` porque en una ventana
+  privada el acceso lanza, y en el celular la tabla se vuelve tarjetas con los rótulos adentro
+  (`data-label`), igual que Cobranzas.
 - Los dos tableros de leads leen la **misma** columna `leads.status`, pero "¿este lead ya es del
   closer?" **no** se deduce de ese texto: se sella en `leads.sales_funnel_at` al entrar al funnel
   comercial. La deducción por status dejaba de reconocer al lead en cuanto el equipo borraba o

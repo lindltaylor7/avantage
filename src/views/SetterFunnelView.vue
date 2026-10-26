@@ -12,6 +12,32 @@
       </div>
 
       <div class="header-actions">
+        <!--
+          Dos vistas sobre los MISMOS leads: el tablero por etapas (cómo va el
+          funnel) y la tabla (la lista de a quién llamar, que en el tablero
+          obliga a recorrer columna por columna). La elegida se recuerda, así
+          que quien trabaja en lista no la vuelve a elegir cada mañana.
+        -->
+        <div class="view-switch" role="group" aria-label="Modo de vista">
+          <button
+            type="button"
+            class="view-switch-btn"
+            :class="{ active: viewMode === 'funnel' }"
+            title="Ver el tablero por etapas"
+            @click="setViewMode('funnel')"
+          >
+            🗂 Funnel
+          </button>
+          <button
+            type="button"
+            class="view-switch-btn"
+            :class="{ active: viewMode === 'tabla' }"
+            title="Ver todos los leads en una sola lista"
+            @click="setViewMode('tabla')"
+          >
+            📋 Tabla
+          </button>
+        </div>
         <button class="btn-action-primary" @click="openCreateLeadModal">
           <span class="btn-icon">👤</span> Nuevo Lead
         </button>
@@ -189,8 +215,8 @@
         </select>
       </div>
 
-      <!-- Flechas de desplazamiento horizontal del tablero -->
-      <div class="board-nav-arrows">
+      <!-- Flechas de desplazamiento horizontal del tablero (solo en el funnel) -->
+      <div v-if="viewMode === 'funnel'" class="board-nav-arrows">
         <button
           class="board-nav-btn"
           @click="scrollBoard('left')"
@@ -260,7 +286,7 @@
     </transition>
 
     <!-- Tablero Kanban Dinámico con Scroll Suave -->
-    <div class="kanban-viewport custom-scrollbar" ref="kanbanBoardRef">
+    <div v-if="viewMode === 'funnel'" class="kanban-viewport custom-scrollbar" ref="kanbanBoardRef">
       <div class="kanban-columns-container">
         <template v-for="(col, colIndex) in columns" :key="col.key">
         <!-- Insertador rápido de etapa (antes de esta columna) -->
@@ -517,6 +543,121 @@
         </div>
       </div>
     </div>
+
+    <!--
+      Vista de tabla: los MISMOS leads del tablero, en una sola lista.
+
+      No pide otra ruta ni vuelve a filtrar por su cuenta: se arma sobre
+      `filteredLeadsByColumn`, así que la búsqueda, el canal, la viabilidad, el
+      responsable y el rango de fechas de la barra filtran las dos vistas por
+      igual. Dos listas con criterios propios es como se llega a que cada
+      pantalla diga un número distinto.
+
+      La etapa es un desplegable y no una etiqueta: en una tabla no se puede
+      arrastrar, y mover el lead es lo que se viene a hacer acá. Escribe por el
+      mismo camino que el tablero (`updateLeadStatusFromSelect`).
+    -->
+    <section v-else class="sf-table-section">
+      <div v-if="tableLeads.length === 0" class="empty-state sf-table-empty">
+        <span class="empty-icon">{{ searchQuery ? '🔍' : '📭' }}</span>
+        <p class="empty-text">
+          {{ searchQuery ? 'Ningún lead coincide con la búsqueda' : 'No hay leads en el Setter Funnel con estos filtros' }}
+        </p>
+        <button v-if="searchQuery" class="clear-search-link" @click="searchQuery = ''">Limpiar búsqueda</button>
+      </div>
+
+      <div v-else class="data-table-wrapper sf-table-wrapper">
+        <table class="data-table sf-table">
+          <thead>
+            <tr>
+              <th class="sf-sortable" title="Ordenar por nombre" @click="sortTableBy('name')">Lead {{ sortMark('name') }}</th>
+              <th>Celular</th>
+              <th class="sf-sortable" title="Ordenar por etapa" @click="sortTableBy('stage')">Etapa {{ sortMark('stage') }}</th>
+              <th class="sf-sortable" title="Ordenar por viabilidad" @click="sortTableBy('viability')">Viab. {{ sortMark('viability') }}</th>
+              <th>Responsable</th>
+              <th class="sf-sortable" title="Ordenar por fecha de registro" @click="sortTableBy('created')">Registrado {{ sortMark('created') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="row in pagedTableLeads"
+              :key="row.lead.id"
+              class="sf-row"
+              :class="{
+                'channel-whatsapp-border': row.channel.type === 'whatsapp',
+                'channel-fb-border': row.channel.type === 'facebook',
+                'channel-ig-border': row.channel.type === 'instagram'
+              }"
+              @click="selectedLead = row.lead"
+            >
+              <td data-label="Lead">
+                <span class="sf-name">
+                  <span v-if="cameFromForm(row.lead)" class="card-form-mark" title="Llegó por formulario de Meta">📋</span>
+                  {{ getLeadFullName(row.lead) }}
+                </span>
+                <span class="sf-sub">#{{ row.lead.id }} · {{ row.channel.icon }} {{ row.channel.label }}</span>
+              </td>
+
+              <!-- El celular es un enlace a WhatsApp: desde esta lista lo que
+                   sigue es escribirle, y copiar el número a mano es el paso
+                   que sobra. -->
+              <td data-label="Celular" @click.stop>
+                <a
+                  v-if="row.lead.phone"
+                  class="sf-phone"
+                  :href="waLink(row.lead.phone)"
+                  target="_blank"
+                  rel="noopener"
+                  :title="`Escribir por WhatsApp a ${row.lead.phone}`"
+                >💬 {{ row.lead.phone }}</a>
+                <span v-else class="sf-sub">Sin celular</span>
+              </td>
+
+              <td data-label="Etapa" @click.stop>
+                <select
+                  class="sf-stage-select"
+                  :value="row.col.key"
+                  :style="{ borderColor: (row.col.color || '#56624A') + '66' }"
+                  title="Mover el lead a otra etapa"
+                  @change="updateLeadStatusFromSelect(row.lead.id, $event.target.value)"
+                >
+                  <option v-for="col in columns" :key="col.key" :value="col.key">
+                    {{ col.icon || '📌' }} {{ col.label }}
+                  </option>
+                </select>
+              </td>
+
+              <td data-label="Viabilidad">
+                <span :class="['viability-pill', getLevelClass(row.lead.viability_level)]">
+                  {{ row.lead.overall_viability_score ?? '—' }}%
+                </span>
+              </td>
+
+              <td data-label="Responsable" @click.stop>
+                <LeadAssignee :lead="row.lead" @assigned="onLeadAssigned" />
+              </td>
+
+              <td data-label="Registrado">
+                <span class="sf-date" :title="`Registrado: ${formatDate(row.lead.created_at)}`">
+                  {{ formatCardDate(row.lead.created_at) }}
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div v-if="tableLeads.length > 0" class="sf-table-footer">
+        <span class="sf-table-range">{{ tableRangeText }}</span>
+        <div v-if="tableTotalPages > 1" class="sf-table-pager">
+          <button class="col-page-btn" :disabled="tablePage <= 1" title="Primera página" @click="tablePage = 1">⏮</button>
+          <button class="col-page-btn" :disabled="tablePage <= 1" title="Página anterior" @click="tablePage--">◀</button>
+          <span class="sf-table-page">{{ tablePage }} / {{ tableTotalPages }}</span>
+          <button class="col-page-btn" :disabled="tablePage >= tableTotalPages" title="Página siguiente" @click="tablePage++">▶</button>
+          <button class="col-page-btn" :disabled="tablePage >= tableTotalPages" title="Última página" @click="tablePage = tableTotalPages">⏭</button>
+        </div>
+      </div>
+    </section>
 
     <!-- ================================================================= -->
     <!-- MODAL 1: Crear Nueva Columna / Etapa                              -->
@@ -1511,6 +1652,125 @@ const paginatedLeadsByColumn = computed(() => {
     }
   }
   return result;
+});
+
+/* ------------------------------------------------------------------ */
+/* Vista de tabla                                                      */
+/* ------------------------------------------------------------------ */
+
+/*
+ * El tablero contesta "¿cómo va el funnel?" y la tabla "¿a quién llamo?". Son
+ * los mismos leads y los mismos filtros: la tabla se arma sobre
+ * `filteredLeadsByColumn` justamente para que no pueda decir otra cosa que el
+ * tablero.
+ */
+const VIEW_STORAGE_KEY = 'setterFunnel.view';
+
+function readStoredView() {
+  // En una ventana privada el solo acceso a localStorage lanza.
+  try {
+    return localStorage.getItem(VIEW_STORAGE_KEY) === 'tabla' ? 'tabla' : 'funnel';
+  } catch {
+    return 'funnel';
+  }
+}
+
+const viewMode = ref(readStoredView());
+
+function setViewMode(mode) {
+  viewMode.value = mode;
+  try {
+    localStorage.setItem(VIEW_STORAGE_KEY, mode);
+  } catch {
+    // Sin dónde guardarla, la vista vale para esta sesión y ya.
+  }
+}
+
+function waLink(phone) {
+  return `https://wa.me/${String(phone || '').replace(/\D/g, '')}`;
+}
+
+// El orden por defecto es el más nuevo primero: en una lista, lo que se
+// trabaja es lo que acaba de entrar.
+const tableSort = reactive({ field: 'created', dir: 'desc' });
+
+function sortTableBy(field) {
+  if (tableSort.field === field) {
+    tableSort.dir = tableSort.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    tableSort.field = field;
+    // El nombre se lee de la A a la Z; la fecha y la viabilidad, de mayor a menor.
+    tableSort.dir = field === 'name' || field === 'stage' ? 'asc' : 'desc';
+  }
+  tablePage.value = 1;
+}
+
+function sortMark(field) {
+  if (tableSort.field !== field) return '';
+  return tableSort.dir === 'asc' ? '▲' : '▼';
+}
+
+/**
+ * Las filas de la tabla: los leads de cada columna, aplanados y ordenados.
+ *
+ * Cada fila recuerda la columna en la que el tablero lo ubica (`col`) y no el
+ * `status` crudo: un lead cuyo estado no es ninguna columna cae en la primera
+ * (misma regla que el tablero), y el desplegable tiene que decir dónde está
+ * de verdad y no quedarse en blanco.
+ */
+const tableLeads = computed(() => {
+  const rows = [];
+  columns.value.forEach((col, colIndex) => {
+    for (const lead of filteredLeadsByColumn.value[col.key] || []) {
+      rows.push({ lead, col, colIndex, channel: getLeadChannelInfo(lead) });
+    }
+  });
+
+  const dir = tableSort.dir === 'asc' ? 1 : -1;
+  const sortValue = (row) => {
+    if (tableSort.field === 'name') return getLeadFullName(row.lead).toLowerCase();
+    if (tableSort.field === 'stage') return row.colIndex;
+    if (tableSort.field === 'viability') return Number(row.lead.overall_viability_score) || 0;
+    return row.lead.created_at || '';
+  };
+
+  return rows.sort((a, b) => {
+    const va = sortValue(a);
+    const vb = sortValue(b);
+    if (va < vb) return -dir;
+    if (va > vb) return dir;
+    // Desempate por id: sin él, dos leads con la misma fecha se intercambian
+    // de lugar en cada repintado.
+    return a.lead.id - b.lead.id;
+  });
+});
+
+const tablePage = ref(1);
+
+// La tabla usa el mismo "Por pág" de la barra: es el mismo control y no hay
+// razón para que el tablero y la lista tengan dos.
+const tablePageSize = computed(() =>
+  (itemsPerPage.value === 'all' ? Math.max(1, tableLeads.value.length) : Number(itemsPerPage.value)));
+
+const tableTotalPages = computed(() =>
+  Math.max(1, Math.ceil(tableLeads.value.length / tablePageSize.value)));
+
+const pagedTableLeads = computed(() => {
+  const start = (tablePage.value - 1) * tablePageSize.value;
+  return tableLeads.value.slice(start, start + tablePageSize.value);
+});
+
+const tableRangeText = computed(() => {
+  const total = tableLeads.value.length;
+  if (total === 0) return 'Sin leads';
+  const start = (tablePage.value - 1) * tablePageSize.value + 1;
+  const end = Math.min(start + tablePageSize.value - 1, total);
+  return `${start}-${end} de ${total} lead${total === 1 ? '' : 's'}`;
+});
+
+// Al filtrar, la página en la que estaba el usuario puede dejar de existir.
+watch([tableLeads, itemsPerPage], () => {
+  if (tablePage.value > tableTotalPages.value) tablePage.value = tableTotalPages.value;
 });
 
 // Reajuste de páginas al cambiar filtros
@@ -3688,6 +3948,113 @@ button.setter-btn {
  * tablero del celular es para mirar y entrar a la ficha, y mover se hace desde
  * ahí.
  */
+/* ---- Conmutador de vista (Funnel / Tabla) ---- */
+.view-switch {
+  display: inline-flex;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-card);
+}
+
+.view-switch-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.view-switch-btn + .view-switch-btn { border-left: 1px solid var(--border-color); }
+.view-switch-btn:hover { color: var(--text-main); background: var(--surface-1); }
+
+.view-switch-btn.active {
+  background: var(--surface-2, var(--surface-1));
+  color: var(--text-main);
+}
+
+/* ---- Vista de tabla ---- */
+.sf-table-section { margin-top: 0.5rem; }
+
+.sf-table-empty {
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 2rem 1rem;
+  text-align: center;
+}
+
+.sf-table th.sf-sortable { cursor: pointer; user-select: none; }
+.sf-table th.sf-sortable:hover { color: var(--text-main); }
+
+.sf-row { cursor: pointer; }
+
+/* El borde de color del canal es el mismo recurso de la tarjeta: identifica
+   de dónde salió el lead sin gastar una columna. */
+.sf-row.channel-whatsapp-border td:first-child { box-shadow: inset 3px 0 0 var(--accent-emerald, #25D366); }
+.sf-row.channel-fb-border td:first-child { box-shadow: inset 3px 0 0 #1877F2; }
+.sf-row.channel-ig-border td:first-child { box-shadow: inset 3px 0 0 #C13584; }
+
+.sf-name {
+  display: block;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.sf-sub {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.sf-phone {
+  font-size: 0.82rem;
+  color: var(--text-sub);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.sf-phone:hover { color: var(--primary); }
+
+.sf-stage-select {
+  max-width: 13rem;
+  padding: 0.3rem 0.45rem;
+  font-size: 0.78rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-main);
+  cursor: pointer;
+}
+
+.sf-date { white-space: nowrap; font-size: 0.82rem; }
+
+.sf-table-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.sf-table-range { font-size: 0.75rem; color: var(--text-muted); }
+
+.sf-table-pager {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.sf-table-page {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-sub);
+  padding: 0 0.35rem;
+}
+
 @media (max-width: 760px) {
   .kanban-header { flex-direction: column; gap: 0.75rem; }
   .kanban-header .header-actions { width: 100%; flex-wrap: wrap; }
@@ -3707,5 +4074,57 @@ button.setter-btn {
     max-width: 86vw;
     scroll-snap-align: start;
   }
+
+  .view-switch { width: 100%; }
+  .view-switch-btn { flex: 1; padding: 0.5rem; }
+
+  /* La tabla no se achica: se vuelve tarjetas con los rótulos adentro. Seis
+     columnas en 380 px solo se leen arrastrándolas de lado, y esta lista es
+     justo la que se usa con el teléfono en la mano. Mismo recurso que
+     Cobranzas. */
+  .sf-table-wrapper { overflow-x: visible; border: none; background: none; }
+
+  .sf-table,
+  .sf-table tbody,
+  .sf-table tr,
+  .sf-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .sf-table thead { display: none; }
+
+  .sf-table tr {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 0.6rem 0.7rem;
+    margin-bottom: 0.6rem;
+    background: var(--bg-card-solid, var(--bg-card));
+  }
+
+  .sf-table td { border: none; padding: 0.22rem 0; }
+
+  .sf-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 0.64rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+  }
+
+  /* El nombre es el título de la tarjeta: no necesita rótulo. */
+  .sf-table td[data-label="Lead"]::before { content: none; }
+  .sf-table td[data-label="Lead"] .sf-name { font-size: 0.95rem; }
+
+  .sf-row.channel-whatsapp-border td:first-child,
+  .sf-row.channel-fb-border td:first-child,
+  .sf-row.channel-ig-border td:first-child { box-shadow: none; }
+
+  .sf-row.channel-whatsapp-border { border-left: 3px solid var(--accent-emerald, #25D366); }
+  .sf-row.channel-fb-border { border-left: 3px solid #1877F2; }
+  .sf-row.channel-ig-border { border-left: 3px solid #C13584; }
+
+  .sf-stage-select { max-width: none; width: 100%; padding: 0.5rem; font-size: 1rem; }
 }
 </style>
