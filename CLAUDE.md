@@ -155,6 +155,21 @@ antes de tocar el arranque de producción.
   del `PUT /api/contracts/:id`, que imprime la tabla con el marcador `{{cronograma_pagos}}`) y desde
   Finanzas — `financeLedgerService.replaceScheduleForLead()` es el único camino, y rechaza quitar o
   cambiar el monto de una cuota ya cobrada, o pasarse de `leads.total_amount`.
+  El editor que comparten esas dos pantallas (`PaymentScheduleEditor.vue`, con la aritmética en
+  `src/paymentSchedulePlan.js`) **propone el plan completo y no cuota por cuota**: la primera vence
+  **hoy** (es la que se cobra al firmar; proponerla para el mes siguiente obligaba a corregir la
+  fecha en todos los cierres) y el precio total se **divide en partes iguales** entre las cuotas que
+  el editor propuso — 1500 en una da 1500, en dos 750 y 750, en tres 500/500/500. Lo bloqueado (ya
+  cobrado) y lo que alguien escribió a mano se descuenta primero y no se toca: sin esa distinción,
+  agregar la última cuota le borraría al vendedor el monto que acaba de pactar. Las cuotas que
+  llegan de afuera —un contrato ya guardado— nacen marcadas como escritas a mano, así que cambiar
+  el precio total nunca reescribe un cronograma que ya está en Finanzas. La diferencia del
+  redondeo va a la **última** cuota (1000 en tres es 333.33 · 333.33 · 333.34): un céntimo de menos
+  y el cronograma nunca dice "completo ✓"; uno de más y `replaceScheduleForLead()` lo rechaza por
+  pasarse del precio. Las fechas se corren con aritmética en UTC y el "hoy" sale de `limaDay()`:
+  con el reloj del navegador en otra zona, un `new Date()` a las 20:00 de Lima ya es mañana.
+  `offset > 0` (el modal de cierre, donde el primer pago se registra arriba) significa que lo de
+  acá es la cola del cronograma y no la primera cuota, así que esa empieza el mes siguiente.
   Una venta firmada que **no llega a concretarse** (el cliente se retracta) se marca desde su propia
   fila en INGRESOS: `leads.deal_cancelled_at` / `_by` / `_reason`,
   `PATCH /api/finance/leads/:id/deal-cancelled` → `setDealCancelled()`. Se marca el **cierre** y no
