@@ -621,6 +621,30 @@ antes de tocar el arranque de producción.
   ficha. `meta_created_time` es el momento del envío en Meta y **no** `created_at` (cuándo entró
   acá): un lead recuperado hoy pertenece al día en que la persona llenó el formulario, y mezclar las
   dos fechas es lo que impide que el cruce contra el Administrador de anuncios cierre.
+  **Las respuestas del formulario se leen por patrón y no por la clave exacta de Meta**
+  (`metaLeadFields.js` → `extractMetaLeadForm()`, usado por `persistMetaLead()` y por el backfill).
+  En un formulario instantáneo clásico las preguntas prellenadas llegan con la clave canónica
+  (`full_name`, `phone_number`, `email`), pero el formulario que se contesta DENTRO de Messenger o
+  de Instagram arma sus preguntas propias y la clave es el texto de la pregunta convertido a slug
+  (`cual_es_tu_numero_de_celular`). Buscando `fields.phone_number` a secas, de esos leads entraba
+  solo el nombre —lo único que Messenger prellena— y la tarjeta quedaba en «Sin celular» con la
+  universidad y la carrera en su valor por defecto, aunque Meta sí las hubiera mandado (caso real
+  del 25/10/2026). Ahora la clave se normaliza (sin tildes, sin signos, guiones como espacio) y se
+  busca por patrón, con tres cuidados: la universidad se resuelve ANTES que el nombre («¿cuál es el
+  **nombre** de tu **universidad**?» tiene las dos palabras y lo que pide es la universidad), un
+  documento nunca entra como celular aunque su pregunta diga «número» (el DNI peruano tiene 8
+  dígitos), y como última red una respuesta de **9 dígitos o más** que no sea un documento se toma
+  como celular se llame como se llame la pregunta. Lo que no cae en ningún campo de la ficha
+  **tampoco se tira**: va al bloque de respuestas de `additional_notes` con el nombre de su
+  pregunta — el equipo agrega preguntas al formulario sin avisarle al CRM, y una respuesta que no se
+  guarda en ningún lado es una respuesta que la persona contestó para nadie. Un lead de formulario
+  que igual llega sin celular deja un `console.warn` con las preguntas que SÍ vinieron: es lo que
+  permite corregir el formulario (o el extractor) sin reproducir el caso.
+  Para las fichas dadas de alta antes, el backfill (`runMetaLeadgenBackfill()`,
+  `POST /api/leads/backfill-meta-fields`, botón «Completar datos del formulario» en el modal de
+  Conciliación) vuelve a pedirle el `field_data` a Meta y rellena solo lo que falta. Un celular
+  rescatado que ya pertenece a otra ficha **no se escribe**: se informa como conflicto, porque
+  escribirlo deja dos leads con el mismo número — justo lo que `findByPhone()` existe para evitar.
   El token tiene que ser de **página**: uno de usuario de sistema pasa el `debug_token` como válido
   y con todos los permisos, pero falla toda llamada de alcance de página (ver `.env.example`).
 - Lo que Meta nos manda **vuelve a Meta**: `metaConversionsService.js` le devuelve, por la

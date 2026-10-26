@@ -1,10 +1,15 @@
 /**
- * Backfill único: completa grado académico / universidad / carrera de los
- * leads que ya se importaron desde un formulario instantáneo de Meta Lead
- * Ads (metaWebhookService.importLead()) ANTES de que ese método empezara a
- * guardar esas respuestas — se quedaron con los valores por defecto
- * ("Pregrado (Bachiller/Título)", "General", sin universidad) aunque la
- * persona sí las hubiera contestado en el formulario.
+ * Backfill: completa celular, correo, grado académico, universidad, carrera y
+ * las demás respuestas de los leads que ya se importaron desde un formulario
+ * de Meta Lead Ads (metaWebhookService.importLead()) con menos campos de los
+ * que Meta había mandado — se quedaron con los valores por defecto
+ * ("Pregrado (Bachiller/Título)", "General", sin universidad) o directamente
+ * "Sin celular" aunque la persona sí los hubiera contestado.
+ *
+ * El caso del celular son los formularios que se contestan dentro de
+ * Messenger o de Instagram: sus preguntas no usan la clave canónica de Meta
+ * (`phone_number`) sino el texto de la pregunta, así que hasta el 26/10/2026
+ * el importador solo guardaba el nombre (ver `metaLeadFields.js`).
  *
  * Vuelve a pedirle el `field_data` a la Graph API usando el `leadgen_id`
  * que ya quedó guardado en `additional_notes` de cada lead, y solo
@@ -21,7 +26,8 @@
  * solo inyecta al proceso de la app.
  */
 import { db } from '../db/connection.js';
-import { extractCustomFields, formatCustomFieldsNote } from '../services/metaWebhookService.js';
+import { extractMetaLeadForm, formatCustomFieldsNote } from '../services/metaLeadFields.js';
+import { LeadService } from '../services/leadService.js';
 
 const GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v21.0';
 const LEADGEN_MARKER_RE = /\[Meta leadgen_id=(\d+)\]/;
@@ -48,7 +54,8 @@ export async function runMetaLeadgenBackfill() {
 
   const leads = await db('leads').where('additional_notes', 'like', '%[Meta leadgen_id=%');
 
-  const result = { totalFound: leads.length, updated: [], skipped: 0, failed: [] };
+  const leadService = new LeadService();
+  const result = { totalFound: leads.length, updated: [], skipped: 0, failed: [], phoneConflicts: [] };
 
   for (const lead of leads) {
     const match = String(lead.additional_notes || '').match(LEADGEN_MARKER_RE);
@@ -58,19 +65,36 @@ export async function runMetaLeadgenBackfill() {
     const missingAcademicLevel = !lead.academic_level || lead.academic_level === DEFAULT_ACADEMIC_LEVEL;
     const missingFieldOfStudy = !lead.field_of_study || lead.field_of_study === DEFAULT_FIELD_OF_STUDY;
     const missingUniversity = !lead.university;
-    if (!missingAcademicLevel && !missingFieldOfStudy && !missingUniversity) {
+    // El celular es el que más falta hace: sin él la ficha no se puede llamar
+    // y el lead no se cruza con el contacto que escriba después por WhatsApp.
+    const missingPhone = !lead.phone;
+    const missingEmail = !lead.email;
+    if (!missingAcademicLevel && !missingFieldOfStudy && !missingUniversity && !missingPhone && !missingEmail) {
       result.skipped++;
       continue;
     }
 
     try {
       const fieldData = await fetchFieldData(leadgenId, token);
-      const custom = extractCustomFields(fieldData);
+      const custom = extractMetaLeadForm(fieldData);
 
       const patch = {};
       if (missingAcademicLevel && custom.academicLevel) patch.academic_level = custom.academicLevel;
       if (missingFieldOfStudy && custom.fieldOfStudy) patch.field_of_study = custom.fieldOfStudy;
       if (missingUniversity && custom.university) patch.university = custom.university;
+      if (missingEmail && custom.email) patch.email = custom.email;
+      // Un celular rescatado puede ser el de un lead que ya existe (la ficha
+      // sin teléfono nunca se pudo cruzar contra él). Escribirlo igual deja
+      // dos fichas con el mismo número, que es justo lo que `findByPhone`
+      // existe para evitar: ahí se informa y se deja la decisión al equipo.
+      if (missingPhone && custom.phone) {
+        const duplicado = await leadService.findByPhone(custom.phone);
+        if (duplicado && duplicado.id !== lead.id) {
+          result.phoneConflicts.push({ id: lead.id, leadgenId, phone: custom.phone, existingLeadId: duplicado.id });
+        } else {
+          patch.phone = custom.phone;
+        }
+      }
 
       // Notas: se reconstruyen con lo que YA quedó bien en el lead (si no
       // era el valor por defecto) más lo que se acaba de rescatar de Meta,
@@ -80,7 +104,9 @@ export async function runMetaLeadgenBackfill() {
         academicLevel: patch.academic_level || (!missingAcademicLevel ? lead.academic_level : null),
         fieldOfStudy: patch.field_of_study || (!missingFieldOfStudy ? lead.field_of_study : null),
         university: patch.university || (!missingUniversity ? lead.university : null),
-        progressNote: custom.progressNote || null
+        progressNote: custom.progressNote || null,
+        // Las respuestas sin campo propio en la ficha: antes se descartaban.
+        extras: custom.extras || []
       };
       const headerMatch = String(lead.additional_notes || '').match(HEADER_RE);
       const header = headerMatch ? headerMatch[0] : `[Meta leadgen_id=${leadgenId}] form_id=desconocido`;

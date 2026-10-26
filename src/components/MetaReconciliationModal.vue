@@ -105,6 +105,52 @@
             </p>
           </div>
 
+        </template>
+
+        <!--
+          Conciliar contesta "¿llegaron todos los leads?"; esto contesta
+          "¿llegaron completos?". Son la misma falla vista de dos maneras y por
+          eso comparten modal: el formulario que se contesta dentro de Messenger
+          o de Instagram manda sus respuestas con preguntas propias, y hasta el
+          26/10/2026 el importador solo guardaba el nombre — la tarjeta quedaba
+          en "Sin celular". Lo nuevo ya entra completo; esto es para las fichas
+          que se dieron de alta antes.
+        -->
+        <div class="meta-rec-backfill">
+          <h4 class="form-label" style="margin: 0;">Fichas incompletas</h4>
+          <p class="section-subheading" style="margin: 0.25rem 0 0.6rem 0;">
+            Vuelve a pedirle a Meta las respuestas de los leads de formulario que ya están en el CRM y completa lo que
+            les falte (celular, correo, universidad, carrera). Nunca pisa un dato corregido a mano.
+          </p>
+          <button type="button" class="btn-action-secondary" :disabled="backfilling" @click="runBackfill">
+            {{ backfilling ? 'Completando…' : '🧩 Completar datos del formulario' }}
+          </button>
+
+          <p v-if="backfillError" class="info-box" style="margin-top: 0.6rem; color: var(--accent-rose); font-size: 0.82rem;">
+            {{ backfillError }}
+          </p>
+          <div v-else-if="backfillResult" class="info-box" style="margin-top: 0.6rem;">
+            <p style="font-size: 0.82rem; margin: 0;">
+              Se revisaron {{ backfillResult.totalFound }} ficha(s) de formulario:
+              <strong>{{ backfillResult.updated.length }}</strong> completada(s),
+              {{ backfillResult.skipped }} ya estaban bien.
+              <template v-if="backfillResult.failed.length">{{ backfillResult.failed.length }} fallaron.</template>
+            </p>
+            <!--
+              Un celular rescatado que ya es de otra ficha no se escribe: serían
+              dos leads con el mismo número. Se nombra para que el equipo decida
+              cuál se queda, que es la misma salida del modal de duplicados.
+            -->
+            <p v-if="backfillResult.phoneConflicts && backfillResult.phoneConflicts.length"
+               style="font-size: 0.8rem; margin: 0.4rem 0 0 0; color: var(--accent-amber);">
+              ⚠️ {{ backfillResult.phoneConflicts.length }} celular(es) recuperado(s) ya pertenecen a otra ficha y no se
+              escribieron: revísalos en Duplicados
+              (ficha {{ backfillResult.phoneConflicts.map((c) => `#${c.id}→#${c.existingLeadId}`).join(', ') }}).
+            </p>
+          </div>
+        </div>
+
+        <template v-if="report">
           <div class="modal-footer-actions">
             <button type="button" class="btn-action-ghost" @click="close">Cerrar</button>
             <button
@@ -133,6 +179,10 @@ const loading = ref(false);
 const error = ref('');
 const report = ref(null);
 const form = reactive({ since: '', until: '' });
+
+const backfilling = ref(false);
+const backfillError = ref('');
+const backfillResult = ref(null);
 
 const PLATFORM_LABELS = { fb: 'Facebook', ig: 'Instagram', desconocida: 'Sin dato' };
 function platformLabel(platform) {
@@ -186,6 +236,27 @@ async function run(apply) {
     loading.value = false;
   }
 }
+
+/*
+ * Completar no importa a nadie nuevo: solo rellena huecos de fichas que ya
+ * están, así que no necesita el paso de confirmación de "Recuperar". Igual se
+ * refresca el tablero al terminar, porque cambia lo que dicen las tarjetas.
+ */
+async function runBackfill() {
+  backfilling.value = true;
+  backfillError.value = '';
+  try {
+    const response = await apiFetch('/api/leads/backfill-meta-fields', { method: 'POST' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.details || data.error || 'Error al completar los datos.');
+    backfillResult.value = data;
+    if (data.updated?.length) emit('imported', data);
+  } catch (err) {
+    backfillError.value = err.message;
+  } finally {
+    backfilling.value = false;
+  }
+}
 </script>
 
 <style scoped>
@@ -197,6 +268,12 @@ async function run(apply) {
 }
 .meta-rec-range .form-control { width: auto; }
 .meta-rec-range .form-label { margin: 0; }
+
+.meta-rec-backfill {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
 
 .meta-rec-totals {
   display: grid;
