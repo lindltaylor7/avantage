@@ -1316,6 +1316,29 @@ antes de tocar el arranque de producción.
   resuelve con reglas y no con el LLM porque de esto depende lo que queda escrito en la ficha —y
   después en la cotización y en el contrato—, y el veto más importante es el del día y la hora: los
   pasos del agendamiento son los dueños de esas frases.
+- **"¿Tienen sede en Lima?" se contesta con un sí y con la dirección** (`officeLocation.js` →
+  `officeQuestion()`, el texto en `whatsappBotCopy.officeLocations()`, enganchado en
+  `runConversationTurn()` **antes** de `_handleTrustDoubt`). Es un dato y no un criterio: la
+  dirección exacta no puede depender de lo que improvise el LLM —una calle inventada manda a
+  alguien a tocar una puerta que no existe—, así que se detecta con reglas, igual que la corrección
+  de carrera/universidad. Va antes de la duda de confianza porque "tienen oficina" coincide con
+  `TRUST_DOUBT_RE`, y por ahí la pregunta se contestaba con el **domicilio legal de Huancayo**: al
+  que preguntaba por Lima se le respondía que estamos en otra ciudad, teniendo la sede de Lima en el
+  catálogo. Las sedes salen de `COMPANY.offices` —la misma fuente que imprime el pie de la
+  cotización— y la de Lima llega hasta el **piso y el número de oficina** (`Jirón Washington 1420,
+  2.º piso, oficina 10`): quien pregunta por la sede va a ir. Se contestan **todas** las que el
+  mensaje nombre ("¿en Lima o en Huancayo?" pregunta por las dos) y **ninguna** que no esté en el
+  catálogo: Arequipa sigue el camino normal en vez de recibir un "¡sí!" por una oficina que no
+  existe. El Meet va al final y como alternativa, nunca en lugar de la dirección — contestar
+  "trabajamos por videollamada" a quien pregunta dónde están es la evasiva que la regla dura del
+  prompt ya prohíbe. Como la duda de confianza, el turno se gasta **entero** en responder (el
+  horario se vuelve a pedir en el turno siguiente), pero a la tercera pregunta **no** se escala a
+  una persona: se deja seguir el camino normal, porque el bloque de datos del LLM ya tiene las
+  sedes (`OFFICES_FACT` en `whatsappBotPromptDefaults.js`, en la FAQ editable y en la red de
+  seguridad de `buildKnowledgeBlock`) y eso cubre las vueltas que ninguna regla va a cubrir ("¿en
+  qué ciudades están?"). Los verbos en **singular** ("queda", "está", "es") quedan fuera del
+  detector a propósito: "mi universidad está en Lima" es una respuesta normal del perfilamiento, y
+  contestarla con la dirección de la oficina es responderle algo que no preguntó.
 - El **catálogo de universidades** (`backend/data/peruUniversities.js`) gana el match **más
   específico de todo el catálogo**, no el de la primera entrada que coincida, y los términos que
   varias comparten (`AMBIGUOUS_UNIVERSITY_TERMS`: "católica", "nacional") **no resuelven a ninguna**

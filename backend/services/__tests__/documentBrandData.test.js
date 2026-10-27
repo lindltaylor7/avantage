@@ -23,7 +23,11 @@ test('la cotización lleva el RUC en el encabezado y no solo al pie', () => {
 
 test('la cotización imprime las dos sedes de atención', () => {
   const html = buildQuotationDocument({ quote: QUOTE, lead: LEAD });
-  assert.match(html, /LIMA<\/strong> Jirón Washington 1420/);
+  // La de Lima va con el piso y el número de oficina: es la misma cadena que
+  // el bot le manda a quien pregunta "¿tienen sede en Lima?" (ver
+  // `officeLocation.js`), y quien pregunta eso va a ir — la calle a secas lo
+  // deja parado en la puerta del edificio.
+  assert.match(html, /LIMA<\/strong> Jirón Washington 1420, 2\.º piso, oficina 10/);
   assert.match(html, /HUANCAYO<\/strong> Calle Neptuno 185/);
 });
 

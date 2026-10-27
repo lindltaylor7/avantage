@@ -7,6 +7,7 @@ import { MIN_BOOKING_LEAD_MINUTES } from './googleCalendarService.js';
 import { normalizeUniversity } from './universityNormalizer.js';
 import { normalizeCareer } from './careerNormalizer.js';
 import { detectProfileCorrection } from './profileCorrection.js';
+import { officeQuestion } from './officeLocation.js';
 import { sanitizeMeetLink } from './googleCalendarService.js';
 import { criticalSignal, describesThesisProgress, isTrustDoubt, isWaitingInMeeting, mayBeRefusal, saysNotInterested } from './leadSignals.js';
 import { coalesceTimeFragments } from './messageFragments.js';
@@ -2562,6 +2563,14 @@ export class WhatsappBotService {
     // libre y en pleno agendamiento — que es justo donde apareció el caso
     // real ("En tu perfil dice España") y donde el paso pendiente empujaba a
     // contestar de pasada y volver al horario en la misma burbuja.
+    // "¿Tienen sede en Lima?" es un dato, no una sospecha, pero entra por el
+    // mismo lugar y por las mismas razones: la dirección exacta no puede
+    // depender de lo que improvise el LLM, y la pregunta vale igual en la
+    // conversación libre que en pleno agendamiento. Va ANTES de la duda de
+    // confianza porque "tienen oficina" coincide con su patrón, y por ahí se
+    // contestaba Huancayo a quien preguntaba por Lima.
+    if (session?.bot_enabled && await this._handleOfficeLocation(waId, session, incomingText)) return;
+
     if (session?.bot_enabled && await this._handleTrustDoubt(waId, session, incomingText)) return;
 
     // El estado pudo cambiar mientras este turno esperaba en la cola
@@ -3359,6 +3368,41 @@ export class WhatsappBotService {
     }
 
     await this.send(waId, whatsappBotCopy.trustCredentials());
+    return true;
+  }
+
+  /**
+   * El contacto pregunta por una de nuestras sedes ("¿tienen oficina en
+   * Lima?", "¿están en Huancayo?"). Devuelve true si consumió el turno.
+   *
+   * Corre ANTES de `_handleTrustDoubt` y no después: "tienen oficina"
+   * coincide con el patrón de la desconfianza, así que por ahí la pregunta se
+   * contestaba con el domicilio legal de Huancayo — al que preguntaba por
+   * Lima se le respondía con otra ciudad, teniendo la sede de Lima en el
+   * catálogo. La respuesta más específica gana.
+   *
+   * Es un dato y no una sospecha, así que a la tercera no se escala a una
+   * persona: se deja seguir el camino normal (el bloque de datos del LLM ya
+   * tiene las sedes) para no quedarse repitiendo la misma dirección en vez de
+   * avanzar con la reunión.
+   */
+  async _handleOfficeLocation(waId, session, incomingText) {
+    const offices = officeQuestion(incomingText);
+    if (!offices.length) return false;
+
+    // Igual que en la duda de confianza: si el paso actual ya puede leer el
+    // mensaje como su dato, manda el paso.
+    if (isObviousStepAnswer(session.status, incomingText)) return false;
+
+    const answers = typeof session.answers === 'string' ? JSON.parse(session.answers) : (session.answers || {});
+    const asked = Number(answers.__officeAsks || 0) + 1;
+    if (asked > 2) return false;
+    answers.__officeAsks = asked;
+    await this.updateSession(waId, { answers: JSON.stringify(answers) });
+
+    this.logActivity({ type: 'office_question', waId, text: incomingText, cities: offices.map((o) => o.city) });
+
+    await this.send(waId, whatsappBotCopy.officeLocations(offices));
     return true;
   }
 

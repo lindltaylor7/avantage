@@ -34,9 +34,14 @@ export const COMPANY = {
    * en SUNAT—, y abrir una sede comercial no cambia el domicilio inscrito.
    * Pisarlos haría que el contrato dijera una dirección que no es la de la
    * ficha RUC.
+   *
+   * Las lee además el bot de WhatsApp (`officeLocation.js`), que es el que
+   * contesta "¿tienen sede en Lima?". Por eso la dirección llega hasta el
+   * piso y el número de oficina: quien pregunta eso va a ir, y "Jirón
+   * Washington 1420" a secas lo deja parado en la puerta de un edificio.
    */
   offices: [
-    { city: 'LIMA', address: 'Jirón Washington 1420' },
+    { city: 'LIMA', address: 'Jirón Washington 1420, 2.º piso, oficina 10' },
     { city: 'HUANCAYO', address: 'Calle Neptuno 185' }
   ],
   /*
