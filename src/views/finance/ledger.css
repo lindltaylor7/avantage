@@ -659,3 +659,135 @@
   text-decoration: underline;
   cursor: pointer;
 }
+
+/* --- Filtro de fechas (LedgerDateRange.vue) -------------------------------
+ * Los dos campos van juntos dentro de una sola cápsula, con el borde en el
+ * grupo y no en cada input: dos cajas sueltas con su propio marco dentro de
+ * una barra que ya tiene búsqueda, estado, banco y botones se leen como cuatro
+ * filtros y no como uno. El grupo se resalta cuando hay rango puesto, que es
+ * lo que evita olvidarse de que la tabla está recortada.
+ */
+.ledger-daterange {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.22rem 0.45rem;
+  background: var(--bg-card-solid);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  transition: all 0.18s ease;
+}
+
+.ledger-daterange:hover { border-color: var(--border-strong); }
+
+.ledger-daterange.is-active {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(111, 129, 37, 0.14);
+}
+
+.ledger-daterange-icon { font-size: 0.8rem; line-height: 1; opacity: 0.75; }
+
+.ledger-daterange-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  cursor: pointer;
+}
+
+.ledger-daterange-label {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding-left: 0.1rem;
+}
+
+.ledger-daterange-input {
+  font-family: var(--font-body);
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-main);
+  background: transparent;
+  border: none;
+  padding: 0 0.1rem;
+  cursor: pointer;
+  /* Un `<input type="date">` vacío mide distinto que uno con fecha: fijarle el
+     ancho evita que la barra entera se mueva al elegir el rango. */
+  min-width: 7.4rem;
+}
+
+.ledger-daterange-input:focus { outline: none; color: var(--primary); }
+
+.ledger-daterange-input::-webkit-calendar-picker-indicator {
+  opacity: 0.5;
+  cursor: pointer;
+}
+
+.ledger-daterange-input::-webkit-calendar-picker-indicator:hover { opacity: 1; }
+
+.ledger-daterange-sep { font-size: 0.7rem; color: var(--text-muted); }
+
+.ledger-daterange-preset {
+  font-family: var(--font-body);
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-sub);
+  background: var(--surface-2);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm, 6px);
+  padding: 0.22rem 0.3rem;
+  cursor: pointer;
+  max-width: 7.5rem;
+}
+
+.ledger-daterange-preset:focus { outline: none; border-color: var(--primary); }
+
+.ledger-daterange-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.3rem;
+  height: 1.3rem;
+  border: none;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ledger-daterange-clear:hover { background: var(--accent-rose, #e11d48); color: #fff; }
+
+/* El aviso de que lo de abajo es un recorte y no el histórico completo. */
+.ledger-range-notice {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.1rem 0 0;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.ledger-range-notice strong { color: var(--text-main); font-weight: 600; }
+
+.ledger-range-notice-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--primary);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+@media (max-width: 640px) {
+  .ledger-daterange { flex-wrap: wrap; width: 100%; }
+  .ledger-daterange-field { flex: 1 1 42%; }
+  .ledger-daterange-input { min-width: 0; width: 100%; }
+  .ledger-daterange-preset { flex: 1 1 100%; max-width: none; }
+}

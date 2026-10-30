@@ -1614,7 +1614,14 @@ app.delete('/api/finance/journal/:id', requireAuth, requirePermission('finance.v
 // --- Finanzas (resumen por mes y banco) ---
 app.get('/api/finance/overview', requireAuth, requirePermission('finance.view'), async (req, res) => {
   try {
-    const overview = await financeLedgerService.getOverview({ monthsBack: req.query.months });
+    // `desde`/`hasta` recortan el PERÍODO (gráfica, totales y últimos
+    // movimientos); el saldo por cuenta nunca se recorta. Sin ellos, `months`
+    // sigue siendo la ventana de la gráfica, como antes del filtro.
+    const overview = await financeLedgerService.getOverview({
+      monthsBack: req.query.months,
+      from: req.query.desde,
+      to: req.query.hasta
+    });
     res.json(overview);
   } catch (error) {
     console.error('❌ Error al obtener el resumen de finanzas:', error);
@@ -1652,7 +1659,11 @@ app.post('/api/finance/fixed-expenses', requireAuth, requirePermission('finance.
  */
 app.get('/api/finance/fixed-expenses/panel', requireAuth, requirePermission('finance.view'), async (req, res) => {
   try {
-    const panel = await financeLedgerService.getFixedExpensesPanel({ monthsBack: req.query.months });
+    const panel = await financeLedgerService.getFixedExpensesPanel({
+      monthsBack: req.query.months,
+      from: req.query.desde,
+      to: req.query.hasta
+    });
     res.json(panel);
   } catch (error) {
     console.error('❌ Error al obtener el panel de gastos fijos:', error);

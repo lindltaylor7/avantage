@@ -33,6 +33,18 @@
         <option value="">Todo banco</option>
         <option v-for="b in BANCOS" :key="b" :value="b">{{ b }}</option>
       </select>
+      <!--
+        El rango corre sobre la fecha en que entró el dinero (`fecha`) y no
+        sobre la pactada (`due_date`): es la que la tabla muestra, la que ordena
+        y la que suman los totales de abajo. Se aplica cuota por cuota, así que
+        un cierre que cruza el borde del rango se sigue viendo, pero solo con
+        las cuotas que caen dentro — y sus totales dicen justo eso.
+      -->
+      <LedgerDateRange
+        v-model:desde="desde"
+        v-model:hasta="hasta"
+        noun="Fecha del cobro"
+      />
       <button
         type="button"
         class="btn-primary ledger-add-btn"
@@ -225,6 +237,21 @@
         total del trato no se reparte por banco, así que queda fuera.
       </p>
 
+      <!--
+        Mismo aviso y mismas razones que el del banco: la tira de totales suma
+        lo que pasó el filtro, así que un recorte de fechas sin decirlo se lee
+        como "este mes se cobró menos" cuando lo que hay es un rango puesto.
+      -->
+      <p v-if="hasDateRange" class="ledger-range-notice">
+        <span>
+          Mostrando solo las cuotas cobradas <strong>{{ rangeLabel(desde, hasta) }}</strong>.
+          El precio total de cada cierre es el del trato completo y no se recorta.
+        </span>
+        <button type="button" class="ledger-range-notice-btn" @click="clearDateRange()">
+          Ver todo el histórico
+        </button>
+      </p>
+
       <dl class="ledger-summary">
         <div class="ledger-summary-item" title="Leads con cuotas registradas">
           <dt>Cierres</dt>
@@ -291,6 +318,9 @@
       <div v-if="paged.length === 0" class="empty-state">
         <p class="empty-state-title">Ningún cierre coincide</p>
         <p class="empty-state-text">
+          <template v-if="hasDateRange">
+            No hay cuotas cobradas {{ rangeLabel(desde, hasta) }}.
+          </template>
           Ajusta la búsqueda o los filtros para volver a ver el registro.
         </p>
         <button type="button" class="btn-secondary ledger-submit-btn" @click="clearFilters()">
@@ -555,6 +585,8 @@ import { dayOnly, formatAmount, formatDate } from "./format.js";
 import { agreedAmount, unexpectedAmount } from "./dealCancellation.js";
 import { BANCOS, CUOTAS, EMITIR_OPCIONES, calcItf } from "./incomeOptions.js";
 import { useLedgerTable } from "./useLedgerTable.js";
+import LedgerDateRange from "./LedgerDateRange.vue";
+import { rangeLabel } from "./dateRange.js";
 import DealPlanHeader from "./DealPlanHeader.vue";
 import LedgerPagination from "./LedgerPagination.vue";
 import ReceiptCell from "./ReceiptCell.vue";
@@ -763,8 +795,9 @@ function groupByLead(payments) {
 }
 
 const {
-  search, estado: estadoFilter, banco: bancoFilter, sort, page, pageSize,
-  grouped, paged, totalPages, range, isFiltered, toggleSort, sortCaret, clearFilters
+  search, estado: estadoFilter, banco: bancoFilter, desde, hasta, sort, page, pageSize,
+  grouped, paged, totalPages, range, isFiltered, hasDateRange,
+  toggleSort, sortCaret, clearFilters, clearDateRange
 } = useLedgerTable(rows, {
   searchText: (row) => [row.code, row.lead_name, row.lead_dni, row.cuota, row.emitir, row.tributario, row.banco]
     .filter(Boolean).join(" "),

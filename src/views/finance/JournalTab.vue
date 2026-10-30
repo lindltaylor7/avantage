@@ -27,6 +27,7 @@
         <option value="">Todo banco</option>
         <option v-for="b in BANCOS" :key="b" :value="b">{{ b }}</option>
       </select>
+      <LedgerDateRange v-model:desde="desde" v-model:hasta="hasta" noun="Fecha del asiento" />
       <button type="button" class="btn-primary ledger-add-btn" @click="isFormOpen ? closeForm() : openCreate()">
         {{ isFormOpen ? (editingRow ? '✕ Cancelar edición' : '✕ Cerrar') : '+ Nuevo asiento' }}
       </button>
@@ -139,6 +140,18 @@
     </div>
 
     <template v-else>
+      <!-- Los totales de abajo suman lo que pasó el filtro, así que un recorte
+           de fechas sin decirlo se lee como un mes flojo. -->
+      <p v-if="hasDateRange" class="ledger-range-notice">
+        <span>
+          Mostrando solo los asientos fechados <strong>{{ rangeLabel(desde, hasta) }}</strong>,
+          y los totales cuentan únicamente esos.
+        </span>
+        <button type="button" class="ledger-range-notice-btn" @click="clearDateRange()">
+          Ver todo el histórico
+        </button>
+      </p>
+
       <dl class="ledger-summary">
         <div class="ledger-summary-item">
           <dt>Asientos</dt>
@@ -175,6 +188,9 @@
       <div v-if="paged.length === 0" class="empty-state">
         <p class="empty-state-title">Ningún asiento coincide</p>
         <p class="empty-state-text">
+          <template v-if="hasDateRange">
+            No hay asientos fechados {{ rangeLabel(desde, hasta) }}.
+          </template>
           Ajusta la búsqueda o los filtros para volver a ver el registro.
         </p>
         <button type="button" class="btn-secondary ledger-submit-btn" @click="clearFilters()">
@@ -298,6 +314,8 @@ import { loadReceiptUrl } from './receiptImage.js';
 import { BANCOS, calcItf } from './incomeOptions.js';
 import { currencySymbol, dayOnly, formatAmount, formatDate } from './format.js';
 import { useLedgerTable } from './useLedgerTable.js';
+import LedgerDateRange from './LedgerDateRange.vue';
+import { rangeLabel } from './dateRange.js';
 import LedgerPagination from './LedgerPagination.vue';
 import ReceiptCell from './ReceiptCell.vue';
 import './ledger.css';
@@ -330,8 +348,9 @@ const editingRow = ref(null);
 let pendingFiles = [];
 
 const {
-  search, estado: estadoFilter, banco: bancoFilter, sort, page, pageSize,
-  filtered, paged, totalPages, range, toggleSort, sortCaret, clearFilters
+  search, estado: estadoFilter, banco: bancoFilter, desde, hasta, sort, page, pageSize,
+  filtered, paged, totalPages, range, hasDateRange,
+  toggleSort, sortCaret, clearFilters, clearDateRange
 } = useLedgerTable(rows, {
   searchText: (row) => [row.code, row.detalle, row.area, row.asiento_por_destino, row.banco]
     .filter(Boolean).join(' '),

@@ -25,12 +25,29 @@
         <option value="pendiente">Por pagar</option>
         <option value="pagado">Pagada</option>
       </select>
+      <!--
+        El rango corre sobre la fecha en que la comisión se DEVENGÓ
+        (`created_at`, la columna "Registrada" de la tabla) y no sobre `paid_at`:
+        esta pestaña es lo que se debe, y lo que importa de un período es qué se
+        ganó en él. Cuándo se le abonó se ve en la propia píldora de estado.
+      -->
+      <LedgerDateRange v-model:desde="desde" v-model:hasta="hasta" noun="Fecha de devengo" />
       <button type="button" class="btn-secondary ledger-add-btn" @click="load" :disabled="isLoading">
         {{ isLoading ? 'Cargando…' : '🔄 Actualizar' }}
       </button>
     </div>
 
     <p v-if="errorMessage" class="info-box ledger-alert">⚠️ {{ errorMessage }}</p>
+
+    <p v-if="hasDateRange" class="ledger-range-notice">
+      <span>
+        Mostrando solo las comisiones devengadas <strong>{{ rangeLabel(desde, hasta) }}</strong>,
+        y los dos recuadros cuentan únicamente esas.
+      </span>
+      <button type="button" class="ledger-range-notice-btn" @click="clearDateRange()">
+        Ver todo el histórico
+      </button>
+    </p>
 
     <div class="commission-totals">
       <div class="commission-total-card">
@@ -46,10 +63,18 @@
     </div>
 
     <div v-if="!isLoading && visible.length === 0" class="empty-state">
-      <p class="empty-state-title">Todavía no hay comisiones</p>
-      <p class="empty-state-text">
+      <p class="empty-state-title">
+        {{ rows.length === 0 ? 'Todavía no hay comisiones' : 'Ninguna comisión coincide' }}
+      </p>
+      <p v-if="rows.length === 0" class="empty-state-text">
         La de la setter nace sola al ganarse un lead que pasó por el Setter Funnel y tiene precio
         total registrado; la de cobranza, al marcar una cuota como cobrada en Cobranzas.
+      </p>
+      <p v-else class="empty-state-text">
+        <template v-if="hasDateRange">
+          No se devengó ninguna comisión {{ rangeLabel(desde, hasta) }}.
+        </template>
+        Ajusta la búsqueda o los filtros para volver a ver el registro.
       </p>
     </div>
 
@@ -103,9 +128,11 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { apiFetch } from '../../apiClient.js';
 import { formatAmount, formatDate } from './format.js';
+import { inDateRange, rangeLabel } from './dateRange.js';
+import LedgerDateRange from './LedgerDateRange.vue';
 import './ledger.css';
 
 /* De dónde sale cada comisión: la de la setter es por venta, la de cobranza
@@ -113,21 +140,56 @@ import './ledger.css';
 const ROLE_LABEL = { setter: 'Setter', cobranza: 'Cobranza' };
 
 const rows = ref([]);
-const summary = reactive({ pendiente: { total: 0, n: 0 }, pagado: { total: 0, n: 0 } });
 const isLoading = ref(false);
 const errorMessage = ref('');
 const savingId = ref(null);
 const search = ref('');
 const estadoFilter = ref('');
+const desde = ref('');
+const hasta = ref('');
+
+const hasDateRange = computed(() => Boolean(desde.value || hasta.value));
+
+function clearDateRange() {
+  desde.value = '';
+  hasta.value = '';
+}
 
 const visible = computed(() => {
   const q = search.value.trim().toLowerCase();
   return rows.value.filter((row) => {
     if (estadoFilter.value && row.estado !== estadoFilter.value) return false;
+    // `created_at` es un `timestamp` y no una columna `DATE`, así que su día
+    // se recorta del tramo ISO igual que lo hace la columna "Registrada" de la
+    // tabla (`formatDate`): el filtro y lo que se ve en pantalla tienen que
+    // partir el día por el mismo lado.
+    if (!inDateRange(row.created_at, desde.value, hasta.value)) return false;
     if (!q) return true;
     return [row.beneficiario, row.cliente, row.tema, row.detalle]
       .some((campo) => String(campo || '').toLowerCase().includes(q));
   });
+});
+
+/**
+ * Los dos recuadros se calculan sobre lo que se está mirando y ya no se leen
+ * del `summary` que manda el servidor: ese cuenta el histórico entero, así que
+ * con un rango de fechas puesto decía una cifra que no es la suma de ninguna
+ * de las filas de abajo. Es el mismo criterio que la tira de totales de las
+ * otras tres pestañas del libro (ver `useLedgerTable`), y acá no cuesta nada
+ * porque `/api/commissions` ya devuelve todas las filas de una vez.
+ */
+const summary = computed(() => {
+  const acumular = (estado) => {
+    const filas = visible.value.filter((row) => row.estado === estado);
+    return {
+      // Sin valor absoluto, igual que `commissionService.summary()`: el monto de
+      // una comisión se guarda en positivo, y "corregirlo" acá haría que las dos
+      // mitades del sistema dejaran de contar lo mismo si alguna vez no lo fuera.
+      total: filas.reduce((suma, row) => suma + (Number(row.monto) || 0), 0),
+      n: filas.length
+    };
+  };
+  return { pendiente: acumular('pendiente'), pagado: acumular('pagado') };
 });
 
 async function load() {
@@ -138,7 +200,6 @@ async function load() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'No se pudieron cargar las comisiones.');
     rows.value = data.commissions || [];
-    Object.assign(summary, data.summary || {});
   } catch (error) {
     errorMessage.value = error.message;
   } finally {

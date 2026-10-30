@@ -29,6 +29,14 @@
         <option value="">Todo banco</option>
         <option v-for="b in BANCOS" :key="b" :value="b">{{ b }}</option>
       </select>
+      <!--
+        El rango corre sobre la fecha de la fila de arriba —la del pago suelto o
+        la del acuerdo—, igual que el filtro de estado y el de banco. Un acuerdo
+        que entra se muestra con TODOS sus pagos: la planilla de un proyecto se
+        lee completa o no se lee, y recortarle los pagos dejaría el porcentaje
+        de cada uno hablando de un acuerdo que no está entero a la vista.
+      -->
+      <LedgerDateRange v-model:desde="desde" v-model:hasta="hasta" noun="Fecha del pago" />
       <button type="button" class="btn-action-secondary ledger-add-btn" @click="agreementOpen ? (agreementOpen = false) : openAgreementForm()">
         {{ agreementOpen ? '✕ Cerrar' : '🏷️ Salario por proyecto' }}
       </button>
@@ -138,6 +146,16 @@
     </div>
 
     <template v-else>
+      <p v-if="hasDateRange" class="ledger-range-notice">
+        <span>
+          Mostrando solo la planilla fechada <strong>{{ rangeLabel(desde, hasta) }}</strong>,
+          y los totales cuentan únicamente eso.
+        </span>
+        <button type="button" class="ledger-range-notice-btn" @click="clearDateRange()">
+          Ver todo el histórico
+        </button>
+      </p>
+
       <dl class="ledger-summary">
         <div class="ledger-summary-item">
           <dt>Pagos</dt>
@@ -284,7 +302,12 @@
 
       <div v-if="paged.length === 0" class="empty-state">
         <p class="empty-state-title">Ningún salario coincide</p>
-        <p class="empty-state-text">Ajusta la búsqueda o los filtros para volver a ver la planilla.</p>
+        <p class="empty-state-text">
+          <template v-if="hasDateRange">
+            No hay nada en la planilla fechado {{ rangeLabel(desde, hasta) }}.
+          </template>
+          Ajusta la búsqueda o los filtros para volver a ver la planilla.
+        </p>
         <button type="button" class="btn-secondary ledger-submit-btn" @click="clearFilters()">
           Quitar filtros
         </button>
@@ -514,6 +537,8 @@ import { currencySymbol, dayOnly, formatAmount, formatDate } from './format.js';
 import { loadReceiptUrl } from './receiptImage.js';
 import { BANCOS } from './incomeOptions.js';
 import { useLedgerTable } from './useLedgerTable.js';
+import LedgerDateRange from './LedgerDateRange.vue';
+import { rangeLabel } from './dateRange.js';
 import LedgerPagination from './LedgerPagination.vue';
 import ReceiptCell from './ReceiptCell.vue';
 import './ledger.css';
@@ -558,8 +583,9 @@ watch(() => props.openFormTrigger, (val) => {
 });
 
 const {
-  search, estado: estadoFilter, banco: bancoFilter, sort, page, pageSize,
-  filtered, paged, totalPages, range, toggleSort, sortCaret, clearFilters
+  search, estado: estadoFilter, banco: bancoFilter, desde, hasta, sort, page, pageSize,
+  filtered, paged, totalPages, range, hasDateRange,
+  toggleSort, sortCaret, clearFilters, clearDateRange
 } = useLedgerTable(rows, {
   searchText: (row) => [row.persona, row.cargo, row.periodo, row.detalle, row.metodo_pago, row.banco]
     .filter(Boolean).join(' '),

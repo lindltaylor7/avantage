@@ -1,4 +1,5 @@
 import { computed, reactive, ref, watch } from 'vue';
+import { inDateRange } from './dateRange.js';
 
 export const PAGE_SIZES = [25, 50, 100];
 
@@ -24,11 +25,21 @@ function compare(a, b) {
  *                   que se ordena y se pagina son los grupos (INGRESOS muestra
  *                   un registro por cierre, con sus cuotas dentro), mientras que
  *                   la búsqueda y los filtros se siguen aplicando fila a fila.
+ * @param dateOf     (fila) => la fecha sobre la que corre el filtro "desde /
+ *                   hasta". Por defecto `row.fecha`, que es la columna que las
+ *                   tres tablas del libro muestran y ordenan.
  */
-export function useLedgerTable(rows, { searchText, sorters, defaultSort, groupBy = null }) {
+export function useLedgerTable(rows, {
+  searchText, sorters, defaultSort, groupBy = null, dateOf = (row) => row.fecha
+}) {
   const search = ref('');
   const estado = ref('');
   const banco = ref('');
+  /* El rango de fechas, en días de calendario e inclusivo en los dos extremos
+     (ver `dateRange.js`). Vacío = todo el histórico, que es como arranca cada
+     pestaña: un recorte puesto de fábrica esconde filas sin que nadie lo pida. */
+  const desde = ref('');
+  const hasta = ref('');
   const sort = reactive({ key: defaultSort.key, dir: defaultSort.dir });
   const page = ref(1);
   const pageSize = ref(PAGE_SIZES[0]);
@@ -38,6 +49,7 @@ export function useLedgerTable(rows, { searchText, sorters, defaultSort, groupBy
     return rows.value.filter((row) => {
       if (estado.value && row.estado !== estado.value) return false;
       if (banco.value && row.banco !== banco.value) return false;
+      if (!inDateRange(dateOf(row), desde.value, hasta.value)) return false;
       return !term || searchText(row).toLowerCase().includes(term);
     });
   });
@@ -65,11 +77,16 @@ export function useLedgerTable(rows, { searchText, sorters, defaultSort, groupBy
     return { from, to: Math.min(from + pageSize.value - 1, total), total };
   });
 
-  const isFiltered = computed(() => Boolean(search.value.trim() || estado.value || banco.value));
+  const isFiltered = computed(() => Boolean(
+    search.value.trim() || estado.value || banco.value || desde.value || hasta.value
+  ));
+
+  /** ¿Hay un recorte de fechas puesto? Es lo que decide si se muestra el aviso. */
+  const hasDateRange = computed(() => Boolean(desde.value || hasta.value));
 
   // Cambiar lo que se está mirando devuelve a la primera página; si la página
   // actual se queda sin filas (al borrar o al filtrar), se retrocede.
-  watch([search, estado, banco, pageSize], () => { page.value = 1; });
+  watch([search, estado, banco, desde, hasta, pageSize], () => { page.value = 1; });
   watch(totalPages, (count) => { if (page.value > count) page.value = count; });
 
   function toggleSort(key) {
@@ -91,11 +108,17 @@ export function useLedgerTable(rows, { searchText, sorters, defaultSort, groupBy
     search.value = '';
     estado.value = '';
     banco.value = '';
+    clearDateRange();
+  }
+
+  function clearDateRange() {
+    desde.value = '';
+    hasta.value = '';
   }
 
   return {
-    search, estado, banco, sort, page, pageSize,
-    filtered, grouped, paged, totalPages, range, isFiltered,
-    toggleSort, sortCaret, clearFilters
+    search, estado, banco, desde, hasta, sort, page, pageSize,
+    filtered, grouped, paged, totalPages, range, isFiltered, hasDateRange,
+    toggleSort, sortCaret, clearFilters, clearDateRange
   };
 }

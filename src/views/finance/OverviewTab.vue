@@ -5,21 +5,44 @@
       <div class="ov-title-group">
         <h2 class="ov-title">Visión General de Tesorería</h2>
         <p class="ov-subtitle">
-          Consolidado en tiempo real, en soles: ingresos verificados menos asientos del libro diario,
-          salarios y comisiones ya pagados, y el ITF que cobró el banco. Los saldos son de todas las cuentas; el rango de meses
-          solo recorta la gráfica de evolución.
+          Consolidado en soles: ingresos verificados menos asientos del libro diario,
+          salarios y comisiones ya pagados, y el ITF que cobró el banco.
+          <template v-if="hasDateRange">
+            Recortado <strong>{{ appliedLabel }}</strong>: las tarjetas de
+            ingresos, egresos, balance y movimientos cuentan solo ese período.
+            Los <strong>saldos por cuenta</strong> siguen siendo de todo el histórico —
+            un saldo recortado a un tramo no es un saldo.
+          </template>
+          <template v-else>
+            Los saldos son de todas las cuentas; el rango de meses
+            solo recorta la gráfica de evolución.
+          </template>
         </p>
       </div>
 
       <div class="ov-actions">
-        <!-- Period range selector -->
+        <!--
+          El rango de fechas recorta el PERÍODO: la gráfica, las tarjetas de
+          ingresos y egresos, el conteo de movimientos y los últimos
+          movimientos. El saldo de cada cuenta nunca se recorta (un saldo
+          recortado no es un saldo), y la tarjeta lo dice.
+        -->
+        <LedgerDateRange v-model:desde="desde" v-model:hasta="hasta" noun="Período" />
+
+        <!--
+          Los atajos de meses siguen siendo la ventana de la GRÁFICA, como
+          antes del filtro. Con rango puesto no deciden nada —los meses salen
+          del rango—, así que quedan apagados en vez de ofrecer un clic que no
+          cambia la pantalla.
+        -->
         <div class="ov-segmented-control" role="group" aria-label="Rango de tiempo">
           <button
             v-for="opt in RANGE_OPTIONS"
             :key="opt"
             type="button"
             class="ov-segment-btn"
-            :class="{ 'is-active': months === opt }"
+            :class="{ 'is-active': !hasDateRange && months === opt }"
+            :disabled="hasDateRange"
             @click="setRange(opt)"
           >
             {{ opt }} meses
@@ -45,7 +68,7 @@
       <!-- KPI 1: Ingresos -->
       <div class="kpi-card kpi-card-income">
         <div class="kpi-card-top">
-          <span class="kpi-card-label">Ingresos Totales</span>
+          <span class="kpi-card-label">{{ hasDateRange ? 'Ingresos del Período' : 'Ingresos Totales' }}</span>
           <span class="kpi-pill kpi-pill-emerald">
             <span class="kpi-pill-arrow">↑</span> Verificado
           </span>
@@ -54,14 +77,16 @@
           <span class="kpi-cur">S/</span> {{ fmt(data.totals.ingresos) }}
         </div>
         <div class="kpi-card-footer">
-          <span class="kpi-hint">Todo lo cobrado y verificado en cuentas</span>
+          <span class="kpi-hint">
+            {{ hasDateRange ? `Cobrado y verificado ${appliedLabel}` : 'Todo lo cobrado y verificado en cuentas' }}
+          </span>
         </div>
       </div>
 
       <!-- KPI 2: Egresos -->
       <div class="kpi-card kpi-card-expense">
         <div class="kpi-card-top">
-          <span class="kpi-card-label">Egresos Totales</span>
+          <span class="kpi-card-label">{{ hasDateRange ? 'Egresos del Período' : 'Egresos Totales' }}</span>
           <span class="kpi-pill kpi-pill-amber">
             <span class="kpi-pill-arrow">↓</span> Salidas
           </span>
@@ -87,7 +112,7 @@
       <!-- KPI 3: Balance Operativo -->
       <div class="kpi-card kpi-card-balance">
         <div class="kpi-card-top">
-          <span class="kpi-card-label">Balance Neto en Caja</span>
+          <span class="kpi-card-label">{{ hasDateRange ? 'Resultado del Período' : 'Balance Neto en Caja' }}</span>
           <span
             class="kpi-pill"
             :class="data.totals.balance >= 0 ? 'kpi-pill-cyan' : 'kpi-pill-rose'"
@@ -102,16 +127,24 @@
           <span class="kpi-cur">S/</span> {{ fmt(data.totals.balance) }}
         </div>
         <div class="kpi-card-footer">
-          <span class="kpi-hint">Saldo acumulado de todas las cuentas</span>
+          <!--
+            Con recorte esto ya no es un saldo, es un resultado: lo que entró
+            menos lo que salió en el tramo. Llamarlo igual es lo que haría
+            confundir "este mes gastamos más de lo que entró" con "la empresa
+            está en rojo".
+          -->
+          <span class="kpi-hint">
+            {{ hasDateRange ? `Lo que entró menos lo que salió ${appliedLabel}` : 'Saldo acumulado de todas las cuentas' }}
+          </span>
         </div>
       </div>
 
       <!-- KPI 4: Movimientos / Cierres -->
       <div class="kpi-card kpi-card-transactions">
         <div class="kpi-card-top">
-          <span class="kpi-card-label">Total Transacciones</span>
+          <span class="kpi-card-label">{{ hasDateRange ? 'Movimientos del Período' : 'Total Transacciones' }}</span>
           <span class="kpi-pill kpi-pill-purple">
-            Histórico
+            {{ hasDateRange ? 'Período' : 'Histórico' }}
           </span>
         </div>
         <div class="kpi-card-value">
@@ -149,8 +182,15 @@
     <div v-if="isLoading && !data.months.length" class="empty-state">
       <p>Cargando información financiera...</p>
     </div>
-    <div v-else-if="isEmpty" class="empty-state">
-      <p class="empty-state-title">Sin movimientos registrados en este período</p>
+    <!--
+      El estado vacío tapa el panel SOLO cuando no hay nada registrado. Con un
+      rango puesto y un tramo flojo, taparlo escondía también los saldos por
+      cuenta —que no se recortan y siguen teniendo plata—, así que la pantalla
+      decía "sin movimientos" con las cuentas llenas. Ahí va un aviso delgado
+      y el panel se sigue viendo.
+    -->
+    <div v-else-if="isEmpty && !hasDateRange" class="empty-state">
+      <p class="empty-state-title">Sin movimientos registrados</p>
       <p class="empty-state-text">
         Registra ingresos o asientos del libro diario para visualizar las gráficas y el estado de cuentas.
       </p>
@@ -163,6 +203,16 @@
         + Registrar primer ingreso
       </button>
     </div>
+
+    <p v-if="!isLoading && isEmpty && hasDateRange" class="ledger-range-notice ov-range-empty">
+      <span>
+        No hubo movimientos confirmados <strong>{{ appliedLabel }}</strong>.
+        Los saldos por cuenta de abajo son de todo el histórico y no se recortan.
+      </span>
+      <button type="button" class="ledger-range-notice-btn" @click="clearDateRange()">
+        Quitar el recorte
+      </button>
+    </p>
 
     <!-- Main Dashboard Body (Grid 2x2) -->
     <div v-else class="ov-main-grid">
@@ -676,10 +726,13 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { apiFetch } from "../../apiClient.js";
 import { BANCOS, bankSlug } from "./incomeOptions.js";
 import { monotonePath, niceAxisMax } from "./chartGeometry.js";
+import { rangeLabel } from "./dateRange.js";
+import LedgerDateRange from "./LedgerDateRange.vue";
+import "./ledger.css";
 
 const emit = defineEmits(["navigate-tab"]);
 
@@ -742,6 +795,23 @@ const ACCOUNT_CARDS = BANCOS
   }));
 
 const months = ref(6);
+/*
+ * El rango de fechas del período. Arranca VACÍO a propósito: sin él la
+ * pantalla dice exactamente lo que decía antes de que el filtro existiera (los
+ * totales cuentan todo el histórico confirmado), y un recorte puesto de fábrica
+ * cambiaría en silencio el número por el que se entra acá.
+ *
+ * El recorte lo resuelve el servidor y no el navegador: esta pestaña no recibe
+ * filas, recibe cifras ya agregadas.
+ */
+const desde = ref('');
+const hasta = ref('');
+const hasDateRange = computed(() => Boolean(desde.value || hasta.value));
+
+function clearDateRange() {
+  desde.value = '';
+  hasta.value = '';
+}
 const chartMode = ref("spline"); // 'spline' | 'bars'
 const selectedBank = ref(""); // "" (todos los bancos) o uno de BANCOS
 const isLoading = ref(false);
@@ -767,7 +837,21 @@ const data = ref({
     totalTransactions: 0,
     byBank: BANCOS.map((banco) => ({ banco, ingresos: 0, egresos: 0 }))
   },
-  recentTransactions: []
+  recentTransactions: [],
+  // Misma forma que devuelve `getOverview()`: el rango que de verdad se aplicó.
+  rango: { desde: '', hasta: '', recortado: false }
+});
+
+/*
+ * El tramo que el servidor de verdad contó, y no el que se escribió en los dos
+ * campos. Los dos se separan en dos casos: cuando se deja un extremo abierto
+ * (el servidor lo cierra en hoy) y cuando el tramo es más largo que las 24
+ * columnas del gráfico (se queda con las últimas). En los dos, rotular las
+ * tarjetas con lo pedido las haría decir un período que no es el que suman.
+ */
+const appliedLabel = computed(() => {
+  const r = data.value.rango;
+  return rangeLabel(r?.desde || desde.value, r?.hasta || hasta.value);
 });
 
 const isEmpty = computed(
@@ -1055,7 +1139,10 @@ async function fetchOverview() {
   isLoading.value = true;
   errorMessage.value = "";
   try {
-    const response = await apiFetch(`/api/finance/overview?months=${months.value}`);
+    const params = new URLSearchParams({ months: String(months.value) });
+    if (desde.value) params.set("desde", desde.value);
+    if (hasta.value) params.set("hasta", hasta.value);
+    const response = await apiFetch(`/api/finance/overview?${params}`);
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "No se pudo obtener el resumen.");
     data.value = payload;
@@ -1071,6 +1158,10 @@ function setRange(value) {
   months.value = value;
   fetchOverview();
 }
+
+// Cada extremo del rango vuelve a pedir el resumen: las cifras vienen agregadas
+// del servidor, así que no hay nada que recortar en memoria.
+watch([desde, hasta], fetchOverview);
 
 let themeObserver = null;
 
@@ -1142,6 +1233,10 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  /* El filtro de fechas sumó ancho a la barra: en una pantalla angosta se
+     parte en dos filas en vez de empujar el título fuera de la tarjeta. */
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .ov-segmented-control {
@@ -1167,6 +1262,14 @@ onBeforeUnmount(() => {
 
 .ov-segment-btn:hover {
   color: var(--text-main);
+}
+
+/* El aviso de período vacío va pegado al panel, no flotando entre tarjetas. */
+.ov-range-empty { margin: 0 0 0.25rem; }
+
+.ov-segment-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .ov-segment-btn.is-active {
