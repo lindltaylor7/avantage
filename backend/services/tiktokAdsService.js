@@ -45,6 +45,13 @@ const AUTH_PORTAL = 'https://business-api.tiktok.com/portal/auth';
 
 /** Cuántas páginas se siguen como máximo en un listado paginado. */
 const MAX_PAGES = 20;
+/*
+ * Tamaño de página por defecto. NO es el mismo para todos los endpoints:
+ * `campaign/get/`, `adgroup/get/` y `ad/get/` aceptan 1000, pero `page/get/`
+ * (los formularios instantáneos) topa en 100 y responde
+ * "page_size: number must be most 100" — un error de validación que parece de
+ * permisos si uno lo lee rápido. Por eso quien llama puede mandar el suyo.
+ */
 const PAGE_SIZE = 1000;
 
 /** Códigos de error de TikTok que significan "el token ya no sirve". */
@@ -473,7 +480,11 @@ export class TikTokAdsService {
   async #getPaged(path, params = {}) {
     const out = [];
     for (let page = 1; page <= MAX_PAGES; page++) {
-      const data = await this.#get(path, { ...params, page: String(page), page_size: String(PAGE_SIZE) });
+      const data = await this.#get(path, {
+        ...params,
+        page: String(page),
+        page_size: String(params.page_size ?? PAGE_SIZE)
+      });
       out.push(...(data?.list || []));
       const totalPages = Number(data?.page_info?.total_page || 1);
       if (page >= totalPages) break;

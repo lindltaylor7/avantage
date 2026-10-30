@@ -5,7 +5,8 @@ import {
   metaColumnFor,
   parseLeadCsv,
   leadFromRow,
-  parseTikTokTime
+  parseTikTokTime,
+  looksLikePermissionError
 } from '../tiktokLeadsService.js';
 import { formContactsFromLeads, TIKTOK_FORM_SPEC } from '../campaignService.js';
 import { extractMetaLeadForm } from '../metaLeadFields.js';
@@ -192,4 +193,24 @@ test('un lead de TikTok sin anuncio no se atribuye a ninguna campaña', () => {
     [{ ...LEAD_TIKTOK, tiktok_ad_id: null }], new Map(), TIKTOK_FORM_SPEC
   );
   assert.equal(contactos.length, 0);
+});
+
+// ───────────────────── Qué consejo da cada error ────────────────────────────
+
+test('un error de validación NO manda a reautorizar la app', () => {
+  /*
+   * Caso real del 30/10/2026: `page/get/` topa el tamaño de página en 100 y
+   * devolvió "page_size: number must be most 100". El aviso de "falta el scope
+   * de Lead Generation" iba colgado de CUALQUIER fallo, así que mandaba a
+   * rehacer el OAuth entero para volver exactamente al mismo error.
+   */
+  assert.equal(looksLikePermissionError({ message: 'TikTok Business API: page_size: number must be most 100' }), false);
+  assert.equal(looksLikePermissionError({ message: 'TikTok Business API: Service error, please retry' }), false);
+});
+
+test('un error de permisos sí lo manda', () => {
+  assert.equal(looksLikePermissionError({ tiktokCode: 40002 }), true);
+  assert.equal(looksLikePermissionError({ message: 'You do not have permission to access this resource' }), true);
+  assert.equal(looksLikePermissionError({ message: 'El token no tiene el scope requerido' }), true);
+  assert.equal(looksLikePermissionError({ message: 'No autorizado para leer esta pagina' }), true);
 });

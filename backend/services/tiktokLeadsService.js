@@ -53,7 +53,33 @@ const TASK_POLL_INTERVAL_MS = 1500;
 /** Tope de formularios que se recorren en una corrida. */
 const MAX_FORMS = 100;
 
+/*
+ * `page/get/` topa el tamaño de página en 100 y rechaza cualquier cosa mayor
+ * con "page_size: number must be most 100" — que es un error de VALIDACIÓN y
+ * no de permisos, aunque leído rápido parezca lo segundo. El paginador que se
+ * comparte con el servicio de anuncios usa 1000 por defecto, que es lo que
+ * aceptan `campaign/get/`, `adgroup/get/` y `ad/get/`, así que acá hay que
+ * pedir el propio.
+ */
+const FORMS_PAGE_SIZE = 100;
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/*
+ * Códigos y frases con las que TikTok dice "este token no puede hacer esto".
+ * Hacen falta porque el aviso de "falta el scope de Lead Generation" sólo
+ * sirve si el error ES de permisos: colgado de cualquier fallo mandaba a
+ * reautorizar la app por un `page_size` inválido (caso real del 30/10/2026),
+ * que es el peor consejo posible — se pierde media hora rehaciendo el OAuth
+ * para volver al mismo error.
+ */
+const PERMISSION_CODES = new Set([40001, 40002, 40100, 40102, 40105, 40110]);
+const PERMISSION_TEXT_RE = /permission|permiso|not authoriz|unauthoriz|scope|access denied|no autoriz/i;
+
+export function looksLikePermissionError(error) {
+  return PERMISSION_CODES.has(Number(error?.tiktokCode))
+    || PERMISSION_TEXT_RE.test(String(error?.message || ''));
+}
 
 /**
  * Las columnas del archivo de leads que son METADATOS y no respuestas del
@@ -293,7 +319,8 @@ export class TikTokLeadsService {
     try {
       const list = await this.ads.apiPaged('page/get/', {
         advertiser_id: advertiserId,
-        business_type: 'LEAD_GEN'
+        business_type: 'LEAD_GEN',
+        page_size: FORMS_PAGE_SIZE
       });
       const forms = list.map((page) => ({
         id: String(page.page_id ?? page.id ?? ''),
@@ -310,7 +337,11 @@ export class TikTokLeadsService {
     } catch (error) {
       const known = await this.#knownPageIds();
       if (!known.length) {
-        const e = new Error(`No se pudieron listar los formularios instantáneos de TikTok: ${error.message}. Si el error habla de permisos, la app necesita el scope de Lead Generation y hay que volver a autorizarla (README > Conectar TikTok Ads).`);
+        // El consejo sólo se da cuando corresponde: ver `looksLikePermissionError`.
+        const pista = looksLikePermissionError(error)
+          ? ' La app necesita el scope de Lead Generation y hay que volver a autorizarla para emitir un token nuevo (README > "Traer los leads de los formularios instantáneos de TikTok").'
+          : '';
+        const e = new Error(`No se pudieron listar los formularios instantáneos de TikTok: ${error.message}.${pista}`);
         e.code = error.code || 'TIKTOK_PAGES_UNAVAILABLE';
         e.tiktokCode = error.tiktokCode || null;
         throw e;
