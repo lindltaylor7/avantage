@@ -317,6 +317,12 @@ export class LeadService {
     metaCampaignId,
     metaPlatform,
     metaCreatedTime,
+    tiktokLeadId,
+    tiktokPageId,
+    tiktokAdId,
+    tiktokAdgroupId,
+    tiktokCampaignId,
+    tiktokCreatedTime,
     autoRoute = true
   }) {
     /*
@@ -388,7 +394,13 @@ export class LeadService {
       meta_adset_id: metaAdsetId || null,
       meta_campaign_id: metaCampaignId || null,
       meta_platform: metaPlatform || null,
-      meta_created_time: metaCreatedTime ? new Date(metaCreatedTime) : null
+      meta_created_time: metaCreatedTime ? new Date(metaCreatedTime) : null,
+      tiktok_lead_id: tiktokLeadId || null,
+      tiktok_page_id: tiktokPageId || null,
+      tiktok_ad_id: tiktokAdId || null,
+      tiktok_adgroup_id: tiktokAdgroupId || null,
+      tiktok_campaign_id: tiktokCampaignId || null,
+      tiktok_created_time: tiktokCreatedTime ? new Date(tiktokCreatedTime) : null
     });
     return this.getLeadById(id);
   }
@@ -421,6 +433,12 @@ export class LeadService {
       metaCampaignId: data.metaCampaignId,
       metaPlatform: data.metaPlatform,
       metaCreatedTime: data.metaCreatedTime,
+      tiktokLeadId: data.tiktokLeadId,
+      tiktokPageId: data.tiktokPageId,
+      tiktokAdId: data.tiktokAdId,
+      tiktokAdgroupId: data.tiktokAdgroupId,
+      tiktokCampaignId: data.tiktokCampaignId,
+      tiktokCreatedTime: data.tiktokCreatedTime,
       // Por acá entran los leads de Meta, que SÍ se reparten; el alta manual
       // entra por `registerManualLead()`, que lo pone en `false`.
       autoRoute: data.autoRoute !== false
@@ -764,6 +782,71 @@ ${note}` : note;
 
     if (Object.keys(patch).length) await db('leads').where({ id: lead.id }).update(patch);
     return this.getLeadById(lead.id);
+  }
+
+  /**
+   * El mismo teléfono ya es un lead y además llenó un formulario instantáneo
+   * de TikTok: el envío se cuelga de esa ficha en vez de abrir una segunda.
+   *
+   * Es `attachMetaLeadToExisting` para la otra plataforma, con la misma regla
+   * de fondo —una persona es un lead, no uno por cada formulario que llena— y
+   * el mismo cuidado: no se pisa el estado ni ningún dato que el equipo ya
+   * haya trabajado. La atribución se completa solo si estaba vacía, y el
+   * marcador va SIEMPRE a las notas aunque la columna ya esté ocupada por un
+   * envío anterior, que es lo que hace que la importación reconozca este
+   * `lead_id` como ya visto y no lo reporte como faltante para siempre.
+   *
+   * Que esto importe más acá que en Meta tiene una razón concreta: en TikTok
+   * el anuncio y el formulario conviven con campañas de Meta corriendo a la
+   * vez sobre el mismo público, así que el contacto que ya escribió por
+   * WhatsApp y después llenó el formulario de TikTok es el caso normal, no la
+   * excepción.
+   */
+  async attachTikTokLeadToExisting(lead, { leadId, pageId, adId, adgroupId, campaignId, createdTime, note }) {
+    const patch = {};
+    if (!lead.tiktok_lead_id && leadId) patch.tiktok_lead_id = leadId;
+    if (!lead.tiktok_page_id && pageId) patch.tiktok_page_id = pageId;
+    if (!lead.tiktok_ad_id && adId) patch.tiktok_ad_id = adId;
+    if (!lead.tiktok_adgroup_id && adgroupId) patch.tiktok_adgroup_id = adgroupId;
+    if (!lead.tiktok_campaign_id && campaignId) patch.tiktok_campaign_id = campaignId;
+    if (!lead.tiktok_created_time && createdTime) patch.tiktok_created_time = new Date(createdTime);
+
+    const notasPrevias = String(lead.additional_notes || '').trim();
+    if (note && !notasPrevias.includes(`[TikTok lead_id=${leadId}]`)) {
+      patch.additional_notes = notasPrevias ? `${notasPrevias}
+
+${note}` : note;
+    }
+
+    if (Object.keys(patch).length) await db('leads').where({ id: lead.id }).update(patch);
+    return this.getLeadById(lead.id);
+  }
+
+  /**
+   * Los `lead_id` de TikTok ya guardados, para restarlos contra los que
+   * devuelve la Business API sin traer un lead entero por cada uno.
+   *
+   * Mira la columna **y** el marcador de las notas, igual que
+   * `getKnownMetaLeadgenIds()`: una ficha que se cuelga de otra por teléfono
+   * puede tener la columna ya ocupada por un envío anterior, y ahí el único
+   * rastro del segundo formulario es el marcador. Sin leerlo, la importación
+   * volvería a dar de alta ese lead en cada pasada.
+   */
+  async getKnownTikTokLeadIds() {
+    const rows = await db('leads')
+      .select('tiktok_lead_id', 'additional_notes')
+      .where((builder) => {
+        builder.whereNotNull('tiktok_lead_id').orWhere('additional_notes', 'like', '%[TikTok lead_id=%');
+      });
+
+    const ids = new Set();
+    for (const row of rows) {
+      if (row.tiktok_lead_id) ids.add(String(row.tiktok_lead_id));
+      for (const m of String(row.additional_notes || '').matchAll(/\[TikTok lead_id=([^\]]+)\]/g)) {
+        ids.add(m[1]);
+      }
+    }
+    return ids;
   }
 
   /**

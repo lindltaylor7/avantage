@@ -38,6 +38,13 @@
         >{{ syncingTikTok ? '↻ Sincronizando…' : '↻ Sincronizar con TikTok' }}</button>
         <button
           type="button"
+          class="btn-secondary sync-btn sync-btn-tiktok"
+          :disabled="tiktokStatus && !tiktokStatus.configured"
+          :title="tiktokStatus && !tiktokStatus.configured ? 'Configura las credenciales de TikTok Ads primero' : 'Traer al CRM los leads de los formularios instantáneos de TikTok'"
+          @click="openTikTokLeads"
+        >📥 Leads de TikTok</button>
+        <button
+          type="button"
           class="btn-secondary export-btn"
           :disabled="exporting || !report || !report.campaigns.length"
           title="Descargar el rendimiento en Excel (.xlsx): atribución anuncio → venta, anuncios, conjuntos y campañas"
@@ -319,10 +326,17 @@
                           </div>
                         </div>
 
-                        <!-- Métricas del Administrador de anuncios (Meta) -->
+                        <!--
+                          Métricas del Administrador de anuncios. El título y
+                          las etiquetas siguen a `campaign.source` y no dicen
+                          "Meta" siempre: las dos integraciones escriben en las
+                          MISMAS columnas (`meta_insights`), así que una campaña
+                          de TikTok mostraba su gasto y sus impresiones bajo un
+                          encabezado que decía Meta Ads.
+                        -->
                         <div v-if="campaign.metrics.impressions != null" class="metrics-block">
                           <div class="metrics-block-head">
-                            <h4 class="metrics-block-title">📊 Meta Ads</h4>
+                            <h4 class="metrics-block-title">📊 {{ campaign.source === 'tiktok' ? 'TikTok Ads' : 'Meta Ads' }}</h4>
                             <span class="metrics-block-note">
                               Informe {{ reportWindowLabel(campaign.metrics) }}
                               <template v-if="campaign.metrics.attributionSetting">
@@ -351,8 +365,8 @@
                             <div class="metric metric-meta"><span class="metric-label">Visitas a la página de destino</span><span class="metric-value">{{ num(campaign.metrics.landingPageViews) }}</span></div>
                             <div class="metric metric-meta"><span class="metric-label">Coste por visita a la página</span><span class="metric-value">{{ campaign.metrics.costPerLandingPageView != null ? money(campaign.metrics.costPerLandingPageView) : '—' }}</span></div>
                             <div v-if="campaign.metrics.shopClicks" class="metric metric-meta"><span class="metric-label">Clics en la tienda</span><span class="metric-value">{{ num(campaign.metrics.shopClicks) }}</span></div>
-                            <div class="metric metric-meta"><span class="metric-label">Conversaciones (Meta)</span><span class="metric-value">{{ num(campaign.metrics.metaMessagingStarted) }}</span></div>
-                            <div class="metric metric-meta"><span class="metric-label">Costo/conv. (Meta)</span><span class="metric-value">{{ campaign.metrics.costPerLeadMeta != null ? money(campaign.metrics.costPerLeadMeta) : '—' }}</span></div>
+                            <div class="metric metric-meta"><span class="metric-label">Conversaciones ({{ adsSourceLabel(campaign) }})</span><span class="metric-value">{{ num(campaign.metrics.metaMessagingStarted) }}</span></div>
+                            <div class="metric metric-meta"><span class="metric-label">Costo/conv. ({{ adsSourceLabel(campaign) }})</span><span class="metric-value">{{ campaign.metrics.costPerLeadMeta != null ? money(campaign.metrics.costPerLeadMeta) : '—' }}</span></div>
                           </div>
                         </div>
 
@@ -713,6 +727,115 @@
       </div>
     </div>
 
+    <!--
+      Leads de formulario instantáneo de TikTok.
+
+      Dos pasos a propósito, igual que la conciliación de Meta: al abrir solo
+      se COMPARA (el GET no escribe nada) y recién el botón de adentro importa.
+      Traer leads agrega gente al funnel que el equipo va a trabajar y a
+      repartir, así que no puede ser el efecto de abrir una pantalla.
+    -->
+    <div v-if="showTikTokLeads" class="cmp-modal-overlay" @click.self="closeTikTokLeads">
+      <div class="cmp-modal cmp-modal-wide">
+        <div class="cmp-modal-head">
+          <div class="trace-head-text">
+            <h3>📥 Leads de formulario de TikTok</h3>
+            <span class="trace-head-sub">Compara lo que TikTok tiene contra lo que llegó al CRM</span>
+          </div>
+          <button type="button" class="icon-btn" @click="closeTikTokLeads">✕</button>
+        </div>
+
+        <div class="cmp-modal-body trace-modal-body">
+          <p v-if="ttLeadsLoading" class="trace-hint">⏳ Preguntándole a TikTok… puede tardar unos segundos: hay que pedirle una descarga por formulario y esperar a que la prepare.</p>
+
+          <p v-else-if="ttLeadsError" class="state-banner state-hint">
+            ⚠️ {{ ttLeadsError }}
+          </p>
+
+          <template v-else-if="ttLeadsReport">
+            <p v-if="ttLeadsReport.aviso" class="state-banner state-hint">⚠️ {{ ttLeadsReport.aviso }}</p>
+
+            <div class="trace-summary">
+              <div class="trace-summary-item">
+                <span class="trace-summary-value">{{ num(ttLeadsReport.totals.en_tiktok) }}</span>
+                <span class="trace-summary-label">En TikTok</span>
+              </div>
+              <div class="trace-summary-item">
+                <span class="trace-summary-value">{{ num(ttLeadsReport.totals.en_crm) }}</span>
+                <span class="trace-summary-label">Ya en el CRM</span>
+              </div>
+              <div class="trace-summary-item">
+                <span class="trace-summary-value">{{ num(ttLeadsReport.totals.faltantes) }}</span>
+                <span class="trace-summary-label">Faltan</span>
+              </div>
+              <div v-if="ttLeadsReport.aplicado" class="trace-summary-item">
+                <span class="trace-summary-value">{{ num(ttLeadsReport.totals.importados) }}</span>
+                <span class="trace-summary-label">Importados</span>
+              </div>
+              <div v-if="ttLeadsReport.aplicado" class="trace-summary-item">
+                <span class="trace-summary-value">{{ num(ttLeadsReport.totals.adjuntados) }}</span>
+                <span class="trace-summary-label">Adjuntados</span>
+              </div>
+            </div>
+
+            <!--
+              "Adjuntado" se dice aparte de "importado" porque no es lo mismo
+              para quien lee esto: un importado es una persona más para
+              trabajar, y un adjuntado es un formulario que se sumó a una ficha
+              que el equipo ya tenía (mismo teléfono).
+            -->
+            <p v-if="ttLeadsReport.aplicado" class="trace-hint">
+              Los <strong>adjuntados</strong> no son gente nueva: esa persona ya era un lead y el
+              formulario se sumó a su ficha en vez de abrirle una segunda.
+            </p>
+
+            <p v-if="!ttLeadsReport.aplicado && ttLeadsReport.totals.faltantes === 0" class="trace-hint">
+              ✅ No falta ninguno: todos los leads de los formularios de TikTok ya están en el CRM.
+            </p>
+
+            <table v-if="ttLeadsReport.forms.length" class="data-table tt-forms-table">
+              <thead>
+                <tr>
+                  <th>Formulario</th>
+                  <th>En TikTok</th>
+                  <th>En el CRM</th>
+                  <th>Faltan</th>
+                  <th v-if="ttLeadsReport.aplicado">Importados</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="f in ttLeadsReport.forms" :key="f.page_id">
+                  <td>
+                    {{ f.nombre || 'Formulario sin nombre' }}
+                    <span class="data-mono tt-form-id">{{ f.page_id }}</span>
+                  </td>
+                  <td>{{ num(f.en_tiktok) }}</td>
+                  <td>{{ num(f.en_crm) }}</td>
+                  <td>{{ num(f.faltantes) }}</td>
+                  <td v-if="ttLeadsReport.aplicado">{{ num(f.importados + f.adjuntados) }}</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <p v-if="ttLeadsReport.errores.length" class="state-banner state-hint">
+              ⚠️ {{ ttLeadsReport.errores.length }} formulario(s) no se pudieron leer:
+              {{ ttLeadsReport.errores.map(e => e.error).join(' · ') }}
+            </p>
+          </template>
+        </div>
+
+        <div class="cmp-modal-actions tt-leads-actions">
+          <button type="button" class="btn-secondary" @click="closeTikTokLeads">Cerrar</button>
+          <button
+            type="button"
+            class="btn-primary"
+            :disabled="ttLeadsLoading || ttLeadsImporting || !ttLeadsReport || !ttLeadsReport.totals.faltantes"
+            @click="importTikTokLeads"
+          >{{ ttLeadsImporting ? '⏳ Importando…' : `Importar ${ttLeadsReport ? ttLeadsReport.totals.faltantes : 0} lead(s)` }}</button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="showModal" class="cmp-modal-overlay" @click.self="closeModal">
       <div class="cmp-modal">
         <div class="cmp-modal-head">
@@ -932,6 +1055,27 @@ const metaStatus = ref(null);
 const tiktokStatus = ref(null);
 const syncing = ref(false);
 const syncingTikTok = ref(false);
+
+/*
+ * Leads de formulario instantáneo de TikTok. El modal se abre comparando (el
+ * GET no escribe nada) y el botón de adentro es el que importa: ver la nota
+ * del template.
+ */
+/**
+ * De qué Administrador de anuncios salen las métricas de esta campaña.
+ *
+ * Las dos integraciones escriben en las mismas columnas (`meta_insights`),
+ * así que el origen no se deduce del dato: lo dice `campaigns.source`.
+ */
+function adsSourceLabel(campaign) {
+  return campaign?.source === 'tiktok' ? 'TikTok' : 'Meta';
+}
+
+const showTikTokLeads = ref(false);
+const ttLeadsReport = ref(null);
+const ttLeadsLoading = ref(false);
+const ttLeadsImporting = ref(false);
+const ttLeadsError = ref('');
 // El mensaje de resultado es uno solo: las dos sincronizaciones no corren a la
 // vez y así el usuario no acumula banners de la plataforma que ya revisó.
 const syncMsg = ref('');
@@ -1093,6 +1237,60 @@ async function syncTikTok() {
   } finally {
     syncingTikTok.value = false;
   }
+}
+
+/**
+ * Abre el modal y compara: qué leads tiene cada formulario instantáneo de
+ * TikTok contra los que están en el CRM. No escribe nada.
+ */
+async function openTikTokLeads() {
+  showTikTokLeads.value = true;
+  ttLeadsReport.value = null;
+  ttLeadsError.value = '';
+  ttLeadsLoading.value = true;
+  try {
+    const res = await apiFetch('/api/campaigns/tiktok/leads');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo consultar a TikTok.');
+    ttLeadsReport.value = data;
+  } catch (err) {
+    ttLeadsError.value = err.message;
+  } finally {
+    ttLeadsLoading.value = false;
+  }
+}
+
+/**
+ * Trae al CRM los que faltan.
+ *
+ * Al terminar se recarga el reporte de Campañas: los leads recién importados
+ * ya traen su `ad_id`, así que la trazabilidad de la campaña —que es lo que
+ * estaba vacío— pasa a tener contactos sin que haya que recargar la página.
+ */
+async function importTikTokLeads() {
+  ttLeadsImporting.value = true;
+  ttLeadsError.value = '';
+  try {
+    const res = await apiFetch('/api/campaigns/tiktok/leads', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudieron importar los leads.');
+    ttLeadsReport.value = data;
+    await loadReport();
+  } catch (err) {
+    ttLeadsError.value = err.message;
+  } finally {
+    ttLeadsImporting.value = false;
+  }
+}
+
+function closeTikTokLeads() {
+  showTikTokLeads.value = false;
+  ttLeadsReport.value = null;
+  ttLeadsError.value = '';
 }
 
 /**

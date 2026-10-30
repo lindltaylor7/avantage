@@ -19,10 +19,16 @@ import { downloadAdCreativeImage } from './adCreativeImage.js';
  * Diferencias de fondo con Meta que explican varias decisiones de este archivo:
  *
  *  - **No hay Click-to-WhatsApp.** TikTok no manda un `referral.source_id` al
- *    chat, así que NO se escriben filas en `campaign_ads`: mapear anuncios que
- *    nunca van a coincidir con una conversación sólo ensuciaría la tabla que
- *    usa la atribución de Meta. El desglose por anuncio de TikTok se ve igual,
- *    porque sale de `meta_ads_insights`, no del mapeo.
+ *    chat, así que por ese camino no hay nada que atribuir. Lo que sí hay
+ *    —desde el 30/10/2026— son los leads de **formulario instantáneo**, que
+ *    llegan con su `ad_id` (ver `tiktokLeadsService.js`), y por eso ahora sí
+ *    se escriben filas en `campaign_ads`: sin ellas, un lead importado de
+ *    TikTok no se podía acreditar a ninguna campaña y la trazabilidad salía
+ *    vacía con 21 conversiones en el Ads Manager. El `ad_source_id` va
+ *    prefijado con `tt:`, igual que el `external_id` de la campaña: los ids
+ *    de anuncio de las dos plataformas son numéricos y `ad_source_id` es
+ *    ÚNICO, así que sin el prefijo un anuncio de TikTok podría robarle la
+ *    fila a uno de Meta y mandar sus leads a la campaña equivocada.
  *  - **La campaña no tiene fechas.** El calendario vive en el grupo de
  *    anuncios (`schedule_start_time`/`schedule_end_time`), así que las fechas
  *    de la campaña se derivan del mínimo y el máximo de sus grupos.
@@ -428,6 +434,24 @@ export class TikTokAdsService {
   }
 
   /**
+   * Los dos `#get` abiertos al resto del backend.
+   *
+   * `tiktokLeadsService` necesita hablar con la MISMA API —mismo token, misma
+   * versión, mismo tratamiento de los errores que TikTok devuelve dentro de un
+   * HTTP 200 y mismo paginado— y la alternativa era copiar esas cuatro cosas
+   * en el otro archivo. Copiadas, el día que el token caducado deje de
+   * reconocerse en uno de los dos la importación fallaría diciendo cualquier
+   * otra cosa.
+   */
+  async api(path, params = {}) {
+    return this.#get(path, params);
+  }
+
+  async apiPaged(path, params = {}) {
+    return this.#getPaged(path, params);
+  }
+
+  /**
    * GET a un endpoint de la API. TikTok responde SIEMPRE HTTP 200: el error
    * real viene en `code` del cuerpo, así que hay que mirarlo siempre.
    */
@@ -591,9 +615,9 @@ export class TikTokAdsService {
       summary.adgroups++;
     }
 
-    // 3) Anuncios. A diferencia de Meta NO se escriben en `campaign_ads`:
-    //    TikTok no manda `referral.source_id` al chat, así que no hay nada que
-    //    atribuir por ese camino (ver la nota de cabecera del archivo).
+    // 3) Anuncios. Se mapean en `campaign_ads` con el prefijo `tt:` para que
+    //    los leads de formulario instantáneo —que sí traen su `ad_id`— se
+    //    puedan acreditar a su campaña (ver la nota de cabecera del archivo).
     let ads = [];
     try {
       ads = await this.#getPaged('ad/get/', { advertiser_id: advertiser });
@@ -629,6 +653,20 @@ export class TikTokAdsService {
       });
 
       const localCampaignId = localIdByExternal.get(String(ad.campaign_id));
+
+      /*
+       * El mapeo anuncio -> campaña, que es de lo que cuelga la atribución de
+       * los leads de formulario. Se reescribe en cada sincronización
+       * (`onConflict().merge()`) y no sólo se inserta: un anuncio renombrado
+       * tiene que decir su nombre nuevo en la trazabilidad.
+       */
+      if (localCampaignId) {
+        await db('campaign_ads')
+          .insert({ campaign_id: localCampaignId, ad_source_id: `tt:${ad.ad_id}`, ad_label: ad.ad_name || null })
+          .onConflict('ad_source_id')
+          .merge({ campaign_id: localCampaignId, ad_label: ad.ad_name || null });
+      }
+
       if (localCampaignId && image && !imageSetForCampaign.has(localCampaignId)) {
         // La campaña se reconoce de un vistazo por el creativo de su primer
         // anuncio, igual que en Meta.

@@ -32,6 +32,7 @@ import { DocumentService } from './services/documentService.js';
 import { CampaignService } from './services/campaignService.js';
 import { MetaAdsService } from './services/metaAdsService.js';
 import { TikTokAdsService } from './services/tiktokAdsService.js';
+import { TikTokLeadsService } from './services/tiktokLeadsService.js';
 import { CampaignExportService } from './services/campaignExportService.js';
 import { UserService } from './services/userService.js';
 import { RoleService } from './services/roleService.js';
@@ -183,6 +184,11 @@ const projectUpdateService = new ProjectUpdateService();
 const deliverableService = new DeliverableService({ projectService, taskService });
 const metaWebhookService = new MetaWebhookService();
 const metaLeadReconciliationService = new MetaLeadReconciliationService(leadService);
+// Los leads de formulario instantáneo de TikTok. Recibe el servicio de
+// anuncios y no el token: de ahí salen la cuenta publicitaria resuelta, la
+// versión de la API y el tratamiento de los errores que TikTok devuelve
+// dentro de un HTTP 200 (ver `tiktokLeadsService.js`).
+const tiktokLeadsService = new TikTokLeadsService({ ads: tiktokAdsService, leadService });
 const pageInteractionService = new PageInteractionService();
 const pageMessageService = new PageMessageService();
 const pageFollowerService = new PageFollowerService();
@@ -4775,6 +4781,50 @@ app.post('/api/campaigns/tiktok/sync', requireAuth, requirePermission('campaigns
     console.error('❌ Error al sincronizar con TikTok Ads:', error);
     const configErrors = ['NOT_CONFIGURED', 'NO_TOKEN', 'NO_AD_ACCOUNT'];
     const status = configErrors.includes(error.code) ? 400 : 502;
+    res.status(status).json({ error: error.message, code: error.code || null, tiktokCode: error.tiktokCode || null });
+  }
+});
+
+/*
+ * Leads de formulario instantáneo de TikTok (TikTok Lead Generation).
+ *
+ * GET  = solo compara y reporta lo que TikTok tiene contra lo que hay en el CRM.
+ * POST = además importa los que falten.
+ *
+ * Separadas por la misma razón que las de Meta: traer leads agrega gente al
+ * funnel que el equipo va a trabajar y a repartir, así que no puede ser el
+ * efecto de abrir una pantalla.
+ *
+ * `campaigns.view` o `leads.view`: el botón vive en Campañas —es quien paga el
+ * anuncio el que nota que faltan leads— pero lo que hace es dar de alta leads,
+ * así que quien trabaja el funnel también tiene que poder correrlo.
+ */
+app.get('/api/campaigns/tiktok/leads', requireAuth, requireAnyPermission('campaigns.view', 'leads.view'), async (req, res) => {
+  try {
+    res.json(await tiktokLeadsService.run({
+      from: req.query.from || null,
+      to: req.query.to || null,
+      apply: false
+    }));
+  } catch (error) {
+    console.error('❌ Error al revisar los leads de TikTok:', error);
+    const status = ['NO_TOKEN', 'NOT_CONFIGURED', 'NO_AD_ACCOUNT'].includes(error.code) ? 400 : 502;
+    res.status(status).json({ error: error.message, code: error.code || null, tiktokCode: error.tiktokCode || null });
+  }
+});
+
+app.post('/api/campaigns/tiktok/leads', requireAuth, requireAnyPermission('campaigns.view', 'leads.view'), async (req, res) => {
+  try {
+    const report = await tiktokLeadsService.run({
+      from: req.body?.from || null,
+      to: req.body?.to || null,
+      apply: true
+    });
+    console.log(`📥 [TikTok Leads] ${report.totals.importados} importados, ${report.totals.adjuntados} adjuntados a fichas existentes.`);
+    res.json(report);
+  } catch (error) {
+    console.error('❌ Error al importar los leads de TikTok:', error);
+    const status = ['NO_TOKEN', 'NOT_CONFIGURED', 'NO_AD_ACCOUNT'].includes(error.code) ? 400 : 502;
     res.status(status).json({ error: error.message, code: error.code || null, tiktokCode: error.tiktokCode || null });
   }
 });

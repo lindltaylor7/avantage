@@ -318,3 +318,75 @@ Meta y en TikTok, así que el informe de rendimiento, la exportación a Excel y 
 igual sin duplicar nada. Lo que distingue el origen es `campaigns.source` (`meta` | `tiktok` |
 `manual`), y los `external_id` de TikTok van prefijados con `tt:` para que no puedan colisionar con
 los de Meta. No hace falta ninguna migración para usar el módulo.
+
+## 5. Traer los leads de los formularios instantáneos de TikTok
+
+Si tus campañas de TikTok usan un **formulario instantáneo** (Instant Form: la persona deja sus
+datos sin salir de TikTok, el equivalente al formulario instantáneo de Meta), esos leads **no
+llegan solos al CRM**. A diferencia de Meta, TikTok no llama a ningún webhook: los leads se quedan
+en el Centro de clientes potenciales de TikTok y el panel no se entera de que existen. El síntoma
+es inconfundible: la campaña marca conversiones en el Ads Manager y su *Trazabilidad de leads* dice
+«Todavía no hay contactos atribuidos a esta campaña».
+
+El botón **📥 Leads de TikTok** (Panel → Campañas, al lado de *Sincronizar con TikTok*) los trae.
+
+### Paso 1 — Darle a la app el permiso de Lead Generation
+
+Es casi seguro que el token que creaste para sincronizar campañas **no sirve para esto**: el scope
+de generación de leads va aparte de `Ads Management`. Un token sin él sincroniza las campañas
+perfectamente y no puede leer un solo lead.
+
+1. <https://business-api.tiktok.com/portal> → **My Apps** → tu app → **Scope of permission**.
+2. Marca el permiso de **Lead Generation** (según la cuenta aparece como *Lead Ads Management* o
+   *Leads*; es el que habla de acceder a los clientes potenciales de los formularios).
+3. Guarda y **vuelve a hacer los pasos 3 y 4** de la sección anterior (autorizar + canjear). Un
+   token emitido *antes* de agregar el permiso no lo tiene: hay que generar uno nuevo y pegarlo en
+   `TIKTOK_ACCESS_TOKEN`.
+
+Para comprobarlo sin tocar nada, el diagnóstico (**solo lee**, no da de alta ningún lead):
+
+```bash
+node backend/scripts/diagnosticarTiktokLeads.js
+```
+
+Dice si el token sirve, lista los formularios de la cuenta, prueba una descarga real y cuenta lo
+que el CRM ya tiene. Si falla por permisos, lo dice con todas las letras.
+
+### Paso 2 — Importar
+
+1. **Panel → Campañas → 📥 Leads de TikTok**. Al abrirse **solo compara** (no escribe nada) y
+   muestra, formulario por formulario, cuántos leads tiene TikTok, cuántos ya están en el CRM y
+   cuántos faltan. Tarda unos segundos: TikTok no entrega los leads de una, hay que pedirle una
+   descarga por formulario y esperar a que la prepare.
+2. El botón **Importar N lead(s)** los trae. Es idempotente: un lead ya importado no se vuelve a
+   dar de alta, así que se puede correr cuantas veces haga falta.
+
+Al terminar el resumen distingue dos cosas que **no son lo mismo**:
+
+- **Importados**: fichas nuevas, gente más para trabajar.
+- **Adjuntados**: esa persona ya era un lead (mismo celular) y el formulario se sumó a su ficha en
+  vez de abrirle una segunda. Una persona es un lead, no uno por cada formulario que llena.
+
+### Qué pasa con cada lead importado
+
+- Entra al **Setter Funnel** en *Conversación abierta* —llenó un formulario pero todavía no habló
+  con nadie— y pasa por el **reparto automático** como cualquier lead que entra solo.
+- Se guarda su atribución (`tiktok_lead_id`, `tiktok_page_id`, `tiktok_ad_id`, `tiktok_adgroup_id`,
+  `tiktok_campaign_id`, `tiktok_created_time`) y con eso aparece en la **trazabilidad de su
+  campaña**, que es lo que estaba vacío.
+- Se fecha por **cuándo llenó el formulario en TikTok**, no por cuándo se corrió la importación:
+  un lead del 27 de octubre rescatado el 30 cuenta el 27, o el reporte nunca cierra contra el Ads
+  Manager.
+- Las respuestas se leen **por patrón y no por la clave exacta**, con el mismo extractor que los
+  formularios de Meta: el nombre de cada pregunta lo escribe quien arma el formulario. Lo que no
+  cae en ningún campo de la ficha va igual a las notas, con el nombre de su pregunta.
+
+### Si algo falla
+
+| Lo que dice el panel | Qué revisar |
+| --- | --- |
+| No se pudieron listar los formularios | Es el permiso: ver el paso 1. El diagnóstico lo confirma. |
+| La cuenta no tiene ningún formulario instantáneo | Las campañas mandan a un sitio web o a un chat, no a un Instant Form. No hay leads que traer por acá. |
+| «sigue preparándose en TikTok» | La descarga tardó más de lo normal. Vuelve a abrir el modal en un minuto; no se pierde nada. |
+| Importa pero no salen en la trazabilidad | Mira el contador **sin anuncio** del reporte: un lead sin `ad_id` entra al CRM pero no se puede acreditar a ninguna campaña. |
+

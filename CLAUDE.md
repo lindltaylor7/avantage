@@ -721,6 +721,56 @@ antes de tocar el arranque de producción.
   incompleto porque la Graph API manda el `ad_id` junto al lead. Y los **formularios activos sin un
   solo lead** se listan aparte (`formularios_activos_sin_leads`): en una lista de treinta
   formularios, la mayoría viejos y vacíos, el que hay que ir a revisar se pierde entre los demás.
+- Los leads de **formulario instantáneo de TikTok** (TikTok Lead Generation) se traen a mano con el
+  botón «📥 Leads de TikTok» de Campañas (`tiktokLeadsService.js`, `GET`/`POST
+  /api/campaigns/tiktok/leads` bajo `campaigns.view` o `leads.view`). Es la conciliación de Meta
+  vista desde el otro lado: allá el webhook perdía leads en silencio y había que ir a buscarlos,
+  acá **no hay webhook en absoluto** —TikTok no llama a nadie—, así que los leads se quedaban en el
+  Centro de clientes potenciales de TikTok y el CRM nunca se enteraba de que existían. El síntoma
+  (30/10/2026): la campaña «TT | WA | Asesor | 27Oct» marcaba 21 conversiones en el Ads Manager y
+  su trazabilidad decía «todavía no hay contactos atribuidos a esta campaña».
+  **Las respuestas las lee el MISMO extractor que las de Meta** (`extractMetaLeadForm` en
+  `metaLeadFields.js`): las dos plataformas tienen idéntico problema —el nombre de cada pregunta no
+  es estable, es el texto que escribió el equipo convertido a slug— y ahí ya están resueltas las
+  reglas que costaron casos reales (la universidad antes que el nombre, un documento que nunca
+  entra como celular, los 9 dígitos como última red). Copiarlas daría dos extractores que el día
+  que alguien corrija uno dicen cosas distintas según de qué plataforma venga el lead. Por eso
+  `leadFromRow()` entrega las respuestas con la forma del `field_data` de Meta (`{name, values}`):
+  el adaptador va del lado de TikTok, no en el extractor.
+  Las columnas de atribución son **propias** (`tiktok_lead_id`, `tiktok_page_id`, `tiktok_ad_id`,
+  `tiktok_adgroup_id`, `tiktok_campaign_id`, `tiktok_created_time`) y no las `meta_*`: de
+  `meta_leadgen_id` cuelgan la conciliación de Meta y el backfill, que le preguntan a la **Graph
+  API** por cada id que encuentran, así que un id de TikTok ahí se reportaría para siempre como
+  "falta en el CRM" y gastaría una llamada por lead contra la API equivocada.
+  `persistTikTokLead()` es el **camino único** de alta (como `persistMetaLead`) y cruza por
+  teléfono con `findByPhone()` antes de crear nada: acá pesa más que en Meta, porque estas campañas
+  corren a la vez que las de Meta sobre el mismo público y el contacto que ya escribió por WhatsApp
+  y además llenó el formulario de TikTok es el caso normal. Un lead ya importado no se vuelve a dar
+  de alta (`getKnownTikTokLeadIds()` mira la columna **y** el marcador `[TikTok lead_id=...]` de
+  las notas, que es el único rastro que queda cuando la ficha se colgó de otra), así que correr la
+  importación dos veces no duplica a nadie. El `GET` solo compara y el `POST` importa, por la misma
+  razón que en Meta: traer leads agrega gente al funnel que el equipo va a trabajar y a repartir.
+  TikTok **no entrega los leads de una**: hay que pedir una tarea de descarga, esperar a que la
+  prepare y bajar el archivo (CSV, con el JSON admitido por si la cuenta lo devuelve así). De ahí
+  que el botón tarde unos segundos y que el CSV se parsee **de verdad** y no con `split(',')`: una
+  respuesta de texto libre trae comas y comillas, y partir por coma rompe justo en el lead cuya
+  respuesta era interesante. El permiso de **Lead Generation va aparte de Ads Management**: un
+  token sin él sincroniza las campañas perfecto y no lee un solo lead, sin que nada falle a la
+  vista — es el fallo más probable y el único que se arregla reautorizando.
+  `backend/scripts/diagnosticarTiktokLeads.js` (solo lee) lo comprueba antes de tocar nada.
+  Como consecuencia de que ahora SÍ hay algo que atribuir, `tiktokAdsService` **escribe
+  `campaign_ads`**, cosa que antes no hacía a propósito. El `ad_source_id` va prefijado con `tt:`
+  (igual que el `external_id` de la campaña) porque esa columna es ÚNICA y la comparten las dos
+  plataformas, y los ids de anuncio de las dos son numéricos: sin el prefijo un anuncio de TikTok
+  podría quedarse con la fila de uno de Meta y mandarle sus leads a la campaña equivocada. Por lo
+  mismo `#resolveContactAd()` le quita el prefijo para buscar en las MÉTRICAS, que se guardan con
+  el id pelado. La atribución entra por `#attributionFromTikTokForms()` con el mismo `sourceId` y
+  la misma forma que los dos caminos de Meta (`TIKTOK_FORM_SPEC`), y la misma persona por varios
+  caminos se cuenta UNA vez (`dedupeAttribution`): alguien que hizo clic en un anuncio de Meta y
+  además llenó el formulario de TikTok es un contacto, y contarlo dos veces infla las
+  conversaciones atribuidas y abarata el costo por lead de las dos campañas a la vez. El lead se
+  ubica en `tiktok_created_time` —cuándo lo llenó en TikTok— y no en `created_at`: uno del 27 de
+  octubre rescatado el 30 pertenece al 27, o el reporte no cierra contra el Ads Manager.
 - Lo que Meta nos manda **vuelve a Meta**: `metaConversionsService.js` le devuelve, por la
   **Conversions API**, en qué etapa del funnel terminó cada lead que llegó de un anuncio
   (`/api/meta-capi` bajo `webhooks.view`, pantalla en `MetaConversionsPanel.vue` dentro de

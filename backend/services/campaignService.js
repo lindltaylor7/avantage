@@ -115,9 +115,40 @@ export function esMejorLead(candidato, actual, wonStatuses = new Set()) {
  * negocio y no una consulta, y de ella depende a qué anuncio se le acreditan
  * los leads de formulario.
  */
-export function formContactsFromLeads(rows, waIdByKey = new Map()) {
+export const META_FORM_SPEC = {
+  adColumn: 'meta_ad_id',
+  formColumn: 'meta_form_id',
+  createdColumn: 'meta_created_time',
+  // El "ID de origen" de Meta es el `ad_id` pelado: es el mismo valor que
+  // llega en el `referral.source_id` de un Click-to-WhatsApp, y los dos
+  // caminos tienen que caer en la misma fila de `campaign_ads`.
+  sourceIdOf: (row) => String(row.meta_ad_id),
+  platformOf: (row) => (row.meta_platform === 'ig' ? 'instagram'
+    : row.meta_platform === 'fb' ? 'facebook' : 'meta')
+};
+
+/**
+ * TikTok, con dos diferencias que no son cosméticas:
+ *
+ *  - El `sourceId` lleva el prefijo `tt:`, el mismo con el que
+ *    `tiktokAdsService` escribe `campaign_ads.ad_source_id`. Los ids de
+ *    anuncio de las dos plataformas son numéricos y esa columna es ÚNICA, así
+ *    que sin el prefijo un anuncio de TikTok podría quedarse con la fila de
+ *    uno de Meta y mandar sus leads a la campaña equivocada.
+ *  - El "formulario" es la Instant Page (`tiktok_page_id`), que es lo que
+ *    cumple el papel del `form_id` de Meta.
+ */
+export const TIKTOK_FORM_SPEC = {
+  adColumn: 'tiktok_ad_id',
+  formColumn: 'tiktok_page_id',
+  createdColumn: 'tiktok_created_time',
+  sourceIdOf: (row) => `tt:${row.tiktok_ad_id}`,
+  platformOf: () => 'tiktok'
+};
+
+export function formContactsFromLeads(rows, waIdByKey = new Map(), spec = META_FORM_SPEC) {
   return rows
-    .filter((row) => row.meta_ad_id)
+    .filter((row) => row[spec.adColumn])
     .map((row) => {
       const matchKey = phoneMatchKey(row.phone);
       return {
@@ -133,12 +164,11 @@ export function formContactsFromLeads(rows, waIdByKey = new Map()) {
         contactName: row.full_name || null,
         // El "ID de origen": el mismo campo por el que ya viajaba el
         // `source_id` del referral de WhatsApp.
-        sourceId: String(row.meta_ad_id),
-        formId: row.meta_form_id || null,
+        sourceId: spec.sourceIdOf(row),
+        formId: row[spec.formColumn] || null,
         headline: null,
         sourceUrl: null,
-        platform: row.meta_platform === 'ig' ? 'instagram'
-          : row.meta_platform === 'fb' ? 'facebook' : 'meta',
+        platform: spec.platformOf(row),
         /*
          * `meta_created_time` —cuándo la persona envió el formulario en Meta—
          * y no `created_at`: un lead que la conciliación rescató tres días
@@ -146,7 +176,7 @@ export function formContactsFromLeads(rows, waIdByKey = new Map()) {
          * es lo que impide que este reporte cierre contra el Administrador de
          * anuncios.
          */
-        firstMessageAt: row.meta_created_time || row.created_at
+        firstMessageAt: row[spec.createdColumn] || row.created_at
       };
     });
 }
@@ -314,14 +344,26 @@ export class CampaignService {
    * cada uno de ellos.
    */
   async #buildAttribution({ from, to } = {}) {
-    const [whatsapp, forms] = await Promise.all([
+    /*
+     * El índice de conversaciones se arma UNA vez acá y se les pasa a los dos
+     * caminos de formulario: es la misma consulta para los dos, y cacheado en
+     * la instancia —que vive lo que vive el proceso— se quedaría sin los
+     * contactos que escriban después del primer reporte del día.
+     */
+    const waIdByKey = await this.#waIdsByPhoneKey();
+    const [whatsapp, forms, tiktok] = await Promise.all([
       this.#attributionFromWhatsApp(),
-      this.#attributionFromMetaForms()
+      this.#attributionFromMetaForms(waIdByKey),
+      this.#attributionFromTikTokForms(waIdByKey)
     ]);
 
     // WhatsApp primero: es el que gana cuando los dos hablan de la misma
-    // persona (ver `dedupeAttribution`).
-    let list = dedupeAttribution(whatsapp, forms);
+    // persona (ver `dedupeAttribution`). Los formularios de TikTok van al
+    // final por lo mismo: alguien que hizo clic en un anuncio de Meta y
+    // además llenó el formulario de TikTok es UN contacto, y contarlo dos
+    // veces infla las conversaciones atribuidas y abarata el costo por lead
+    // de las dos campañas a la vez.
+    let list = dedupeAttribution(whatsapp, forms, tiktok);
 
     if (from) list = list.filter((a) => new Date(a.firstMessageAt) >= new Date(from));
     if (to) list = list.filter((a) => new Date(a.firstMessageAt) <= new Date(to));
@@ -384,13 +426,47 @@ export class CampaignService {
    * son unos pocos miles de filas y evita que este servicio arrastre el módulo
    * de WhatsApp, que ya importa a este por otro lado.
    */
-  async #attributionFromMetaForms() {
+  async #attributionFromMetaForms(waIdByKey) {
     const rows = await db('leads')
       .whereNotNull('meta_ad_id')
       .select('id', 'phone', 'full_name', 'meta_ad_id', 'meta_form_id',
         'meta_platform', 'meta_created_time', 'created_at');
     if (!rows.length) return [];
+    return formContactsFromLeads(rows, waIdByKey, META_FORM_SPEC);
+  }
 
+  /**
+   * Los leads de formulario instantáneo de **TikTok**, atribuidos por el
+   * `ad_id` que TikTok manda junto al lead (`leads.tiktok_ad_id`, escrito por
+   * `tiktokLeadsService`).
+   *
+   * Es la misma mitad que faltaba en Meta hasta el 29/10/2026, repetida en la
+   * otra plataforma: las columnas de atribución de TikTok se guardaban al
+   * importar pero nadie las leía, así que una campaña con 21 conversiones en
+   * el Ads Manager mostraba "todavía no hay contactos atribuidos" en su
+   * trazabilidad.
+   */
+  async #attributionFromTikTokForms(waIdByKey) {
+    const rows = await db('leads')
+      .whereNotNull('tiktok_ad_id')
+      .select('id', 'phone', 'full_name', 'tiktok_ad_id', 'tiktok_page_id',
+        'tiktok_created_time', 'created_at');
+    if (!rows.length) return [];
+    return formContactsFromLeads(rows, waIdByKey, TIKTOK_FORM_SPEC);
+  }
+
+  /**
+   * Índice "últimos 9 dígitos -> wa_id" de las conversaciones que existen.
+   *
+   * Lo comparten los dos caminos de formulario: si la persona que llenó el
+   * formulario después escribió por WhatsApp, esa conversación es la que hay
+   * que contarle (tiempo de respuesta, sesión del bot, reunión agendada).
+   * Está acá y no dentro de cada uno porque son la misma pregunta y la misma
+   * consulta, y duplicada se pagaría dos veces en cada carga del reporte. No
+   * se cachea en la instancia: este servicio vive lo que vive el proceso, y un
+   * índice congelado dejaría fuera a todo el que escriba después.
+   */
+  async #waIdsByPhoneKey() {
     const waIdByKey = new Map();
     const contactos = await db('whatsapp_messages')
       .groupBy('wa_id')
@@ -403,7 +479,7 @@ export class CampaignService {
       if (key) waIdByKey.set(key, row.wa_id);
     }
 
-    return formContactsFromLeads(rows, waIdByKey);
+    return waIdByKey;
   }
 
   /**
@@ -631,7 +707,15 @@ export class CampaignService {
   #resolveContactAd(contact, campaign, metaAds) {
     const sourceId = contact.sourceId ? String(contact.sourceId) : null;
     const label = campaign?.ads?.find((a) => String(a.ad_source_id) === sourceId)?.ad_label || null;
-    const metaAd = metaAds.find((a) => String(a.adId) === sourceId)
+    /*
+     * El `sourceId` de TikTok lleva el prefijo `tt:` porque `campaign_ads` es
+     * compartida y su `ad_source_id` es único; las MÉTRICAS, en cambio, se
+     * guardan con el id pelado que devuelve cada plataforma. Sin quitarlo acá,
+     * un contacto de TikTok nunca encontraba su anuncio en las métricas y la
+     * trazabilidad salía sin nombre de anuncio ni miniatura.
+     */
+    const insightsId = sourceId?.startsWith('tt:') ? sourceId.slice(3) : sourceId;
+    const metaAd = metaAds.find((a) => String(a.adId) === insightsId)
       || (label ? metaAds.find((a) => a.adName === label) : null);
     return {
       adSourceId: sourceId,
