@@ -7,6 +7,84 @@ const PAGE_SIZE = 100;
 const MAX_PAGES = 50;
 
 /**
+ * El campo del webhook del que cuelga TODO lo de los formularios: si la Página
+ * no está suscrita a él, Meta no avisa de un solo lead nuevo.
+ */
+export const LEADGEN_FIELD = 'leadgen';
+
+/**
+ * Qué dice la lista de apps suscritas a la Página sobre si los leads de
+ * formulario pueden llegar.
+ *
+ * La suscripción al webhook **no es por formulario**: se declara una vez, de la
+ * app a la Página, y vale para todos sus formularios —los que ya existen y los
+ * que el equipo cree mañana—. Por eso "revisar que estén suscritos todos los
+ * formularios" se contesta acá y no formulario por formulario; lo que sí se
+ * revisa de a uno es si cada formulario activo entregó sus leads, y eso es la
+ * comparación que hace `reconcile()`.
+ *
+ * Es la causa más silenciosa de leads perdidos: sin `leadgen` suscrito no hay
+ * error en ningún log —Meta simplemente no llama— y el CRM se ve igual que un
+ * día sin campañas. Se reporta como `conectado | sin_leadgen | sin_apps` en vez
+ * de un booleano porque las tres se arreglan distinto: la primera no se toca,
+ * la segunda es agregar el campo a la suscripción que ya existe, y la tercera
+ * es que la app nunca se suscribió a esta Página.
+ *
+ * Vive fuera de la clase y recibe la respuesta cruda para poder probarse sin
+ * llamar a Meta.
+ */
+export function subscriptionState(apps = [], appId = null) {
+  const lista = Array.isArray(apps) ? apps : [];
+  if (!lista.length) {
+    return {
+      estado: 'sin_apps',
+      leadgen: false,
+      apps: [],
+      detalle: 'Ninguna app está suscrita a los webhooks de esta Página, así que Meta no avisa de ningún lead nuevo. Hay que suscribir la app a la Página con el campo "leadgen".'
+    };
+  }
+
+  const resumen = lista.map((app) => ({
+    id: app.id ? String(app.id) : null,
+    nombre: app.name || null,
+    campos: Array.isArray(app.subscribed_fields) ? app.subscribed_fields : []
+  }));
+
+  /*
+   * Si sabemos cuál es NUESTRA app se mira solo la suya: otra app suscrita a
+   * `leadgen` sobre la misma Página recibe los leads en su propio webhook y no
+   * en el nuestro, así que contarla como "conectado" diría que todo está bien
+   * mientras los leads siguen sin entrar.
+   */
+  const propias = appId ? resumen.filter((app) => app.id === String(appId)) : resumen;
+  if (appId && !propias.length) {
+    return {
+      estado: 'sin_apps',
+      leadgen: false,
+      apps: resumen,
+      detalle: `La app ${appId} no figura entre las suscritas a esta Página (sí lo están: ${resumen.map((a) => a.nombre || a.id).join(', ')}). Los leads de formulario llegan al webhook de otra app, no al nuestro.`
+    };
+  }
+
+  const conLeadgen = propias.filter((app) => app.campos.includes(LEADGEN_FIELD));
+  if (!conLeadgen.length) {
+    return {
+      estado: 'sin_leadgen',
+      leadgen: false,
+      apps: resumen,
+      detalle: `La app está suscrita a la Página pero sin el campo "leadgen" (tiene: ${propias.flatMap((a) => a.campos).join(', ') || 'ninguno'}). Meta no va a avisar de ningún lead de formulario hasta que se agregue.`
+    };
+  }
+
+  return {
+    estado: 'conectado',
+    leadgen: true,
+    apps: resumen,
+    detalle: 'La Página está suscrita al campo "leadgen": Meta avisa de cada lead nuevo de cualquiera de sus formularios, incluidos los que se creen después.'
+  };
+}
+
+/**
  * Conciliación de leads de Meta Lead Ads: le pregunta a la Graph API qué
  * leads tiene CADA formulario y los compara contra los que llegaron al CRM.
  *
@@ -108,6 +186,29 @@ export class MetaLeadReconciliationService {
     }
   }
 
+  /**
+   * Si Meta está avisando de los leads nuevos de esta Página.
+   *
+   * Un fallo acá no puede tumbar la conciliación: leer la suscripción exige
+   * `pages_manage_metadata`, un permiso que el token puede no tener, y la
+   * comparación de leads —que es lo que recupera lo perdido— funciona igual
+   * sin esto. Por eso el error se devuelve como dato y no se lanza.
+   */
+  async checkSubscription() {
+    try {
+      const pageId = await this.resolvePageId();
+      const data = await this.graph(`${pageId}/subscribed_apps`, { fields: 'id,name,subscribed_fields' });
+      return subscriptionState(data.data || [], process.env.META_APP_ID || null);
+    } catch (error) {
+      return {
+        estado: 'desconocido',
+        leadgen: null,
+        apps: [],
+        detalle: `No se pudo leer la suscripción al webhook (${error.message}). Hace falta el permiso pages_manage_metadata en el token para comprobarla desde acá; mientras tanto se revisa en Meta > Configuración de la app > Webhooks > Página.`
+      };
+    }
+  }
+
   /** Todos los leads que Meta tiene registrados para un formulario. */
   async fetchFormLeads(formId) {
     const leads = [];
@@ -149,8 +250,14 @@ export class MetaLeadReconciliationService {
       return true;
     };
 
-    const known = await this.leadService.getKnownMetaLeadgenIds();
-    const { forms, source, aviso } = await this.listForms();
+    const [known, withAd] = await Promise.all([
+      this.leadService.getKnownMetaLeadgenIds(),
+      this.leadService.getMetaLeadgenIdsWithAd()
+    ]);
+    const [{ forms, source, aviso }, suscripcion] = await Promise.all([
+      this.listForms(),
+      this.checkSubscription()
+    ]);
 
     const report = {
       page_id: await this.resolvePageId(),
@@ -158,9 +265,24 @@ export class MetaLeadReconciliationService {
       applied: apply,
       forms_source: source,
       aviso,
+      /*
+       * Va en el mismo reporte y no en una pantalla aparte porque es la
+       * primera pregunta que hay que hacerse cuando faltan leads: con
+       * `leadgen` sin suscribir, "faltan 37" no es un fallo del webhook sino
+       * que el webhook nunca se llamó, y la conciliación es lo único que los
+       * trae mientras eso no se arregle.
+       */
+      suscripcion,
       forms: [],
       by_platform: {},
-      totals: { en_meta: 0, en_crm: 0, faltantes: 0, importados: 0, adjuntados: 0, fallidos: 0 },
+      /*
+       * `sin_anuncio` es la segunda mitad de "tienen que aparecer los mismos,
+       * cada uno con su anuncio": un lead que entró pero sin `meta_ad_id` no
+       * figura en el reporte de Campañas, así que contarlo solo en `en_crm`
+       * daría por cerrada una comparación que no cerró. Se arregla con el
+       * botón de completar datos del formulario, no volviendo a importar.
+       */
+      totals: { en_meta: 0, en_crm: 0, sin_anuncio: 0, faltantes: 0, importados: 0, adjuntados: 0, fallidos: 0 },
       errores: []
     };
 
@@ -171,6 +293,7 @@ export class MetaLeadReconciliationService {
         estado: form.status || null,
         en_meta: 0,
         en_crm: 0,
+        sin_anuncio: 0,
         faltantes: 0,
         importados: 0,
         adjuntados: 0,
@@ -202,6 +325,12 @@ export class MetaLeadReconciliationService {
           row.en_crm++;
           report.totals.en_crm++;
           report.by_platform[platform].en_crm++;
+          // Está en el CRM, pero ¿con su anuncio? Las fichas anteriores a la
+          // columna de atribución entraron sin él.
+          if (!withAd.has(String(lead.id))) {
+            row.sin_anuncio++;
+            report.totals.sin_anuncio++;
+          }
           continue;
         }
 
@@ -225,6 +354,12 @@ export class MetaLeadReconciliationService {
           // trabajar, y un adjuntado es un envío que se sumó a una ficha que
           // el equipo ya tenía. Sumarlos juntos haría ver gente nueva donde no
           // la hay.
+          // Lo recién traído cuenta como conocido Y con anuncio: la Graph
+          // API manda el `ad_id` junto al lead y `persistMetaLead` lo guarda,
+          // así que dejarlo fuera del índice lo reportaría como incompleto en
+          // la misma corrida que lo completó.
+          if (lead.ad_id) withAd.add(String(lead.id));
+
           if (created) {
             row.importados++;
             report.totals.importados++;
@@ -250,6 +385,19 @@ export class MetaLeadReconciliationService {
     }
 
     report.forms.sort((a, b) => b.faltantes - a.faltantes || b.en_meta - a.en_meta);
+
+    /*
+     * Un formulario ACTIVO que en el rango no entregó un solo lead al CRM es
+     * el síntoma de la suscripción caída, y se dice aparte porque en una lista
+     * de treinta formularios (la mayoría viejos y vacíos) no se distingue del
+     * ruido. "Activo" lo dice Meta en `status`; cuando los formularios se
+     * listaron desde la base (sin `pages_manage_ads`) no hay estado y esta
+     * lista queda vacía en vez de inventar uno.
+     */
+    report.formularios_activos_sin_leads = report.forms
+      .filter((f) => String(f.estado || '').toUpperCase() === 'ACTIVE' && f.en_crm === 0)
+      .map((f) => ({ form_id: f.form_id, nombre: f.nombre, en_meta: f.en_meta }));
+
     return report;
   }
 }

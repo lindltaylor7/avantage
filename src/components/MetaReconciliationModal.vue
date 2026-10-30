@@ -40,6 +40,26 @@
           <p style="color: var(--accent-amber); font-size: 0.82rem; margin: 0;">⚠️ {{ report.aviso }}</p>
         </div>
 
+        <!--
+          La suscripción al webhook va ARRIBA de los totales y no al pie: con
+          el campo "leadgen" sin suscribir, "faltan 37 leads" no es un fallo
+          del webhook sino que Meta nunca llamó, y es la única de las dos
+          cifras que explica a la otra. La suscripción es de la app a la
+          PÁGINA, así que cubre todos sus formularios —los que existen y los
+          que se creen después— y por eso se dice una vez y no formulario por
+          formulario.
+        -->
+        <div
+          v-if="report && report.suscripcion"
+          class="info-box meta-rec-subscription"
+          :class="`is-${report.suscripcion.estado}`"
+        >
+          <p class="meta-rec-subscription-title">
+            {{ SUBSCRIPTION_LABELS[report.suscripcion.estado] || 'Suscripción al webhook' }}
+          </p>
+          <p class="meta-rec-subscription-detail">{{ report.suscripcion.detalle }}</p>
+        </div>
+
         <template v-if="report">
           <div class="meta-rec-totals">
             <div class="stat-card">
@@ -62,7 +82,29 @@
                 </span>
               </div>
             </div>
+            <!--
+              "Están los mismos" no alcanza: un lead que entró sin su ad_id no
+              aparece en el reporte de Campañas, así que esta cifra es la otra
+              mitad de la comprobación. Se arregla con el botón de completar
+              datos de abajo, no volviendo a importar.
+            -->
+            <div class="stat-card">
+              <div class="stat-info">
+                <span class="stat-label">Sin anuncio</span>
+                <span class="stat-value" :style="{ color: report.totals.sin_anuncio ? 'var(--accent-amber)' : 'var(--accent-green)' }">
+                  {{ report.totals.sin_anuncio }}
+                </span>
+              </div>
+            </div>
           </div>
+          <p
+            v-if="report.totals.sin_anuncio"
+            class="section-subheading"
+            style="margin: 0.4rem 0 0 0;"
+          >
+            {{ report.totals.sin_anuncio }} lead(s) están en el CRM sin el anuncio que los trajo, así que no figuran en
+            Campañas. Son fichas anteriores a la atribución: se completan con “Completar datos del formulario”.
+          </p>
 
           <h4 class="form-label" style="margin-top: 1rem;">Por plataforma</h4>
           <table class="meta-rec-table">
@@ -82,7 +124,7 @@
           <h4 class="form-label" style="margin-top: 1rem;">Por formulario</h4>
           <table class="meta-rec-table">
             <thead>
-              <tr><th>Formulario</th><th>En Meta</th><th>En el CRM</th><th>Faltantes</th></tr>
+              <tr><th>Formulario</th><th>En Meta</th><th>En el CRM</th><th>Sin anuncio</th><th>Faltantes</th></tr>
             </thead>
             <tbody>
               <tr v-for="row in report.forms" :key="row.form_id">
@@ -92,10 +134,29 @@
                 </td>
                 <td>{{ row.en_meta }}</td>
                 <td>{{ row.en_crm }}</td>
+                <td :style="{ color: row.sin_anuncio ? 'var(--accent-amber)' : 'inherit' }">{{ row.sin_anuncio }}</td>
                 <td :style="{ color: row.faltantes ? 'var(--accent-rose)' : 'inherit' }">{{ row.faltantes }}</td>
               </tr>
             </tbody>
           </table>
+
+          <!--
+            Un formulario activo que no entregó un solo lead se dice aparte: en
+            una lista de treinta formularios (la mayoría viejos y vacíos) no se
+            distingue del ruido, y es justo el que hay que ir a revisar.
+          -->
+          <div
+            v-if="report.formularios_activos_sin_leads && report.formularios_activos_sin_leads.length"
+            class="info-box meta-rec-subscription is-sin_leadgen"
+            style="margin-top: 0.75rem;"
+          >
+            <p class="meta-rec-subscription-title">
+              {{ report.formularios_activos_sin_leads.length }} formulario(s) activo(s) sin un solo lead en el CRM
+            </p>
+            <p class="meta-rec-subscription-detail">
+              {{ report.formularios_activos_sin_leads.map((f) => `${f.nombre || f.form_id} (${f.en_meta} en Meta)`).join(' · ') }}
+            </p>
+          </div>
 
           <div v-if="report.applied" class="info-box" style="margin-top: 1rem; border-color: rgba(70, 180, 120, 0.4); background: rgba(70, 180, 120, 0.08);">
             <p style="color: var(--accent-green); font-size: 0.85rem; margin: 0;">
@@ -183,6 +244,20 @@ const form = reactive({ since: '', until: '' });
 const backfilling = ref(false);
 const backfillError = ref('');
 const backfillResult = ref(null);
+
+/*
+ * Cada estado se arregla distinto, y por eso el rótulo dice qué pasa y no solo
+ * si está bien o mal: "sin_leadgen" es agregar un campo a una suscripción que
+ * ya existe, "sin_apps" es que la app nunca se suscribió a esta Página, y
+ * "desconocido" es que al token le falta permiso para comprobarlo — que no es
+ * lo mismo que estar desconectado.
+ */
+const SUBSCRIPTION_LABELS = {
+  conectado: '✅ Meta está avisando de cada lead nuevo',
+  sin_leadgen: '🚨 La Página no está suscrita al campo "leadgen"',
+  sin_apps: '🚨 Ninguna app nuestra está suscrita a esta Página',
+  desconocido: '⚠️ No se pudo comprobar la suscripción al webhook'
+};
 
 const PLATFORM_LABELS = { fb: 'Facebook', ig: 'Instagram', desconocida: 'Sin dato' };
 function platformLabel(platform) {
@@ -274,6 +349,40 @@ async function runBackfill() {
   padding-top: 1rem;
   border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
 }
+
+/* El diagnóstico de la suscripción: el color lo pone el estado, porque es lo
+   primero que hay que ver al abrir el modal. Los tres tonos salen de los
+   tokens de acento del panel para que funcionen en los dos temas. */
+.meta-rec-subscription {
+  margin-bottom: 0.75rem;
+}
+.meta-rec-subscription-title {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.meta-rec-subscription-detail {
+  margin: 0.3rem 0 0 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.meta-rec-subscription.is-conectado {
+  border-color: rgba(70, 180, 120, 0.4);
+  background: rgba(70, 180, 120, 0.08);
+}
+.meta-rec-subscription.is-conectado .meta-rec-subscription-title { color: var(--accent-green); }
+.meta-rec-subscription.is-sin_leadgen,
+.meta-rec-subscription.is-sin_apps {
+  border-color: rgba(220, 90, 90, 0.4);
+  background: rgba(220, 90, 90, 0.08);
+}
+.meta-rec-subscription.is-sin_leadgen .meta-rec-subscription-title,
+.meta-rec-subscription.is-sin_apps .meta-rec-subscription-title { color: var(--accent-rose); }
+.meta-rec-subscription.is-desconocido {
+  border-color: rgba(201, 146, 46, 0.4);
+  background: rgba(201, 146, 46, 0.08);
+}
+.meta-rec-subscription.is-desconocido .meta-rec-subscription-title { color: var(--accent-amber); }
 
 .meta-rec-totals {
   display: grid;

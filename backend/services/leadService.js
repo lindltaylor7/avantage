@@ -836,6 +836,29 @@ ${note}` : note;
   }
 
   /**
+   * De los leads de formulario ya guardados, cuáles tienen su anuncio.
+   *
+   * Es la otra mitad de la comprobación que pide la conciliación: que el lead
+   * esté en el CRM no alcanza si llegó sin `meta_ad_id`, porque entonces no
+   * hay anuncio al que acreditarle nada y el lead no aparece en el reporte de
+   * Campañas. Se devuelve el conjunto de los que SÍ lo tienen para poder
+   * restarlo contra los conocidos sin traer un lead entero por cada uno.
+   *
+   * Solo cuenta la columna y no el marcador de las notas: el `leadgen_id` se
+   * escribió ahí desde siempre, pero el `ad_id` nunca — las fichas anteriores
+   * a la columna de atribución se completan con el backfill, y darlas por
+   * buenas acá sería esconder justo lo que hay que arreglar.
+   */
+  async getMetaLeadgenIdsWithAd() {
+    const rows = await db('leads')
+      .select('meta_leadgen_id')
+      .whereNotNull('meta_leadgen_id')
+      .whereNotNull('meta_ad_id')
+      .andWhere('meta_ad_id', '!=', '');
+    return new Set(rows.map((row) => String(row.meta_leadgen_id)));
+  }
+
+  /**
    * El lead de un teléfono. Primero la coincidencia exacta; si no hay, se
    * compara por los últimos 9 dígitos (ver `phoneMatchKey`), que es lo que
    * reconoce al mismo contacto guardado con otro formato.

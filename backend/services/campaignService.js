@@ -103,6 +103,80 @@ export function esMejorLead(candidato, actual, wonStatuses = new Set()) {
 }
 
 /**
+ * Un contacto atribuido por cada lead de formulario instantáneo.
+ *
+ * `waIdByKey` es el índice "últimos 9 dígitos → wa_id" de las conversaciones
+ * que existen: si la persona del formulario después escribió por WhatsApp, su
+ * conversación es la que hay que contarle (tiempo de respuesta, sesión del bot,
+ * reunión agendada por el bot). Sin eso, un lead de formulario al que el equipo
+ * sí atendió se leía como un lead al que nadie contestó.
+ *
+ * Vive fuera de la clase, como `isWonLead` y `esMejorLead`: es una regla de
+ * negocio y no una consulta, y de ella depende a qué anuncio se le acreditan
+ * los leads de formulario.
+ */
+export function formContactsFromLeads(rows, waIdByKey = new Map()) {
+  return rows
+    .filter((row) => row.meta_ad_id)
+    .map((row) => {
+      const matchKey = phoneMatchKey(row.phone);
+      return {
+        origin: 'form',
+        waId: (matchKey && waIdByKey.get(matchKey)) || null,
+        leadId: row.id,
+        phone: row.phone || null,
+        matchKey,
+        // Un formulario puede llegar sin celular (pasa, y el webhook lo deja
+        // avisado en el log): ese lead se desduplica por su id, que es lo
+        // único que lo identifica.
+        dedupeKey: matchKey || `lead:${row.id}`,
+        contactName: row.full_name || null,
+        // El "ID de origen": el mismo campo por el que ya viajaba el
+        // `source_id` del referral de WhatsApp.
+        sourceId: String(row.meta_ad_id),
+        formId: row.meta_form_id || null,
+        headline: null,
+        sourceUrl: null,
+        platform: row.meta_platform === 'ig' ? 'instagram'
+          : row.meta_platform === 'fb' ? 'facebook' : 'meta',
+        /*
+         * `meta_created_time` —cuándo la persona envió el formulario en Meta—
+         * y no `created_at`: un lead que la conciliación rescató tres días
+         * después pertenece al día en que lo llenó, y mezclar las dos fechas
+         * es lo que impide que este reporte cierre contra el Administrador de
+         * anuncios.
+         */
+        firstMessageAt: row.meta_created_time || row.created_at
+      };
+    });
+}
+
+/**
+ * Los contactos de los dos caminos, con la misma persona contada UNA vez.
+ *
+ * Alguien puede haber hecho clic en un anuncio Click-to-WhatsApp y además
+ * llenado un formulario: son dos toques del mismo contacto, y contarlo dos
+ * veces infla las conversaciones atribuidas y abarata el costo por lead de la
+ * campaña.
+ *
+ * Gana el primero de la lista —se llama con WhatsApp primero— porque es el que
+ * tiene la conversación detrás (tiempo de primera respuesta, sesión del bot,
+ * línea de tiempo) y porque así los números que el equipo ya venía mirando no
+ * se mueven: lo que la mitad de formularios suma son los leads que hasta hoy
+ * no estaban en ninguna parte.
+ */
+export function dedupeAttribution(...listas) {
+  const vistos = new Set();
+  const out = [];
+  for (const entry of listas.flat()) {
+    if (vistos.has(entry.dedupeKey)) continue;
+    vistos.add(entry.dedupeKey);
+    out.push(entry);
+  }
+  return out;
+}
+
+/**
  * Etapas en las que el lead ya tiene una propuesta económica sobre la mesa.
  * Se miran además de las tablas de cotizaciones/contratos/ingresos porque el
  * equipo negocia por WhatsApp y a veces mueve la tarjeta antes de emitir el
@@ -222,11 +296,43 @@ export class CampaignService {
 
   // ──────────────────────────── Atribución base ───────────────────────────
   /**
-   * Primer mensaje entrante con `referral` de anuncio por contacto. Es el
-   * "clic en el anuncio → escribió por WhatsApp" y define a qué anuncio se
-   * atribuye ese contacto.
+   * De qué anuncio llegó cada persona, por los DOS caminos por los que Meta
+   * nos manda gente y no solo por uno.
+   *
+   * Hasta el 29/10/2026 esto era únicamente el `referral` de WhatsApp —el
+   * "clic en el anuncio → escribió por WhatsApp"—, así que un lead de
+   * formulario instantáneo, que es la mayoría de lo que entra, no figuraba en
+   * ninguna hoja de Campañas: su `meta_ad_id`/`meta_campaign_id` se guardaba
+   * desde el webhook pero nadie lo leía, y el reporte por anuncio contaba la
+   * mitad de los leads y la mitad del dinero que trajo cada anuncio.
+   *
+   * El formulario entra ahora por el MISMO campo `sourceId` —el "ID de
+   * origen"— que ya usaba el referral, con el `ad_id` que Meta manda junto al
+   * lead. Es deliberado que sea el mismo campo y no uno nuevo: de `sourceId`
+   * cuelgan el mapeo a campaña, el funnel por anuncio, la trazabilidad y el
+   * exportable, y un campo paralelo obligaría a enseñarle los dos caminos a
+   * cada uno de ellos.
    */
   async #buildAttribution({ from, to } = {}) {
+    const [whatsapp, forms] = await Promise.all([
+      this.#attributionFromWhatsApp(),
+      this.#attributionFromMetaForms()
+    ]);
+
+    // WhatsApp primero: es el que gana cuando los dos hablan de la misma
+    // persona (ver `dedupeAttribution`).
+    let list = dedupeAttribution(whatsapp, forms);
+
+    if (from) list = list.filter((a) => new Date(a.firstMessageAt) >= new Date(from));
+    if (to) list = list.filter((a) => new Date(a.firstMessageAt) <= new Date(to));
+    return list;
+  }
+
+  /**
+   * Primer mensaje entrante con `referral` de anuncio por contacto: el clic
+   * en el anuncio que terminó en una conversación de WhatsApp.
+   */
+  async #attributionFromWhatsApp() {
     const rows = await db('whatsapp_messages')
       .whereNotNull('referral')
       .andWhere('direction', 'inbound')
@@ -240,8 +346,20 @@ export class CampaignService {
       const sourceId = ref?.source_id ? String(ref.source_id) : null;
       const sourceType = ref?.source_type || (sourceId ? 'ad' : null);
       if (!sourceId || !AD_SOURCE_TYPES.has(sourceType)) continue;
+      const matchKey = phoneMatchKey(row.wa_id);
       firstByContact.set(row.wa_id, {
+        origin: 'whatsapp',
         waId: row.wa_id,
+        leadId: null,
+        phone: row.wa_id,
+        matchKey,
+        /*
+         * Hay `wa_id` que no son teléfonos sino identificadores de usuario de
+         * la empresa (`PE.2379096279586501`): `phoneMatchKey` devuelve null
+         * con razón, y se desduplican por sí mismos en vez de por sus últimos
+         * dígitos, que emparejaría contactos distintos.
+         */
+        dedupeKey: matchKey || `wa:${row.wa_id}`,
         contactName: row.contact_name || null,
         sourceId,
         headline: ref.headline || ref.body || null,
@@ -251,19 +369,59 @@ export class CampaignService {
       });
     }
 
-    let list = [...firstByContact.values()];
-    if (from) list = list.filter((a) => new Date(a.firstMessageAt) >= new Date(from));
-    if (to) list = list.filter((a) => new Date(a.firstMessageAt) <= new Date(to));
-    return list;
+    return [...firstByContact.values()];
+  }
+
+  /**
+   * Los leads de formulario instantáneo, atribuidos por el `ad_id` que Meta
+   * manda junto al lead (`leads.meta_ad_id`, escrito por `persistMetaLead`).
+   *
+   * Se les busca su `wa_id` por los últimos 9 dígitos del teléfono: si
+   * esa persona después escribió por WhatsApp —sin referral, porque no vino de
+   * un clic— su conversación, su sesión del bot y su reunión son las que hay
+   * que contarle. El cruce se hace en JavaScript sobre los contactos agrupados
+   * (una fila por `wa_id`, no una por mensaje) y no con un `RIGHT()` en SQL:
+   * son unos pocos miles de filas y evita que este servicio arrastre el módulo
+   * de WhatsApp, que ya importa a este por otro lado.
+   */
+  async #attributionFromMetaForms() {
+    const rows = await db('leads')
+      .whereNotNull('meta_ad_id')
+      .select('id', 'phone', 'full_name', 'meta_ad_id', 'meta_form_id',
+        'meta_platform', 'meta_created_time', 'created_at');
+    if (!rows.length) return [];
+
+    const waIdByKey = new Map();
+    const contactos = await db('whatsapp_messages')
+      .groupBy('wa_id')
+      .select('wa_id')
+      .max('received_at as lastAt');
+    for (const row of contactos.sort((a, b) => new Date(a.lastAt) - new Date(b.lastAt))) {
+      const key = phoneMatchKey(row.wa_id);
+      // El último gana: si el mismo número figura con dos formatos de
+      // `wa_id`, el que importa es la conversación viva.
+      if (key) waIdByKey.set(key, row.wa_id);
+    }
+
+    return formContactsFromLeads(rows, waIdByKey);
   }
 
   /**
    * Enriquece cada contacto atribuido con su recorrido real en el funnel.
    */
   async #enrichContacts(attribution) {
-    const waIds = attribution.map((a) => a.waId);
-    if (!waIds.length) return [];
-    const phoneKeys = [...new Set(waIds.map(phoneMatchKey).filter(Boolean))];
+    if (!attribution.length) return [];
+    // Solo los contactos de WhatsApp tienen `wa_id` siempre; los de
+    // formulario, únicamente si esa persona además escribió alguna vez.
+    const waIds = [...new Set(attribution.map((a) => a.waId).filter(Boolean))];
+    const phoneKeys = [...new Set(attribution.map((a) => a.matchKey).filter(Boolean))];
+    /*
+     * Los leads de formulario se traen además por su id y no solo por
+     * teléfono: un formulario puede llegar sin celular, y entonces no hay
+     * últimos 9 dígitos con los que cruzarlo — que es justo el lead al que
+     * hace falta mirarle la ficha.
+     */
+    const formLeadIds = [...new Set(attribution.map((a) => a.leadId).filter(Boolean))];
 
     const [outboundRows, leads, sessions, meetings] = await Promise.all([
       db('whatsapp_messages').whereIn('wa_id', waIds).andWhere('direction', 'outbound')
@@ -277,13 +435,24 @@ export class CampaignService {
        * aparecía: la trazabilidad mostraba al contacto sin ficha, o sea sin
        * etapa comercial, y lo dejaba congelado en "En espera de la reunión".
        */
-      db('leads').whereIn(db.raw(PHONE_MATCH_KEY_SQL), phoneKeys)
+      db('leads')
+        .where((q) => q
+          .whereIn(db.raw(PHONE_MATCH_KEY_SQL), phoneKeys)
+          .orWhereIn('id', formLeadIds))
         .select('id', 'phone', 'status', 'created_at', 'full_name', 'topic', 'overall_viability_score',
           // Correo y carrera solo los usa la hoja "Ruta de leads" del Excel.
           'email', 'field_of_study', 'sales_funnel_at'),
       db('whatsapp_bot_sessions').whereIn('wa_id', waIds)
         .select('wa_id', 'status', 'started_at', 'updated_at'),
-      db('scheduled_meetings').whereIn('wa_id', waIds)
+      /*
+       * Por `wa_id` y además por `lead_id`: a un lead de formulario la
+       * reunión se le carga desde su ficha o desde el Calendario, donde no hay
+       * conversación de WhatsApp detrás y `scheduled_meetings.wa_id` queda en
+       * null (ver `bookManual()`). Buscando solo por `wa_id`, el anuncio que
+       * trajo una cita aparecería con cero citas.
+       */
+      db('scheduled_meetings')
+        .where((q) => q.whereIn('wa_id', waIds).orWhereIn('lead_id', formLeadIds))
         .select('wa_id', 'lead_id', 'start_time', 'created_at')
     ]);
 
@@ -313,11 +482,19 @@ export class CampaignService {
       const previo = leadByWa.get(key);
       if (!previo || esMejorLead(lead, previo, wonStatuses)) leadByWa.set(key, lead);
     }
+    const leadById = new Map(leads.map((l) => [l.id, l]));
     const sessionByWa = new Map(sessions.map((s) => [s.wa_id, s]));
     const meetingByWa = new Map();
+    const meetingByLead = new Map();
     for (const m of meetings) {
       const prev = meetingByWa.get(m.wa_id);
-      if (!prev || new Date(m.created_at) < new Date(prev.created_at)) meetingByWa.set(m.wa_id, m);
+      if (m.wa_id && (!prev || new Date(m.created_at) < new Date(prev.created_at))) {
+        meetingByWa.set(m.wa_id, m);
+      }
+      const prevLead = m.lead_id ? meetingByLead.get(m.lead_id) : null;
+      if (m.lead_id && (!prevLead || new Date(m.created_at) < new Date(prevLead.created_at))) {
+        meetingByLead.set(m.lead_id, m);
+      }
     }
 
     // Propuestas y dinero real por lead. El ingreso sale del libro de
@@ -373,10 +550,22 @@ export class CampaignService {
     }
 
     return attribution.map((a) => {
-      const lead = leadByWa.get(phoneMatchKey(a.waId)) || null;
-      const session = sessionByWa.get(a.waId) || null;
-      const meeting = meetingByWa.get(a.waId) || null;
-      const firstOut = firstOutByWa.get(a.waId) || null;
+      /*
+       * El cruce por teléfono manda también para los leads de formulario, y no
+       * se usa directo el id de la fila que trajo la atribución: es el mismo
+       * `esMejorLead()` de arriba el que decide cuál de los gemelos de un
+       * teléfono es el lead de verdad, y preguntarlo distinto acá es como se
+       * llega a que dos pantallas cuenten cosas diferentes. El id queda como
+       * respaldo para el formulario que llegó sin celular.
+       */
+      const lead = (a.matchKey ? leadByWa.get(a.matchKey) : null)
+        || (a.leadId ? leadById.get(a.leadId) : null)
+        || null;
+      const session = a.waId ? sessionByWa.get(a.waId) || null : null;
+      const meeting = (a.waId ? meetingByWa.get(a.waId) : null)
+        || (lead ? meetingByLead.get(lead.id) : null)
+        || null;
+      const firstOut = a.waId ? firstOutByWa.get(a.waId) || null : null;
 
       const responded = !!firstOut;
       const qualified = (session && session.status === 'completed')
@@ -494,8 +683,12 @@ export class CampaignService {
 
         return {
           leadId: lead?.id || null,
-          name: lead?.full_name || c.contactName || c.waId,
-          phone: c.waId,
+          name: lead?.full_name || c.contactName || c.phone || c.waId,
+          // El teléfono de la ficha cuando el lead no tiene conversación: el
+          // de formulario llega sin `wa_id` y la columna quedaba vacía justo
+          // en la hoja con la que se lo va a llamar.
+          phone: c.phone || c.waId || lead?.phone || null,
+          origin: c.origin === 'form' ? 'Formulario' : 'WhatsApp',
           email: lead?.email || null,
           career: lead?.field_of_study || null,
           topic: lead?.topic || null,
@@ -622,9 +815,11 @@ export class CampaignService {
         .sort((x, y) => new Date(y.firstMessageAt) - new Date(x.firstMessageAt))
         .slice(0, 60)
         .map((c) => ({
-          name: c.lead?.full_name || c.contactName || c.waId,
+          name: c.lead?.full_name || c.contactName || c.phone || c.waId,
           leadId: c.lead?.id || null,
           topic: c.lead?.topic || null,
+          // Por dónde entró: el formulario instantáneo o el clic en el anuncio.
+          origin: c.origin,
           currentStage: c.currentStage,
           viability: c.viability,
           platform: c.platform || null,
@@ -701,7 +896,12 @@ export class CampaignService {
   #buildTimeline(c) {
     const steps = [];
     const platformLabel = c.platform === 'instagram' ? 'Instagram' : c.platform === 'facebook' ? 'Facebook' : 'Meta';
-    steps.push({ stage: `Escribió por WhatsApp desde el anuncio (${platformLabel})`, at: c.firstMessageAt });
+    // El primer hito es cómo entró, y los dos caminos no son lo mismo para
+    // quien lee la trazabilidad: del formulario tenemos sus respuestas y
+    // todavía nadie habló con él; del clic, una conversación abierta.
+    steps.push(c.origin === 'form'
+      ? { stage: `Llenó el formulario del anuncio (${platformLabel})`, at: c.firstMessageAt }
+      : { stage: `Escribió por WhatsApp desde el anuncio (${platformLabel})`, at: c.firstMessageAt });
     if (c.firstResponseMinutes != null && c.responded) {
       steps.push({ stage: 'Avan respondió', at: null, note: `${Math.round(c.firstResponseMinutes)} min de espera` });
     }
@@ -716,7 +916,9 @@ export class CampaignService {
       cita_agendada: 'En espera de la reunión',
       calificado: 'Calificado, sin cita aún',
       respondido: 'En conversación con Avan',
-      conversacion: 'Sin respuesta todavía'
+      // Un lead de formulario al que nadie escribió todavía no está "sin
+      // responder" por decisión de nadie: es que la conversación no existe.
+      conversacion: c.origin === 'form' ? 'Sin contactar todavía' : 'Sin respuesta todavía'
     }[c.currentStage];
     steps.push({ stage: `Estado actual: ${finalLabel}`, at: null, isFinal: true });
     return steps;

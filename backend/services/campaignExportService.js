@@ -248,6 +248,11 @@ function leadTrailColumns(currency) {
     { header: 'Correo', key: 'email', width: 26 },
     { header: 'Carrera', key: 'career', width: 28 },
     // ── Por dónde llegó ──
+    // Por cuál de los dos caminos de Meta entró: el formulario instantáneo o
+    // el clic en el anuncio que abre WhatsApp. De eso depende qué columnas de
+    // esta hoja tienen sentido para esa fila (un formulario no tiene titular
+    // del anuncio ni tiempo de primera respuesta de Avan).
+    { header: 'Cómo llegó', key: 'origin', width: 14 },
     { header: 'Plataforma', key: 'platform', width: 13 },
     { header: 'Campaña', key: 'campaignName', width: 32 },
     { header: 'Conjunto de anuncios', key: 'adsetName', width: 32 },
@@ -502,6 +507,7 @@ export class CampaignExportService {
     for (const row of rows) {
       sheet.addRow({
         ...row,
+        origin: row.origin || '-',
         platform: PLATFORM_LABELS[row.platform] || row.platform || '-',
         campaignName: row.campaignName || 'Sin campaña asignada',
         adsetName: row.adsetName || '-',

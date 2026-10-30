@@ -631,6 +631,29 @@ antes de tocar el arranque de producción.
   misma pregunta de la que cuelgan la creación del proyecto y la comisión de la setter, y se
   contesta en un solo sitio a propósito: tres pantallas con tres listas propias es como se llega a
   que cada una diga un número distinto.
+- **La atribución de Campañas tiene dos caminos y no uno** (`#buildAttribution()` en
+  `campaignService.js`, con las reglas puras en `formContactsFromLeads()` y `dedupeAttribution()`):
+  el `referral` de WhatsApp (el clic en el anuncio que abre una conversación) y los leads de
+  **formulario instantáneo**, atribuidos por el `ad_id` que Meta manda junto al lead
+  (`leads.meta_ad_id`). Hasta el 29/10/2026 era solo el primero, así que el formulario —que es la
+  mayoría de lo que entra— no figuraba en ninguna hoja de Campañas: sus columnas de atribución se
+  guardaban desde el webhook pero **nadie las leía**, y el reporte por anuncio contaba la mitad de
+  los leads y la mitad del dinero de cada anuncio. El formulario entra por el **MISMO** campo
+  `sourceId` —el "ID de origen"— que ya usaba el referral y no por uno nuevo: de `sourceId` cuelgan
+  el mapeo a campaña, el funnel por anuncio, la trazabilidad y el exportable, y un campo paralelo
+  obligaría a enseñarle los dos caminos a cada uno de ellos. El mapeo anuncio → campaña ya
+  funcionaba para esto sin tocarlo: `metaAdsService` registra `String(ad.id)` entre los candidatos.
+  Lo ubica en el tiempo `meta_created_time` —cuándo se envió el formulario en Meta— y no
+  `created_at`: un lead que la conciliación rescató tres días después pertenece al día en que lo
+  llenó, y mezclar las dos fechas es lo que impide que el reporte cierre contra el Administrador de
+  anuncios. La misma persona por los dos caminos es **un** contacto y gana el de WhatsApp: contarla
+  dos veces infla las conversaciones atribuidas y abarata el costo por lead, y así los números que
+  el equipo ya venía mirando no se mueven — lo que esta mitad suma son los leads que no estaban en
+  ninguna parte. Se le busca además su `wa_id` por los últimos 9 dígitos (si después escribió por
+  WhatsApp, esa conversación es la suya) y la reunión se cruza también por `lead_id`, porque a un
+  lead de formulario la cita se le carga desde su ficha y `scheduled_meetings.wa_id` queda en null.
+  Un formulario **sin celular** entra igual, desduplicado por su id: es justo el lead incompleto el
+  que además desaparecía del reporte.
 - Los leads de **Meta Lead Ads** entran por el webhook (`metaWebhookService.importLead()`), que es
   un punto único de falla **silencioso**: `/api/webhooks/meta` responde 200 ANTES de procesar (Meta
   espera una respuesta rápida), así que un fallo posterior no se reintenta y solo deja una línea en
@@ -677,6 +700,27 @@ antes de tocar el arranque de producción.
   escribirlo deja dos leads con el mismo número — justo lo que `findByPhone()` existe para evitar.
   El token tiene que ser de **página**: uno de usuario de sistema pasa el `debug_token` como válido
   y con todos los permisos, pero falla toda llamada de alcance de página (ver `.env.example`).
+  La conciliación contesta además las otras dos mitades de "¿llegaron todos?". **(1) Si Meta está
+  avisando**: `checkSubscription()` → `subscriptionState()` lee `/{page_id}/subscribed_apps` y dice
+  `conectado | sin_leadgen | sin_apps | desconocido`, porque las cuatro se arreglan distinto. Es la
+  causa más silenciosa de leads perdidos: sin el campo `leadgen` suscrito Meta no llama al webhook,
+  no hay error en ningún log y el CRM se ve igual que un día sin campañas, así que con eso roto
+  "faltan 37" no es un fallo del webhook sino que el webhook nunca se llamó. La suscripción es de la
+  app a la **Página** y no por formulario, así que cubre los formularios que existen y los que se
+  creen después — esa pregunta se contesta una vez; lo que sí se revisa de a uno es si cada
+  formulario activo entregó sus leads. Una app ajena suscrita a `leadgen` **no** cuenta como nuestra
+  (los leads le llegan a SU webhook) y una respuesta sin `subscribed_fields` no se lee como
+  suscrita: dar por bueno lo que no se comprobó es el peor diagnóstico posible. Leerla exige
+  `pages_manage_metadata`, que el token puede no tener, así que el fallo viaja como dato y no
+  tumba la conciliación — recuperar los leads perdidos no necesita ese permiso.
+  **(2) Si cada lead entró con su anuncio**: `totals.sin_anuncio` cuenta los que están en el CRM sin
+  `meta_ad_id` (`getMetaLeadgenIdsWithAd()`), que son las fichas anteriores a la columna de
+  atribución — están en el CRM pero no figuran en Campañas, así que contarlas solo en `en_crm`
+  daría por cerrada una comparación que no cerró. Se arreglan con el botón de completar datos del
+  formulario, no volviendo a importar; lo que la conciliación acaba de traer no se reporta como
+  incompleto porque la Graph API manda el `ad_id` junto al lead. Y los **formularios activos sin un
+  solo lead** se listan aparte (`formularios_activos_sin_leads`): en una lista de treinta
+  formularios, la mayoría viejos y vacíos, el que hay que ir a revisar se pierde entre los demás.
 - Lo que Meta nos manda **vuelve a Meta**: `metaConversionsService.js` le devuelve, por la
   **Conversions API**, en qué etapa del funnel terminó cada lead que llegó de un anuncio
   (`/api/meta-capi` bajo `webhooks.view`, pantalla en `MetaConversionsPanel.vue` dentro de
@@ -687,6 +731,11 @@ antes de tocar el arranque de producción.
   la mayoría, no pasan por YCloud), solo admite dos eventos (`Lead` y `Purchase`) y para saber que
   un lead pasó a "Cotizado" habría que llamarlo igual desde acá — un salto extra para un dato que
   el CRM ya tiene y el proveedor no.
+  El evento de formulario lleva además `custom_data.lead_event_source`, que es el texto con el que
+  el Administrador de eventos identifica el origen de la "Integración de CRM" —hoy **"CRM
+  AVANTAGE"**, `META_CAPI_LEAD_EVENT_SOURCE` para cambiarlo—: es lo único de ese payload que el
+  equipo lee en pantalla, y sin él el evento se acepta igual pero queda sin atribuir a ninguna
+  integración, el mismo fallo silencioso que el conjunto de datos cruzado.
   Un lead se reporta solo si **Meta puede reconocerlo**, y hay dos caminos: su `lead_id`
   (`leads.meta_leadgen_id`, formularios instantáneos → `action_source: 'system_generated'` +
   `custom_data.event_source: 'crm'`) o su `ctwa_clid` (el click id que viaja en el `referral` del
