@@ -6,7 +6,8 @@ import {
   parseLeadCsv,
   leadFromRow,
   parseTikTokTime,
-  looksLikePermissionError
+  looksLikePermissionError,
+  isRoutingError
 } from '../tiktokLeadsService.js';
 import { formContactsFromLeads, TIKTOK_FORM_SPEC } from '../campaignService.js';
 import { extractMetaLeadForm } from '../metaLeadFields.js';
@@ -213,4 +214,18 @@ test('un error de permisos sí lo manda', () => {
   assert.equal(looksLikePermissionError({ message: 'You do not have permission to access this resource' }), true);
   assert.equal(looksLikePermissionError({ message: 'El token no tiene el scope requerido' }), true);
   assert.equal(looksLikePermissionError({ message: 'No autorizado para leer esta pagina' }), true);
+});
+
+test('solo un fallo de RUTA justifica probar el endpoint siguiente', () => {
+  /*
+   * La ruta de la tarea de descarga se resuelve probando variantes. Si
+   * cualquier error hiciera avanzar a la siguiente, un fallo de permisos o de
+   * parámetros terminaría reportado como "ninguna ruta respondió" —un 404
+   * engañoso que esconde justo el error que hay que leer.
+   */
+  assert.equal(isRoutingError({ httpStatus: 404 }), true);
+  assert.equal(isRoutingError({ httpStatus: 405 }), true);
+  assert.equal(isRoutingError({ httpStatus: 200, tiktokCode: 40002 }), false);
+  assert.equal(isRoutingError({ httpStatus: 400 }), false);
+  assert.equal(isRoutingError({}), false);
 });

@@ -63,6 +63,35 @@ const MAX_FORMS = 100;
  */
 const FORMS_PAGE_SIZE = 100;
 
+/*
+ * Cómo se crea la tarea de descarga, en orden de probabilidad.
+ *
+ * El portal de documentación de TikTok es una aplicación JavaScript que no se
+ * puede leer de forma programática, así que la ruta exacta no se pudo fijar de
+ * antemano. Lo que sí se sabe es el patrón del resto de la familia —los
+ * endpoints de lead de prueba son `page/lead/mock/create/` y
+ * `page/lead/mock/delete/`, con el verbo como segmento propio— y lo que
+ * contestó la cuenta real el 30/10/2026: `GET page/lead/task/` devolvió 405
+ * ("existe, pero no por este método") y 404.
+ *
+ * Por eso se prueban las variantes en vez de adivinar una: la que funciona se
+ * recuerda en la instancia, así que esto cuesta un intento la primera vez y
+ * cero en todas las demás. Y si fallan todas, el error las lista con su
+ * estado HTTP, que es lo que permite arreglarlo en una sola vuelta en vez de
+ * seguir probando a ciegas.
+ */
+const TASK_CREATE_VARIANTS = [
+  { path: 'page/lead/task/create/', method: 'POST' },
+  { path: 'page/lead/task/', method: 'POST' },
+  { path: 'page/lead/task/', method: 'GET' }
+];
+
+/** Lo mismo para consultar si la tarea ya está lista. */
+const TASK_CHECK_VARIANTS = [
+  { path: 'page/lead/task/check/', method: 'GET' },
+  { path: 'page/lead/task/', method: 'GET' }
+];
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /*
@@ -75,6 +104,18 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  */
 const PERMISSION_CODES = new Set([40001, 40002, 40100, 40102, 40105, 40110]);
 const PERMISSION_TEXT_RE = /permission|permiso|not authoriz|unauthoriz|scope|access denied|no autoriz/i;
+
+/**
+ * ¿Este fallo es "la ruta no es esa" y no "la llamada estaba mal"?
+ *
+ * Solo 404 (no existe) y 405 (existe pero no por este método) justifican
+ * probar la variante siguiente. Un error de permisos, de parámetros o de la
+ * cuenta tiene que propagarse tal cual: reintentarlo contra otra ruta lo
+ * convierte en un 404 engañoso y esconde el error que de verdad hay que leer.
+ */
+export function isRoutingError(error) {
+  return error?.httpStatus === 404 || error?.httpStatus === 405;
+}
 
 export function looksLikePermissionError(error) {
   return PERMISSION_CODES.has(Number(error?.tiktokCode))
@@ -377,10 +418,10 @@ export class TikTokLeadsService {
     if (from) params.start_time = from;
     if (to) params.end_time = to;
 
-    const created = await this.ads.api('page/lead/task/', params);
+    const created = await this.#callVariant('create', TASK_CREATE_VARIANTS, params, pageId);
     const taskId = created?.task_id ?? created?.taskId ?? created?.id;
     if (!taskId) {
-      throw new Error(`TikTok no devolvió el identificador de la tarea de descarga del formulario ${pageId}.`);
+      throw new Error(`TikTok aceptó la petición pero no devolvió el identificador de la tarea de descarga del formulario ${pageId}.`);
     }
 
     /*
@@ -391,7 +432,9 @@ export class TikTokLeadsService {
     let state = String(created?.status ?? created?.state ?? '').toUpperCase();
     for (let attempt = 0; attempt < TASK_POLL_ATTEMPTS && !isTaskReady(state); attempt++) {
       await sleep(TASK_POLL_INTERVAL_MS);
-      const check = await this.ads.api('page/lead/task/', { advertiser_id: advertiserId, task_id: taskId });
+      const check = await this.#callVariant(
+        'check', TASK_CHECK_VARIANTS, { advertiser_id: advertiserId, task_id: taskId }, pageId
+      );
       state = String(check?.status ?? check?.state ?? '').toUpperCase();
       if (state === 'FAILED' || state === 'FAIL') {
         throw new Error(`TikTok no pudo preparar la descarga de leads del formulario ${pageId}.`);
@@ -402,6 +445,44 @@ export class TikTokLeadsService {
     }
 
     return this.#downloadTask(advertiserId, taskId, pageId);
+  }
+
+  /**
+   * Llama al primer endpoint de la lista que funcione y se queda con él.
+   *
+   * La ruta exacta de estos dos endpoints no se pudo fijar leyendo la
+   * documentación (ver `TASK_CREATE_VARIANTS`), así que se prueban en orden.
+   * Dos cuidados:
+   *
+   *  - Solo se pasa a la variante siguiente cuando el fallo es de RUTA (404 o
+   *    405, o sea "no existe" / "no por este método"). Un error de permisos,
+   *    de parámetros o de la propia cuenta se propaga tal cual: reintentarlo
+   *    contra otra ruta lo convertiría en un 404 engañoso y escondería el
+   *    error que de verdad hay que leer.
+   *  - La que funciona se recuerda, así que el precio de esto es un intento
+   *    fallido la primera vez y nada en los formularios siguientes.
+   */
+  async #callVariant(kind, variants, params, pageId) {
+    this._endpoint ??= {};
+    const lista = this._endpoint[kind] ? [this._endpoint[kind]] : variants;
+    const fallos = [];
+
+    for (const variant of lista) {
+      try {
+        const data = variant.method === 'POST'
+          ? await this.ads.apiPost(variant.path, params)
+          : await this.ads.api(variant.path, params);
+        this._endpoint[kind] = variant;
+        return data;
+      } catch (error) {
+        fallos.push(`${variant.method} ${variant.path} → ${error.message}`);
+        if (!isRoutingError(error)) throw error;
+      }
+    }
+
+    const e = new Error(`Ninguna ruta de descarga de leads respondió para el formulario ${pageId}. Intentos: ${fallos.join(' | ')}`);
+    e.code = 'TIKTOK_LEAD_TASK_UNAVAILABLE';
+    throw e;
   }
 
   /**
@@ -419,6 +500,18 @@ export class TikTokLeadsService {
       headers: { 'Access-Token': this.ads.accessToken }
     });
     const text = await res.text();
+
+    /*
+     * Sin esta comprobación, un 404 del gateway (que devuelve HTML) se le
+     * pasaba al parser de CSV, que no falla: devuelve filas de basura. Es el
+     * peor desenlace posible — leads inventados a partir de una página de
+     * error. Mejor un error claro.
+     */
+    if (!res.ok) {
+      const e = new Error(`No se pudo descargar el archivo de leads del formulario ${pageId}: HTTP ${res.status}.`);
+      e.httpStatus = res.status;
+      throw e;
+    }
 
     if (text.trim().startsWith('{')) {
       let json = {};

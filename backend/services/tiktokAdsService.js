@@ -459,6 +459,30 @@ export class TikTokAdsService {
   }
 
   /**
+   * POST a un endpoint de la API, con el cuerpo en JSON.
+   *
+   * Lo pide la creación de la tarea de descarga de leads, que no se puede
+   * hacer por GET. Mismo tratamiento del error que `#get`: TikTok responde
+   * HTTP 200 con el fallo adentro, salvo cuando el fallo es del gateway (404,
+   * 405) y el cuerpo ni siquiera es JSON — por eso se mira también el estado.
+   */
+  async apiPost(path, body = {}) {
+    const res = await this.fetch(`${API_BASE}/${path}`, {
+      method: 'POST',
+      headers: { 'Access-Token': this.accessToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const json = await res.json().catch(() => ({}));
+    if (json.code !== 0) {
+      const e = new Error(`TikTok Business API: ${json.message || `HTTP ${res.status}`}`);
+      e.tiktokCode = json.code || null;
+      e.httpStatus = res.status;
+      throw e;
+    }
+    return json.data;
+  }
+
+  /**
    * GET a un endpoint de la API. TikTok responde SIEMPRE HTTP 200: el error
    * real viene en `code` del cuerpo, así que hay que mirarlo siempre.
    */
@@ -471,6 +495,10 @@ export class TikTokAdsService {
     if (json.code !== 0) {
       const e = new Error(`TikTok Business API: ${json.message || `HTTP ${res.status}`}`);
       e.tiktokCode = json.code || null;
+      // El estado HTTP distingue "esta ruta no existe" (404) de "existe pero
+      // no por este método" (405), que es lo que deja elegir la variante
+      // correcta en `tiktokLeadsService`.
+      e.httpStatus = res.status;
       throw e;
     }
     return json.data;
