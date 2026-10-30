@@ -86,11 +86,25 @@ const TASK_CREATE_VARIANTS = [
   { path: 'page/lead/task/', method: 'GET' }
 ];
 
-/** Lo mismo para consultar si la tarea ya está lista. */
+/**
+ * Lo mismo para consultar si la tarea ya está lista.
+ *
+ * Contra la cuenta real (30/10/2026) **ninguna de estas existe**: la creación
+ * por `POST page/lead/task/create/` sí funcionó, pero `check/` y la raíz
+ * devolvieron 404/405. Se siguen probando porque una cuenta o una versión de
+ * la API podrían tenerlas, y cuando ninguna responde NO se da por perdido el
+ * formulario: se pasa a sondear la descarga, que es el camino que de verdad
+ * importa (ver `#fetchLeadsForPage`). Un endpoint de estado es una comodidad;
+ * el archivo es el objetivo.
+ */
 const TASK_CHECK_VARIANTS = [
   { path: 'page/lead/task/check/', method: 'GET' },
+  { path: 'page/lead/task/get/', method: 'GET' },
   { path: 'page/lead/task/', method: 'GET' }
 ];
+
+/** Cuántas veces se reintenta la descarga mientras TikTok la prepara. */
+const DOWNLOAD_RETRY_ATTEMPTS = 8;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -421,7 +435,14 @@ export class TikTokLeadsService {
     const created = await this.#callVariant('create', TASK_CREATE_VARIANTS, params, pageId);
     const taskId = created?.task_id ?? created?.taskId ?? created?.id;
     if (!taskId) {
-      throw new Error(`TikTok aceptó la petición pero no devolvió el identificador de la tarea de descarga del formulario ${pageId}.`);
+      /*
+       * Los NOMBRES de los campos que vinieron, nunca sus valores: en esta
+       * respuesta puede venir el dato de una persona, y el mensaje de error
+       * termina en la pantalla y en el log. Con los nombres alcanza para saber
+       * qué devuelve de verdad este endpoint.
+       */
+      const campos = Object.keys(created || {}).join(', ') || 'ninguno';
+      throw new Error(`TikTok aceptó crear la tarea del formulario ${pageId} pero no devolvió su identificador. Campos recibidos: ${campos}.`);
     }
 
     /*
@@ -432,19 +453,52 @@ export class TikTokLeadsService {
     let state = String(created?.status ?? created?.state ?? '').toUpperCase();
     for (let attempt = 0; attempt < TASK_POLL_ATTEMPTS && !isTaskReady(state); attempt++) {
       await sleep(TASK_POLL_INTERVAL_MS);
-      const check = await this.#callVariant(
-        'check', TASK_CHECK_VARIANTS, { advertiser_id: advertiserId, task_id: taskId }, pageId
-      );
+
+      const check = await this.#checkTask(advertiserId, taskId, pageId);
+      /*
+       * `null` = esta cuenta no tiene endpoint de estado (es lo que pasa hoy:
+       * la creación funciona y `check/` no existe). No es motivo para dar el
+       * formulario por perdido: se pasa a sondear la descarga, que es lo que
+       * de verdad se vino a buscar. Un endpoint de estado es una comodidad, el
+       * archivo es el objetivo.
+       */
+      if (check === null) break;
+
       state = String(check?.status ?? check?.state ?? '').toUpperCase();
       if (state === 'FAILED' || state === 'FAIL') {
         throw new Error(`TikTok no pudo preparar la descarga de leads del formulario ${pageId}.`);
       }
     }
-    if (!isTaskReady(state)) {
-      throw new Error(`La descarga de leads del formulario ${pageId} sigue preparándose en TikTok (estado "${state || 'desconocido'}"). Volvé a intentarlo en un minuto.`);
-    }
 
     return this.#downloadTask(advertiserId, taskId, pageId);
+  }
+
+  /**
+   * El estado de la tarea, o `null` si esta cuenta no expone ningún endpoint
+   * para consultarlo.
+   *
+   * Devolver `null` en vez de lanzar es la diferencia entre "no pudimos
+   * preguntar cómo va" y "no se pueden traer los leads", que son cosas muy
+   * distintas: lo primero se resuelve esperando y bajando igual.
+   */
+  async #checkTask(advertiserId, taskId, pageId) {
+    // Una vez que se supo que no hay endpoint de estado, no se vuelve a
+    // probar: con varios formularios serían tres llamadas fallidas por cada
+    // uno, y la respuesta ya se sabe.
+    if (this._sinEndpointDeEstado) return null;
+
+    try {
+      return await this.#callVariant(
+        'check', TASK_CHECK_VARIANTS, { advertiser_id: advertiserId, task_id: taskId }, pageId
+      );
+    } catch (error) {
+      if (error.code === 'TIKTOK_LEAD_TASK_UNAVAILABLE') {
+        this._sinEndpointDeEstado = true;
+        console.warn('⚠️ [TikTok Leads] Esta cuenta no expone un endpoint de estado de la tarea; se sondea la descarga directamente.');
+        return null;
+      }
+      throw error;
+    }
   }
 
   /**
@@ -495,37 +549,56 @@ export class TikTokLeadsService {
    * adivinar por el Content-Type, que TikTok no siempre manda.
    */
   async #downloadTask(advertiserId, taskId, pageId) {
-    const search = new URLSearchParams({ advertiser_id: String(advertiserId), task_id: String(taskId) });
-    const res = await this.fetch(`${this.apiBase}/page/lead/task/download/?${search.toString()}`, {
-      headers: { 'Access-Token': this.ads.accessToken }
-    });
-    const text = await res.text();
+    let ultimo = null;
 
     /*
-     * Sin esta comprobación, un 404 del gateway (que devuelve HTML) se le
-     * pasaba al parser de CSV, que no falla: devuelve filas de basura. Es el
-     * peor desenlace posible — leads inventados a partir de una página de
-     * error. Mejor un error claro.
+     * Se reintenta porque, sin endpoint de estado, la única forma de saber que
+     * la tarea ya está lista es pedir el archivo. TikTok contesta con un error
+     * mientras la prepara, así que un solo intento devolvería vacío justo
+     * cuando hay leads.
      */
-    if (!res.ok) {
-      const e = new Error(`No se pudo descargar el archivo de leads del formulario ${pageId}: HTTP ${res.status}.`);
-      e.httpStatus = res.status;
-      throw e;
-    }
+    for (let intento = 0; intento < DOWNLOAD_RETRY_ATTEMPTS; intento++) {
+      if (intento > 0) await sleep(TASK_POLL_INTERVAL_MS);
 
-    if (text.trim().startsWith('{')) {
-      let json = {};
-      try { json = JSON.parse(text); } catch { json = {}; }
-      if (json.code !== undefined && json.code !== 0) {
-        const e = new Error(`TikTok Business API: ${json.message || `HTTP ${res.status}`}`);
-        e.tiktokCode = json.code || null;
+      const search = new URLSearchParams({ advertiser_id: String(advertiserId), task_id: String(taskId) });
+      const res = await this.fetch(`${this.apiBase}/page/lead/task/download/?${search.toString()}`, {
+        headers: { 'Access-Token': this.ads.accessToken }
+      });
+      const text = await res.text();
+
+      /*
+       * 404/405 es la RUTA, no la tarea: reintentarlo treinta segundos no la
+       * va a hacer aparecer. Se corta en el acto y el mensaje lo dice, que es
+       * lo que permite arreglarlo en una vuelta.
+       */
+      if (res.status === 404 || res.status === 405) {
+        const e = new Error(`La ruta de descarga de leads no existe en esta cuenta: GET page/lead/task/download/ → HTTP ${res.status}.`);
+        e.httpStatus = res.status;
         throw e;
       }
-      const list = json.data?.list || json.data?.leads || [];
-      return list.map((item) => leadFromRow(flattenJsonLead(item), { pageId }));
+
+      if (res.ok && !text.trim().startsWith('{')) {
+        /*
+         * El archivo. Sin la comprobación de `res.ok` de arriba, una página de
+         * error HTML se le pasaba al parser de CSV —que no falla: devuelve
+         * filas de basura—, o sea leads inventados a partir de un error.
+         */
+        return parseLeadCsv(text).map((row) => leadFromRow(row, { pageId }));
+      }
+
+      let json = {};
+      try { json = JSON.parse(text); } catch { json = {}; }
+
+      if (res.ok && (json.code === 0 || json.code === undefined)) {
+        const list = json.data?.list || json.data?.leads || [];
+        return list.map((item) => leadFromRow(flattenJsonLead(item), { pageId }));
+      }
+
+      ultimo = json.message || `HTTP ${res.status}`;
+      // Cualquier otra cosa se lee como "todavía no está lista" y se reintenta.
     }
 
-    return parseLeadCsv(text).map((row) => leadFromRow(row, { pageId }));
+    throw new Error(`La descarga de leads del formulario ${pageId} no estuvo lista a tiempo (último aviso de TikTok: ${ultimo || 'sin detalle'}). Volvé a intentarlo en un minuto; la tarea sigue preparándose del lado de TikTok.`);
   }
 
   /**
