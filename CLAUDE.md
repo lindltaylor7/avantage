@@ -390,9 +390,10 @@ antes de tocar el arranque de producción.
   al pie llega recén después de haber leído el precio. Los cuatro los guarda
   `__tests__/documentBrandData.test.js`, porque están escritos en el HTML y no en una tabla.
 - La **celda de comprobantes del libro de Finanzas** es `ReceiptCell.vue`, compartida por INGRESOS,
-  el Libro Diario y las dos filas de Salarios (el acuerdo y sus pagos). Estaba copiada **cuatro
-  veces**, idéntica hasta el último atributo, así que arreglar la miniatura en una dejaba las otras
-  tres mostrando un pedazo del comprobante. Dos decisiones: la miniatura es **vertical** (46×60) y
+  el Libro Diario, las dos filas de Salarios (el acuerdo y sus pagos) y Comisiones. Estaba copiada
+  **cuatro veces**, idéntica hasta el último atributo, así que arreglar la miniatura en una dejaba
+  las otras tres mostrando un pedazo del comprobante — y por eso la quinta pantalla que necesitó
+  comprobantes no tuvo que escribir nada. Dos decisiones: la miniatura es **vertical** (46×60) y
   con `object-fit: contain`, porque un comprobante es la captura de un Yape o de una transferencia
   —siempre más alta que ancha— y en un cuadrado recortado al centro lo que se veía era una tira del
   medio, sin el monto ni la fecha ni a quién se le pagó (lo que el equipo reportó como «se ve
@@ -1271,14 +1272,33 @@ antes de tocar el arranque de producción.
   volver a cerrar no paga dos veces. La etapa ganadora se pregunta con `loadWinningStatuses()`
   (`ganado` + la columna marcada `final`), no comparando contra una constante: el que renombra la
   columna no sabe que de eso cuelga la comisión. El porcentaje y la base se guardan en cada fila:
-  cambiar el 2% no reescribe lo ya devengado. Es el **devengo**, no el pago, y sigue sin entrar en
-  `finance_journal`.
+  cambiar el 2% no reescribe lo ya devengado. Sigue sin entrar en `finance_journal`: el libro
+  diario es contabilidad, y esto es lo que se le debe al equipo por vender y por cobrar.
   En el **Resumen Financiero sí resta**, desde el 16/10/2026: la comisión `pagada` cuenta como
   egreso (fechada en `paid_at`, el día en que salió, no en el que se devengó) y la `pendiente` va
   aparte en `totals.pendientes`, sin tocar el balance. **No se descuenta dos veces** porque acá las
   comisiones se pagan por fuera de la planilla, así que no hay una fila de `finance_salaries` que
   repita ese mismo egreso — si algún día se empiezan a anotar en Salarios, el único lugar donde hay
   que dejar de sumarlas es `getOverview()`, donde está dicho en un comentario.
+  Desde el **31/10/2026 la fila guarda también el pago**: su **cuenta** (`banco`), el método
+  (`metodo_pago`) y sus **comprobantes** (`sales_commission_receipts`, 1:N, calcada de
+  `finance_salary_receipts` y con los archivos en la misma carpeta `uploads/finance-receipts/`). Se
+  corrige desde el lápiz de cada fila (`PUT /api/commissions/:id`, multipart,
+  `commissionService.update()`), y la píldora de estado sigue siendo el `PATCH .../estado` de un
+  clic — va aparte por lo mismo que en el Libro Diario: reenviar el formulario entero para cambiar
+  una palabra reescribe de paso campos que nadie tocó, y por eso `setEstado()` **no** toca la cuenta
+  ni el método. Lo que la edición NO deja cambiar es de dónde viene la comisión —el lead, la cuota,
+  el beneficiario y `base_amount`, que los escribió el cierre o el cobro—, y tampoco hay botón de
+  alta: una comisión cargada a mano no tendría de qué colgar. El **`percent` se recalcula** desde el
+  monto corregido y la base (`update()`): un 2% guardado al lado de un monto que ya no es su 2% es
+  una fila que se contradice sola. Y de `banco` cuelga lo importante: el egreso resta en la tarjeta
+  de **esa** cuenta del Resumen y no en el cajón "Sin cuenta" —las cuatro consultas de comisiones de
+  `getOverview()` van agrupadas por banco, igual que las de salarios—, así que el saldo de la cuenta
+  dejó de decir más de lo que hay. Las comisiones anteriores a esa fecha no tienen cuenta y el
+  filtro de la pestaña las junta bajo "Sin cuenta", que es como se las encuentra para completarlas.
+  `paid_at` se entrega como `"YYYY-MM-DD"` (`isoDay()`, el mismo cuidado que el resto de Finanzas):
+  ahora carga un campo de fecha del formulario, así que un día corrido por el huso no sería una
+  etiqueta mal escrita sino un dato que se guarda al editar.
 - En la bandeja de WhatsApp, cada conversación muestra la **etapa del funnel** del lead
   (`funnel_stage`, resuelto en `funnelStageLabel.js`): quien contesta un mensaje no tenía forma de
   saber si del otro lado hay un contacto recién llegado o un cliente al que ya se le cotizó, y de

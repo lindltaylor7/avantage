@@ -618,8 +618,10 @@
                   {{ formatTxDate(tx.fecha) }}
                 </td>
                 <td class="tx-bank-cell">
-                  <!-- Una comisión no sale de una cuenta del panel: se dice,
-                       en vez de dejar la celda con una píldora vacía. -->
+                  <!-- La cuenta es opcional en los salarios y en las
+                       comisiones (y las comisiones de antes del 31/10/2026
+                       nacieron sin ella): se dice "Sin cuenta" en vez de dejar
+                       la celda con una píldora vacía. -->
                   <span
                     class="bank-badge-pill"
                     :class="`badge-bank-${bankSlug(tx.banco)}`"

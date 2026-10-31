@@ -5905,9 +5905,11 @@ app.post('/api/collections/:id/revert', requireAuth, requirePermission('collecti
 
 /* ---------------------------- Comisiones por venta --------------------------- */
 /*
- * Lo que se le debe a la setter por las ventas que pasó al closer. Viven bajo
- * `finance.view` porque son dinero: la pantalla es una pestaña de Finanzas, al
- * lado de la planilla donde después se registra el pago.
+ * Lo que se le debe al equipo por vender y por cobrar. Viven bajo
+ * `finance.view` porque son dinero: la pantalla es una pestaña de Finanzas, y
+ * el pago se registra en la propia fila —fecha, cuenta, método y comprobante—
+ * en vez de repetirse en la planilla, que descontaría el mismo egreso dos
+ * veces (ver la cabecera de `commissionService`).
  */
 
 app.get('/api/commissions', requireAuth, requirePermission('finance.view'), async (req, res) => {
@@ -5933,6 +5935,61 @@ app.patch('/api/commissions/:id/estado', requireAuth, requirePermission('finance
   } catch (error) {
     console.error('❌ Error al cambiar el estado de la comisión:', error);
     res.status(400).json({ error: error.message });
+  }
+});
+
+/**
+ * Corrige una comisión: lo que se le paga y cómo se le pagó (cuenta, método,
+ * fecha, detalle) más los comprobantes del pago, que viajan en el mismo envío.
+ *
+ * Es `PUT` con multipart —no el `PATCH` de la píldora— por lo mismo que en el
+ * libro diario: la píldora cambia una palabra y reenviar el formulario entero
+ * reescribiría de paso campos que nadie tocó.
+ */
+app.put('/api/commissions/:id', requireAuth, requirePermission('finance.view'), uploadFinanceReceipt, async (req, res) => {
+  try {
+    const { monto, percent, estado, paidAt, banco, metodoPago, detalle } = req.body || {};
+    const commission = await commissionService.update(req.params.id, {
+      monto, percent, estado, paidAt, banco, metodoPago, detalle, receipts: req.receipts
+    });
+    if (!commission) return res.status(404).json({ error: 'Comisión no encontrada.' });
+    res.json({ commission });
+  } catch (error) {
+    console.error('❌ Error al actualizar la comisión:', error);
+    res.status(400).json({ error: error.message || 'Error al actualizar la comisión.' });
+  }
+});
+
+// Los comprobantes de una comisión son 1:N y viven en la misma carpeta que los
+// del libro diario y de la planilla: respaldan el pago, no son contabilidad.
+app.post('/api/commissions/:id/receipts', requireAuth, requirePermission('finance.view'), uploadFinanceReceipt, async (req, res) => {
+  try {
+    const receipts = await commissionService.addReceipts(req.params.id, req.receipts);
+    res.status(201).json({ receipts });
+  } catch (error) {
+    console.error('❌ Error al subir el comprobante de la comisión:', error);
+    res.status(400).json({ error: error.message || 'Error al subir el comprobante.' });
+  }
+});
+
+app.get('/api/commission-receipts/:id', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const receipt = await commissionService.getReceiptById(req.params.id);
+    if (!receipt) return res.status(404).json({ error: 'Comprobante no encontrado.' });
+    sendFinanceFile(res, receipt.filename);
+  } catch (error) {
+    console.error('❌ Error al obtener el comprobante de la comisión:', error);
+    res.status(500).json({ error: 'Error al obtener el comprobante.', details: error.message });
+  }
+});
+
+app.delete('/api/commission-receipts/:id', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    await commissionService.deleteReceipt(req.params.id);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error al eliminar el comprobante de la comisión:', error);
+    res.status(500).json({ error: 'Error al eliminar el comprobante.', details: error.message });
   }
 });
 

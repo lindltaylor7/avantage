@@ -1278,18 +1278,20 @@ export class FinanceLedgerService {
      * evolución mensual aunque sí en el total.
      */
     const commissionRows = await db('sales_commissions')
+      .select('banco')
       .select(db.raw("DATE_FORMAT(paid_at, '%Y-%m') as month"))
       .select(db.raw('SUM(ABS(monto)) as egreso'))
       .where('estado', 'pagado')
       .whereNotNull('paid_at')
       .where('paid_at', '>=', earliest)
       .where('paid_at', '<', afterLast)
-      .groupBy('month');
+      .groupBy('banco', 'month');
 
     /*
-     * Una comisión no tiene cuenta bancaria y un salario puede no tenerla, y
-     * la grilla mensual está indexada por cuenta: sin este cajón, ese dinero
-     * se caía del gráfico en silencio (es la misma razón por la que el TOTAL
+     * Un salario o una comisión pueden no tener cuenta —el campo es opcional en
+     * los dos, y las comisiones de antes del 31/10/2026 nacieron sin él—, y la
+     * grilla mensual está indexada por cuenta: sin este cajón, ese dinero se
+     * caía del gráfico en silencio (es la misma razón por la que el TOTAL
      * cuenta lo que no tiene banco asignado). No entra en `banks` ni en las
      * tarjetas por cuenta, que reparten solo lo que sí cayó en una conocida.
      */
@@ -1327,8 +1329,9 @@ export class FinanceLedgerService {
       }
     }
     for (const r of commissionRows) {
-      if (egresos[SIN_CUENTA]?.[r.month] !== undefined) {
-        egresos[SIN_CUENTA][r.month] += Number(r.egreso) || 0;
+      const cuenta = cuentaDe(r.banco);
+      if (egresos[cuenta]?.[r.month] !== undefined) {
+        egresos[cuenta][r.month] += Number(r.egreso) || 0;
       }
     }
 
@@ -1364,11 +1367,16 @@ export class FinanceLedgerService {
       .where('kind', 'pago')
       .groupBy('banco');
 
-    // Las comisiones no tienen cuenta: restan del total, no de una tarjeta.
-    const comisionesPagadas = await db('sales_commissions')
+    // Una comisión pagada desde BCP es plata que salió de BCP: resta en la
+    // tarjeta de esa cuenta igual que un salario. Va agrupada por banco y no
+    // como un total suelto para que el saldo y el total del período sigan
+    // saliendo de la MISMA consulta (ver `fuente`): dos consultas sobre el
+    // mismo universo terminan contando universos distintos.
+    const commissionByBank = await db('sales_commissions')
+      .select('banco')
       .select(db.raw('SUM(ABS(monto)) as egreso'))
       .where('estado', 'pagado')
-      .first();
+      .groupBy('banco');
 
     /*
      * El saldo de cada cuenta: TODO el dinero confirmado, sin ventana ni
@@ -1392,6 +1400,7 @@ export class FinanceLedgerService {
       acumularSaldo(r.banco, Number(r.ingreso) || 0, (Number(r.egreso) || 0) + (Number(r.itf) || 0));
     }
     for (const r of salaryByBank) acumularSaldo(r.banco, 0, Number(r.egreso) || 0);
+    for (const r of commissionByBank) acumularSaldo(r.banco, 0, Number(r.egreso) || 0);
 
     /*
      * De dónde salen los totales del período. Sin recorte de fechas son las
@@ -1414,7 +1423,7 @@ export class FinanceLedgerService {
         income: incomeByBank,
         journal: journalByBank,
         salary: salaryByBank,
-        commission: [{ egreso: Number(comisionesPagadas?.egreso) || 0 }]
+        commission: commissionByBank
       };
 
     let sumaIngresos = 0;
@@ -1568,7 +1577,7 @@ export class FinanceLedgerService {
       .limit(8);
 
     const recentCommissions = await enPeriodo(db('sales_commissions')
-      .select('id', 'beneficiary_name', 'paid_at', 'monto', 'role', 'percent')
+      .select('id', 'beneficiary_name', 'paid_at', 'monto', 'role', 'percent', 'banco')
       .where('estado', 'pagado')
       .whereNotNull('paid_at'), 'paid_at')
       .orderBy('paid_at', 'desc')
@@ -1618,7 +1627,7 @@ export class FinanceLedgerService {
         fecha: r.paid_at,
         title: r.beneficiary_name,
         subtitle: `Comisión ${r.role} (${Number(r.percent) || 0}%)`,
-        banco: null,
+        banco: r.banco,
         amount: Math.abs(Number(r.monto) || 0),
         type: 'out',
         source: 'commission'
