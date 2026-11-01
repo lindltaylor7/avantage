@@ -12,13 +12,17 @@ import ExcelJS from 'exceljs';
  *                   ingreso para que los anuncios ganadores queden arriba y
  *                   los que sólo queman presupuesto, abajo.
  *
- *   - "Ruta de leads" : una fila por lead atribuido, con por dónde entró
- *                   (plataforma, campaña, conjunto, anuncio y titular), cuánto
- *                   tardó Avan en responderle, si se calificó o agendó, y en
- *                   qué columna del Kanban está hoy. Es el detalle que hay
- *                   detrás de los conteos de la hoja de atribución: ahí se ve
- *                   que un anuncio trajo 7 leads, y acá quiénes son y dónde
- *                   quedaron.
+ *   - "Ruta de leads" : una fila por lead —atribuido o no—, con por dónde
+ *                   entró (plataforma, canal, campaña, conjunto, anuncio,
+ *                   titular y los ids de cada nivel), cuánto tardó Avan en
+ *                   responderle, si se calificó o agendó, y en qué columna del
+ *                   Kanban está hoy. Es el detalle que hay detrás de los
+ *                   conteos de la hoja de atribución: ahí se ve que un anuncio
+ *                   trajo 7 leads, y acá quiénes son y dónde quedaron. Es
+ *                   además la hoja que marketing importa a su planilla, así
+ *                   que sus encabezados son un contrato: el importador busca
+ *                   las columnas por su nombre y renombrar una la deja fuera
+ *                   del reporte sin que nada falle a la vista.
  *
  *   - "Anuncios"  : una fila por anuncio con **las mismas columnas y en el
  *                   mismo orden** que exporta el Administrador de anuncios de
@@ -73,6 +77,15 @@ const INT_FMT = '#,##0';
 const DEC_FMT = '#,##0.00';
 const DATE_FMT = 'dd/mm/yyyy';
 const DATETIME_FMT = 'dd/mm/yyyy hh:mm';
+/*
+ * Formato de TEXTO para las columnas de identificadores. Los ids de Meta y de
+ * TikTok tienen 15 a 17 dígitos: leídos como número, Excel les cambia los
+ * últimos dígitos y los muestra en notación científica ("1,20223e+16"), y el
+ * cruce contra el Administrador de anuncios deja de cerrar. El valor ya viaja
+ * como cadena; esto evita además que el propio Excel lo reinterprete si
+ * alguien pega la columna en otra hoja.
+ */
+const TEXT_FMT = '@';
 
 /**
  * Convierte el `YYYY-MM-DD` de Meta a una fecha local. `new Date('2026-09-17')`
@@ -244,30 +257,47 @@ function leadTrailColumns(currency) {
   return [
     // ── Quién es ──
     { header: 'Lead', key: 'name', width: 28 },
-    { header: 'Teléfono', key: 'phone', width: 16 },
+    { header: 'Teléfono', key: 'phone', width: 16, fmt: TEXT_FMT },
     { header: 'Correo', key: 'email', width: 26 },
     { header: 'Carrera', key: 'career', width: 28 },
     // ── Por dónde llegó ──
-    // Por cuál de los dos caminos de Meta entró: el formulario instantáneo o
-    // el clic en el anuncio que abre WhatsApp. De eso depende qué columnas de
-    // esta hoja tienen sentido para esa fila (un formulario no tiene titular
-    // del anuncio ni tiempo de primera respuesta de Avan).
+    // Por cuál de los dos caminos entró: el formulario instantáneo o el clic
+    // en el anuncio que abre WhatsApp. De eso depende qué columnas de esta
+    // hoja tienen sentido para esa fila (un formulario no tiene titular del
+    // anuncio ni tiempo de primera respuesta de Avan).
     { header: 'Cómo llegó', key: 'origin', width: 14 },
+    { header: 'Canal', key: 'channel', width: 16 },
     { header: 'Plataforma', key: 'platform', width: 13 },
+    // Facebook o Instagram dentro de Meta: la plataforma es "Meta" en los dos
+    // casos, y esto es la red donde la persona vio el anuncio.
+    { header: 'Red del anuncio', key: 'network', width: 16 },
     { header: 'Campaña', key: 'campaignName', width: 32 },
+    { header: 'ID de campaña', key: 'campaignId', width: 20, fmt: TEXT_FMT },
     { header: 'Conjunto de anuncios', key: 'adsetName', width: 32 },
+    { header: 'ID de conjunto', key: 'adsetId', width: 20, fmt: TEXT_FMT },
     { header: 'Anuncio', key: 'adName', width: 38 },
+    // El campo con el que se enlaza todo: el id del anuncio, pelado y como
+    // texto (ver `bareSourceId` y `TEXT_FMT`).
+    { header: 'ID de origen', key: 'adSourceId', width: 20, fmt: TEXT_FMT },
     { header: 'Titular del anuncio', key: 'adHeadline', width: 38 },
-    { header: 'ID de origen', key: 'adSourceId', width: 20 },
+    { header: 'ID del lead en la plataforma', key: 'platformLeadId', width: 30, fmt: TEXT_FMT },
     // ── Qué pasó después ──
+    // Cuándo entró el lead EN LA PLATAFORMA (`created_time`), que no es
+    // cuándo se dio de alta acá: un lead que la conciliación rescató tres
+    // días después pertenece al día en que la persona llenó el formulario.
+    { header: 'Fecha de ingreso', key: 'enteredAt', width: 18, fmt: DATETIME_FMT },
     { header: 'Primer mensaje', key: 'firstMessageAt', width: 18, fmt: DATETIME_FMT },
     { header: 'Respuesta de Avan (min)', key: 'firstResponseMinutes', width: 22, fmt: DEC_FMT },
+    // Separa el chat vacío de la pérdida real: Meta cuenta como conversación
+    // iniciada cualquier clic que abre el chat.
+    { header: 'Solo saludó', key: 'onlyGreeted', width: 12 },
     { header: 'Calificado', key: 'qualified', width: 12 },
     { header: 'Viabilidad', key: 'viability', width: 12, fmt: INT_FMT },
     { header: 'Cita agendada', key: 'meetingAt', width: 18, fmt: DATETIME_FMT },
     // ── Dónde está hoy ──
     { header: 'Columna del funnel', key: 'funnelColumn', width: 24 },
     { header: 'Etapa comercial', key: 'commercialStage', width: 22 },
+    { header: 'Fecha de cierre', key: 'closedAt', width: 18, fmt: DATE_FMT },
     // ── Dinero ──
     { header: `Cotizado (${currency})`, key: 'quotedValue', width: 18, fmt: MONEY_FMT },
     { header: `Cobrado (${currency})`, key: 'paidRevenue', width: 17, fmt: MONEY_FMT },
@@ -275,7 +305,24 @@ function leadTrailColumns(currency) {
   ];
 }
 
-const PLATFORM_LABELS = { instagram: 'Instagram', facebook: 'Facebook', messenger: 'Messenger' };
+/*
+ * La plataforma de un lead la resuelve `leadOrigin()` y ya viene escrita como
+ * la lee marketing ("Meta", "TikTok", "Orgánico", "Referido", "Otro"). Si
+ * llegara vacía se escribe "Otro" y no "Meta": el valor por defecto "Meta" es
+ * justo lo que hacía figurar los leads de TikTok como si fueran de Meta.
+ */
+const PLATFORM_FALLBACK = 'Otro';
+
+/**
+ * Un identificador, como texto y sin que nada lo convierta a número en el
+ * camino. Los ids de anuncio tienen 15 a 17 dígitos y `Number` les cambia los
+ * últimos; la celda lleva además formato de texto (ver `TEXT_FMT`).
+ */
+function asText(value) {
+  if (value === null || value === undefined) return null;
+  const out = String(value).trim();
+  return out ? out : null;
+}
 
 const round2 = (n) => Math.round(n * 100) / 100;
 
@@ -482,12 +529,19 @@ export class CampaignExportService {
   }
 
   /**
-   * Hoja "Ruta de leads": una fila por lead atribuido.
+   * Hoja "Ruta de leads": una fila por lead, atribuido o no.
    *
-   * Los leads cuyo anuncio no está mapeado a ninguna campaña salen igual, con
-   * la campaña en blanco y una nota en su lugar: son contactos reales que
-   * hasta ahora no aparecían en ninguna hoja, y esconderlos daba a entender
-   * que el anuncio no trajo a nadie.
+   * Van TODOS los leads del rango y no solo los de campaña. La hoja contesta
+   * "¿de dónde salió cada lead?", y con solo los atribuidos no se puede
+   * comprobar que ninguno se haya quedado sin plataforma — que es lo que
+   * marketing verifica para dar el arreglo por bueno. Los leads cuyo anuncio
+   * no está mapeado a ninguna campaña también salen: son contactos reales, y
+   * esconderlos daba a entender que el anuncio no trajo a nadie.
+   *
+   * Dos reglas de redacción, y la diferencia importa: `-` es "acá no hay nada
+   * que poner" (un lead orgánico no tiene anuncio) y `sin dato` es "esto vino
+   * de un anuncio y el dato falta". Marketing trata lo segundo como dato
+   * faltante que hay que ir a buscar, no como cero.
    */
   #addLeadTrailSheet(workbook, leadTrail, campaigns, campaignIds, currency) {
     const sheet = workbook.addWorksheet('Ruta de leads');
@@ -495,30 +549,53 @@ export class CampaignExportService {
     styleSheet(sheet, columns, 2); // fija el lead y su teléfono
 
     // Si el usuario filtró campañas en pantalla, la hoja respeta ese filtro.
-    // Se compara por id y no por nombre porque dos campañas pueden llamarse
-    // igual. Los leads sin campaña se conservan: no pertenecen a ninguna, así
-    // que ningún filtro por campaña debería hacerlos desaparecer.
+    // Se compara por el id interno de la campaña y no por su nombre porque dos
+    // campañas pueden llamarse igual. Los leads sin campaña se conservan: no
+    // pertenecen a ninguna, así que ningún filtro por campaña debería hacerlos
+    // desaparecer.
     let rows = leadTrail;
     if (campaignIds && campaignIds.length) {
       const wanted = new Set(campaigns.map((c) => Number(c.id)));
-      rows = rows.filter((r) => !r.campaignId || wanted.has(Number(r.campaignId)));
+      rows = rows.filter((r) => !r.crmCampaignId || wanted.has(Number(r.crmCampaignId)));
     }
 
     for (const row of rows) {
+      // Lo que falta de un lead PAGADO se nombra; lo que no corresponde, no.
+      const faltante = row.paid ? 'sin dato' : '-';
+
       sheet.addRow({
         ...row,
         origin: row.origin || '-',
-        platform: PLATFORM_LABELS[row.platform] || row.platform || '-',
-        campaignName: row.campaignName || 'Sin campaña asignada',
-        adsetName: row.adsetName || '-',
-        adName: row.adName || '-',
+        channel: row.channel || '-',
+        // Nunca vacío y nunca "Meta" por descarte: lo que no se reconoce es
+        // "Otro" (ver `leadOrigin.js`).
+        platform: row.platform || PLATFORM_FALLBACK,
+        network: row.network || '-',
+        campaignName: row.campaignName || (row.paid ? 'sin dato' : 'Sin campaña asignada'),
+        campaignId: asText(row.campaignId) || faltante,
+        adsetName: row.adsetName || faltante,
+        adsetId: asText(row.adsetId) || faltante,
+        adName: row.adName || faltante,
+        adSourceId: asText(row.adSourceId) || faltante,
         adHeadline: row.adHeadline || '-',
-        adSourceId: row.adSourceId || '-',
+        platformLeadId: asText(row.platformLeadId) || '-',
+        phone: asText(row.phone) || '-',
         email: row.email || '-',
         career: row.career || '-',
-        qualified: row.qualified ? 'Sí' : 'No',
+        onlyGreeted: row.onlyGreeted ? 'Sí' : 'No',
+        /*
+         * Tres estados. La celda vacía es "nadie la calificó todavía" y es
+         * información: antes esta columna se derivaba de la etapa del lead y
+         * decía "Sí" en el 100% de las filas, con lo que no se podía medir la
+         * calidad de ningún anuncio.
+         */
+        qualified: row.qualified === null || row.qualified === undefined
+          ? ''
+          : (row.qualified ? 'Sí' : 'No'),
+        enteredAt: toLocalDateTime(row.enteredAt),
         firstMessageAt: toLocalDateTime(row.firstMessageAt),
         meetingAt: toLocalDateTime(row.meetingAt),
+        closedAt: toLocalDateTime(row.closedAt),
         // Sin lead en el CRM no hay columna: el contacto escribió pero nadie
         // lo registró todavía, y decirlo es más útil que dejar la celda vacía.
         funnelColumn: row.funnelColumn || 'Sin lead en el CRM'
@@ -526,7 +603,7 @@ export class CampaignExportService {
     }
 
     if (sheet.rowCount === 1) {
-      sheet.addRow({ name: 'No hay leads atribuidos a anuncios en el rango seleccionado.' });
+      sheet.addRow({ name: 'No hay leads en el rango seleccionado.' });
     }
     return sheet;
   }

@@ -3,6 +3,8 @@ import path from 'path';
 import { db } from '../db/connection.js';
 import { campaignAdImageDir } from '../middleware/upload.js';
 import { PHONE_MATCH_KEY_SQL, phoneMatchKey } from './leadService.js';
+import { LEAD_ORIGIN_COLUMNS, bareSourceId, leadOrigin, onlyGreeted } from './leadOrigin.js';
+import { GENERIC_CONTACT_NAME } from './contactName.js';
 import { LOST_STATUSES, loadWinningStatuses } from './salesFunnelStage.js';
 
 /**
@@ -146,13 +148,40 @@ export const TIKTOK_FORM_SPEC = {
   platformOf: () => 'tiktok'
 };
 
+/**
+ * El clic en un anuncio que abrió una conversación, leído del LEAD y no del
+ * `referral` del mensaje.
+ *
+ * Es la red que tapa la fuga de P3: el webhook de WhatsApp responde 200 antes
+ * de procesar, así que un primer mensaje que no se guardó se llevaba consigo
+ * el único rastro de que ese contacto vino de un anuncio — la conversación
+ * existía en Meta y en el CRM aparecía como orgánica. Desde que la atribución
+ * se escribe también en el lead (`ctwa_ad_id`), ese contacto se puede
+ * recuperar desde acá.
+ *
+ * Va ÚLTIMO en el desduplicado: cuando el mensaje sí se guardó gana la fila de
+ * `whatsapp_messages`, que además trae el titular del anuncio y la
+ * conversación detrás.
+ */
+export const CTWA_LEAD_SPEC = {
+  adColumn: 'ctwa_ad_id',
+  formColumn: null,
+  createdColumn: 'ctwa_created_time',
+  sourceIdOf: (row) => String(row.ctwa_ad_id),
+  platformOf: () => 'meta',
+  headlineOf: (row) => row.ctwa_headline || null,
+  origin: 'whatsapp'
+};
+
 export function formContactsFromLeads(rows, waIdByKey = new Map(), spec = META_FORM_SPEC) {
   return rows
     .filter((row) => row[spec.adColumn])
     .map((row) => {
       const matchKey = phoneMatchKey(row.phone);
       return {
-        origin: 'form',
+        // Casi todos estos caminos son formularios; el del clic que abrió
+        // WhatsApp usa esta misma función y declara su propio origen.
+        origin: spec.origin || 'form',
         waId: (matchKey && waIdByKey.get(matchKey)) || null,
         leadId: row.id,
         phone: row.phone || null,
@@ -165,8 +194,8 @@ export function formContactsFromLeads(rows, waIdByKey = new Map(), spec = META_F
         // El "ID de origen": el mismo campo por el que ya viajaba el
         // `source_id` del referral de WhatsApp.
         sourceId: spec.sourceIdOf(row),
-        formId: row[spec.formColumn] || null,
-        headline: null,
+        formId: spec.formColumn ? row[spec.formColumn] || null : null,
+        headline: spec.headlineOf ? spec.headlineOf(row) : null,
         sourceUrl: null,
         platform: spec.platformOf(row),
         /*
@@ -351,10 +380,11 @@ export class CampaignService {
      * contactos que escriban después del primer reporte del día.
      */
     const waIdByKey = await this.#waIdsByPhoneKey();
-    const [whatsapp, forms, tiktok] = await Promise.all([
+    const [whatsapp, forms, tiktok, ctwaLeads] = await Promise.all([
       this.#attributionFromWhatsApp(),
       this.#attributionFromMetaForms(waIdByKey),
-      this.#attributionFromTikTokForms(waIdByKey)
+      this.#attributionFromTikTokForms(waIdByKey),
+      this.#attributionFromCtwaLeads(waIdByKey)
     ]);
 
     // WhatsApp primero: es el que gana cuando los dos hablan de la misma
@@ -363,7 +393,7 @@ export class CampaignService {
     // además llenó el formulario de TikTok es UN contacto, y contarlo dos
     // veces infla las conversaciones atribuidas y abarata el costo por lead
     // de las dos campañas a la vez.
-    let list = dedupeAttribution(whatsapp, forms, tiktok);
+    let list = dedupeAttribution(whatsapp, forms, tiktok, ctwaLeads);
 
     if (from) list = list.filter((a) => new Date(a.firstMessageAt) >= new Date(from));
     if (to) list = list.filter((a) => new Date(a.firstMessageAt) <= new Date(to));
@@ -456,6 +486,22 @@ export class CampaignService {
   }
 
   /**
+   * Los contactos que vinieron de un Click-to-WhatsApp según su propio lead.
+   *
+   * Recupera a los que `#attributionFromWhatsApp()` no puede ver porque su
+   * primer mensaje no quedó guardado (ver `CTWA_LEAD_SPEC`). El que sí está en
+   * `whatsapp_messages` entra por aquel camino y este no lo duplica.
+   */
+  async #attributionFromCtwaLeads(waIdByKey) {
+    const rows = await db('leads')
+      .whereNotNull('ctwa_ad_id')
+      .select('id', 'phone', 'full_name', 'ctwa_ad_id', 'ctwa_headline',
+        'ctwa_created_time', 'created_at');
+    if (!rows.length) return [];
+    return formContactsFromLeads(rows, waIdByKey, CTWA_LEAD_SPEC);
+  }
+
+  /**
    * Índice "últimos 9 dígitos -> wa_id" de las conversaciones que existen.
    *
    * Lo comparten los dos caminos de formulario: si la persona que llenó el
@@ -517,7 +563,15 @@ export class CampaignService {
           .orWhereIn('id', formLeadIds))
         .select('id', 'phone', 'status', 'created_at', 'full_name', 'topic', 'overall_viability_score',
           // Correo y carrera solo los usa la hoja "Ruta de leads" del Excel.
-          'email', 'field_of_study', 'sales_funnel_at'),
+          'email', 'field_of_study', 'sales_funnel_at',
+          // La calificación del setter es un dato propio del lead y ya no se
+          // deduce de su etapa (ver la migración de `qualified`).
+          'qualified', 'qualified_at',
+          // Con qué se decide si el contacto dejó algo con lo que trabajar o
+          // solo saludó.
+          'dni',
+          // Las columnas con las que `leadOrigin()` contesta de dónde salió.
+          ...LEAD_ORIGIN_COLUMNS.filter((c) => c !== 'created_at')),
       db('whatsapp_bot_sessions').whereIn('wa_id', waIds)
         .select('wa_id', 'status', 'started_at', 'updated_at'),
       /*
@@ -592,6 +646,7 @@ export class CampaignService {
      * manual — y los tres significan lo mismo.
      */
     const wonProjectLeadIds = new Set();
+    const closedAtByLead = new Map();
 
     if (leadIds.length) {
       const [quotes, contracts, income, projects] = await Promise.all([
@@ -601,11 +656,23 @@ export class CampaignService {
           .select('lead_id'),
         db('finance_income').whereIn('lead_id', leadIds)
           .select('lead_id', 'monto', 'estado'),
-        db('projects').whereIn('lead_id', leadIds).select('lead_id')
+        /*
+         * `created_at` es la fecha de cierre de la venta: el proyecto nace al
+         * ganar el lead (ver `projectService`), así que es el único momento
+         * datado de ese hecho — `leads.status` dice que está ganado pero no
+         * desde cuándo. Es la misma fecha con la que el Reporte General fecha
+         * lo vendido.
+         */
+        db('projects').whereIn('lead_id', leadIds).select('lead_id', 'created_at')
       ]);
 
       for (const project of projects) {
-        if (project.lead_id) wonProjectLeadIds.add(project.lead_id);
+        if (!project.lead_id) continue;
+        wonProjectLeadIds.add(project.lead_id);
+        const previo = closedAtByLead.get(project.lead_id);
+        if (!previo || new Date(project.created_at) < new Date(previo)) {
+          closedAtByLead.set(project.lead_id, project.created_at);
+        }
       }
 
       for (const q of quotes) {
@@ -687,8 +754,19 @@ export class CampaignService {
         billedRevenue,
         hasProposal,
         crmStage,
+        closedAt: lead ? closedAtByLead.get(lead.id) || null : null,
         responded,
         qualified: !!qualified,
+        /*
+         * Tres estados y no dos: `null` es "nadie la miró todavía", que es con
+         * lo que marketing separa el lead sin revisar del lead revisado y
+         * descartado. `qualified` (sin prefijo) es otra cosa —el informe de
+         * viabilidad de Avan— y de ella cuelgan las tasas por anuncio de la
+         * pantalla de Campañas.
+         */
+        setterQualified: lead && lead.qualified !== null && lead.qualified !== undefined
+          ? !!lead.qualified
+          : null,
         hasAppointment: !!hasAppointment,
         won: !!won,
         lost: !!lost,
@@ -741,7 +819,7 @@ export class CampaignService {
    *    no está mapeado a ninguna campaña: esos leads existen y hoy no salían
    *    en ninguna hoja, que es justo el agujero que tapa esta.
    */
-  async #buildLeadTrail(contacts, campaigns, campaignByAd) {
+  async #buildLeadTrail(contacts, campaigns, campaignByAd, { from = null, to = null } = {}) {
     const columns = await db('funnel_columns').select('key', 'label');
     const labelByKey = new Map(columns.map((c) => [c.key, c.label]));
 
@@ -757,50 +835,148 @@ export class CampaignService {
       seguimiento: 'En seguimiento'
     };
 
-    return contacts
-      .slice()
+    /*
+     * Los leads que NO vinieron de un anuncio van en la misma hoja: la
+     * pregunta que contesta es "¿de dónde salió cada lead?", y una hoja donde
+     * solo figuran los de campaña no permite comprobar que ningún lead se haya
+     * quedado sin plataforma — que es justo lo que marketing verifica. Se
+     * enriquecen por el mismo camino que los atribuidos para que su etapa, su
+     * cita y su dinero se calculen con las mismas reglas.
+     */
+    const atribuidos = new Set(contacts.map((c) => c.lead?.id).filter(Boolean));
+    const organicos = await this.#enrichContacts(
+      await this.#nonAttributedContacts({ from, to }, atribuidos)
+    );
+
+    const row = (c) => {
+      const campaign = campaignByAd.get(c.sourceId) || null;
+      const ad = this.#resolveContactAd(c, campaign, campaign ? metaAdsByCampaign.get(campaign.id) || [] : []);
+      const lead = c.lead;
+      /*
+       * El origen sale del propio lead y no de la campaña mapeada: ahí están
+       * los nombres y los ids que la plataforma mandó al dar de alta el lead,
+       * que es lo único que sigue siendo verdad cuando el anuncio se pausó o
+       * se borró y ya no figura en las métricas sincronizadas.
+       */
+      const origin = leadOrigin(lead || {});
+
+      return {
+        leadId: lead?.id || null,
+        name: lead?.full_name || c.contactName || c.phone || c.waId,
+        // El teléfono de la ficha cuando el lead no tiene conversación: el
+        // de formulario llega sin `wa_id` y la columna quedaba vacía justo
+        // en la hoja con la que se lo va a llamar.
+        phone: c.phone || c.waId || lead?.phone || null,
+        origin: c.origin === 'form' ? 'Formulario' : 'WhatsApp',
+        email: lead?.email || null,
+        career: lead?.field_of_study || null,
+        topic: lead?.topic || null,
+
+        // ── De dónde salió ──
+        platform: origin.platform,
+        network: origin.network,
+        channel: origin.channel,
+        paid: origin.paid,
+        /*
+         * El nombre guardado en el lead gana sobre el resuelto contra las
+         * métricas: el primero es el que mandó la plataforma al entrar el
+         * lead, el segundo depende de que el anuncio siga sincronizado. El
+         * nombre de la campaña del CRM queda de último recurso para los leads
+         * anteriores a que se guardaran los nombres.
+         */
+        campaignId: bareSourceId(origin.campaignId || campaign?.external_id || null),
+        campaignName: origin.campaignName || campaign?.name || null,
+        adsetId: bareSourceId(origin.adsetId || ad.adsetId || null),
+        adsetName: origin.adsetName || ad.adsetName || null,
+        adName: origin.adName || ad.adName || null,
+        adHeadline: c.headline || origin.headline || null,
+        // El "ID de origen" sale pelado: el prefijo `tt:` es interno del CRM
+        // y en la hoja se compara dígito por dígito contra el Ads Manager.
+        adSourceId: bareSourceId(ad.adSourceId || origin.adId || null),
+        platformLeadId: origin.platformLeadId,
+        // El id interno de la campaña del CRM, con el que el exportable
+        // respeta el filtro de campañas de la pantalla.
+        crmCampaignId: campaign?.id || null,
+
+        enteredAt: origin.enteredAt || c.firstMessageAt || null,
+        firstMessageAt: c.firstMessageAt,
+        firstResponseMinutes: c.firstResponseMinutes,
+        // Tres estados: `null` es "sin calificar", y se escribe vacío.
+        qualified: c.setterQualified,
+        viability: c.viability,
+        meetingAt: c.meetingAt,
+        /*
+         * Meta cuenta como conversación iniciada cualquier clic que abre el
+         * chat, así que su total siempre va a ser mayor que el del CRM. Este
+         * marcador separa al que escribió y no dejó un dato —el chat vacío—
+         * de la pérdida real, que es la mitad que hay que corregir.
+         */
+        onlyGreeted: lead ? onlyGreeted(lead, { genericName: GENERIC_CONTACT_NAME }) : true,
+
+        // Dónde está hoy: la columna del Kanban y, en paralelo, el cajón
+        // comercial con el que se suman las cifras por anuncio.
+        funnelColumn: lead ? (labelByKey.get(lead.status) || lead.status) : null,
+        commercialStage: STAGE_LABELS[c.crmStage] || c.crmStage,
+
+        closedAt: c.closedAt || null,
+        quotedValue: c.quotedValue,
+        paidRevenue: c.paidRevenue || 0,
+        billedRevenue: c.billedRevenue || 0
+      };
+    };
+
+    return [...contacts, ...organicos]
       .sort((x, y) => new Date(y.firstMessageAt) - new Date(x.firstMessageAt))
-      .map((c) => {
-        const campaign = campaignByAd.get(c.sourceId) || null;
-        const ad = this.#resolveContactAd(c, campaign, campaign ? metaAdsByCampaign.get(campaign.id) || [] : []);
-        const lead = c.lead;
+      .map(row);
+  }
 
-        return {
-          leadId: lead?.id || null,
-          name: lead?.full_name || c.contactName || c.phone || c.waId,
-          // El teléfono de la ficha cuando el lead no tiene conversación: el
-          // de formulario llega sin `wa_id` y la columna quedaba vacía justo
-          // en la hoja con la que se lo va a llamar.
-          phone: c.phone || c.waId || lead?.phone || null,
-          origin: c.origin === 'form' ? 'Formulario' : 'WhatsApp',
-          email: lead?.email || null,
-          career: lead?.field_of_study || null,
-          topic: lead?.topic || null,
+  /**
+   * Los leads del rango que no vinieron de ningún anuncio, con la forma de un
+   * contacto atribuido para poder pasarlos por `#enrichContacts()`.
+   *
+   * `excluidos` son los leads que ya entraron por atribución: un contacto de
+   * WhatsApp se atribuye desde `whatsapp_messages` y su lead no tiene ninguna
+   * columna de anuncio, así que sin esa resta saldría dos veces en la hoja.
+   *
+   * El rango se mide por `created_at` —cuándo entró el lead al CRM— porque un
+   * lead orgánico no tiene fecha en ninguna plataforma.
+   */
+  async #nonAttributedContacts({ from, to }, excluidos = new Set()) {
+    const query = db('leads')
+      .whereNull('meta_ad_id')
+      .whereNull('tiktok_ad_id')
+      .whereNull('ctwa_ad_id');
+    if (from) query.where('created_at', '>=', from);
+    if (to) query.where('created_at', '<=', to);
 
-          platform: c.platform || null,
-          campaignId: campaign?.id || null,
-          campaignName: campaign?.name || null,
-          adsetName: ad.adsetName || null,
-          adName: ad.adName || null,
-          adHeadline: c.headline || null,
-          adSourceId: ad.adSourceId || null,
+    const rows = await query.select('id', 'phone', 'full_name', 'created_at');
+    const pendientes = rows.filter((r) => !excluidos.has(r.id));
+    if (!pendientes.length) return [];
 
-          firstMessageAt: c.firstMessageAt,
-          firstResponseMinutes: c.firstResponseMinutes,
-          qualified: c.qualified,
-          viability: c.viability,
-          meetingAt: c.meetingAt,
+    // Si esa persona además tiene conversación de WhatsApp, es la suya: de ahí
+    // salen su tiempo de primera respuesta, su sesión del bot y su reunión.
+    const waIdByKey = await this.#waIdsByPhoneKey();
 
-          // Dónde está hoy: la columna del Kanban y, en paralelo, el cajón
-          // comercial con el que se suman las cifras por anuncio.
-          funnelColumn: lead ? (labelByKey.get(lead.status) || lead.status) : null,
-          commercialStage: STAGE_LABELS[c.crmStage] || c.crmStage,
-
-          quotedValue: c.quotedValue,
-          paidRevenue: c.paidRevenue || 0,
-          billedRevenue: c.billedRevenue || 0
-        };
-      });
+    return pendientes.map((lead) => {
+      const matchKey = phoneMatchKey(lead.phone);
+      return {
+        origin: 'organic',
+        waId: (matchKey && waIdByKey.get(matchKey)) || null,
+        leadId: lead.id,
+        phone: lead.phone || null,
+        matchKey,
+        dedupeKey: `lead:${lead.id}`,
+        contactName: lead.full_name || null,
+        // Sin anuncio no hay ID de origen, y por eso ninguna campaña lo
+        // reclama: `campaignByAd.get(null)` no encuentra nada.
+        sourceId: null,
+        formId: null,
+        headline: null,
+        sourceUrl: null,
+        platform: null,
+        firstMessageAt: lead.created_at
+      };
+    });
   }
 
   #summariseGroup(contacts, campaign) {
@@ -1115,7 +1291,7 @@ export class CampaignService {
     // acotada de `sampleContacts`, y engordaría la respuesta que consume la
     // vista de Campañas en cada refresco.
     const leadTrail = includeLeadTrail
-      ? await this.#buildLeadTrail(contacts, campaigns, campaignByAd)
+      ? await this.#buildLeadTrail(contacts, campaigns, campaignByAd, { from, to })
       : undefined;
 
     return {
