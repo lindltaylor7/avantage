@@ -772,6 +772,114 @@ antes de tocar el arranque de producción.
   conversaciones atribuidas y abarata el costo por lead de las dos campañas a la vez. El lead se
   ubica en `tiktok_created_time` —cuándo lo llenó en TikTok— y no en `created_at`: uno del 27 de
   octubre rescatado el 30 pertenece al 27, o el reporte no cierra contra el Ads Manager.
+- **De dónde salió un lead se contesta en un solo sitio**, `backend/services/leadOrigin.js`
+  (`leadOrigin(lead)`): plataforma (`Meta` · `TikTok` · `Orgánico` · `Referido` · `Otro`), canal
+  (`Formulario` · `WhatsApp` · `Mensaje directo`), campaña, conjunto, anuncio, el id del lead en la
+  plataforma y la fecha de ingreso. La respuesta vive repartida en tres juegos de columnas que
+  escriben tres caminos distintos (`meta_*`, `tiktok_*`, `ctwa_*`) más el texto libre de
+  `leads.source`, y cada pantalla que lo resolvía por su cuenta llegaba a una respuesta distinta:
+  así la exportación de marketing terminó marcando como "Meta" hasta los leads de TikTok, con la
+  venta de S/ 8.500 del 27/10/2026 acreditada a la plataforma equivocada. **"Meta" no es el valor
+  por defecto de nada**: lo que no se reconoce es `Otro`, porque un origen que no se sabe tiene que
+  poder contarse como tal en vez de abultar el de una plataforma que quizá no lo trajo.
+  Tres reglas que vinieron de arreglarlo: (1) **los NOMBRES se copian de la API al entrar el lead**
+  (`meta_ad_name`, `tiktok_campaign_name`, …) y no se resuelven después contra las métricas
+  sincronizadas de la campaña, donde solo están los anuncios que siguen entregando — un anuncio
+  pausado o borrado dejaba al lead como "Sin campaña asignada" teniendo su `ad_id` guardado; el
+  enlace sigue siendo por **id**, así que un nombre que cambie en la plataforma no rompe nada y el
+  guardado es el que ese lead tuvo. (2) **La atribución de un Click-to-WhatsApp vive en el lead**
+  (`ctwa_ad_id`, `ctwa_clid`, `ctwa_source_type`, `ctwa_headline`) y no solo en el `referral` del
+  primer mensaje: el webhook responde 200 ANTES de procesar, así que un primer mensaje que no se
+  guardó se llevaba el único rastro del anuncio y el contacto pasaba por orgánico — de ahí
+  `CTWA_LEAD_SPEC` en `campaignService`, que recupera a esos contactos desde su propia ficha y va
+  último en el desduplicado (cuando el mensaje sí está, gana la fila de `whatsapp_messages`, que
+  trae además el titular y la conversación). (3) Los ids viajan como **texto**: son números de 15 a
+  17 dígitos y cualquier paso por `Number` les cambia los últimos o los pasa a notación científica.
+  El prefijo `tt:` es interno del CRM (`campaign_ads.ad_source_id` es única y la comparten las dos
+  plataformas) y `bareSourceId()` lo quita antes de publicar el "ID de origen", que es lo que se
+  compara dígito por dígito contra el Ads Manager.
+  La atribución **no se edita desde ninguna pantalla**: `updateLead()` tiene lista blanca y esas
+  columnas no están en ella. Un id de anuncio corregido a mano es un lead acreditado a una campaña
+  que no lo trajo, y de esos números cuelga el presupuesto. Lo que sí es libre es `source`, el canal
+  escrito a mano de un lead que no vino de un anuncio.
+- La hoja **"Ruta de leads"** del exportable de Campañas es un **contrato con marketing**: su
+  importador busca las columnas por el **nombre del encabezado** (sin distinguir mayúsculas ni
+  tildes), así que renombrar una la deja fuera del reporte sin que nada falle a la vista. Lleva una
+  fila por lead —**atribuido o no**: la pregunta que contesta es de dónde salió cada lead, y con
+  solo los de campaña no se puede comprobar que ninguno se haya quedado sin plataforma—. Los leads
+  no atribuidos se enriquecen por el MISMO camino que los atribuidos (`#nonAttributedContacts()` +
+  `#enrichContacts()`), así que su etapa, su cita y su dinero se calculan con las mismas reglas:
+  dos criterios para lo mismo es como se llega a que cada mitad de la hoja diga otra cosa. Dos
+  reglas de redacción, y la diferencia importa: **`-` es "acá no hay nada que poner"** (un lead
+  orgánico no tiene anuncio) y **`sin dato` es "esto vino de un anuncio y el dato falta"**, que es
+  lo que marketing va a buscar y nunca trata como cero.
+- La **calificación comercial** es un dato propio en TRES estados (`leads.qualified`, vacío por
+  defecto; `PATCH /api/leads/:id/qualified`, `LeadQualification.vue` en la ficha de los dos
+  tableros). Antes se **derivaba** de que el lead hubiera salido de `nuevo`, con lo que decía "Sí"
+  en 403 de 403 leads y no servía para medir la calidad de ningún anuncio, que es justo para lo que
+  se la mira. El vacío es información —separa al lead que nadie revisó del revisado y descartado—, y
+  un "No" por defecto haría el mismo daño con el signo cambiado. La pone una **persona** y nunca un
+  automatismo (es un juicio sobre el contacto, no algo que se deduzca de por dónde pasó la
+  tarjeta), queda escrito quién y cuándo, y el **criterio va escrito y a la vista**
+  (`src/leadQualificationCriteria.js`, un solo sitio para las dos pantallas): de esa marca cuelga la
+  decisión de cortarle el presupuesto a un anuncio, y dos personas calificando con criterios
+  distintos la vuelven tan inútil como cuando decía "Sí" siempre. Va aparte del `PUT /api/leads/:id`
+  del formulario por lo mismo que la píldora de estado del Libro Diario. No toca el funnel.
+- **La etapa de cita exige su reunión.** `updateLeadStatus()` rechaza (409, `APPOINTMENT_REQUIRED`)
+  que una PERSONA mueva un lead a `cita_agendada` sin una reunión no cancelada en
+  `scheduled_meetings`: se podía afirmar arrastrando una tarjeta, y el lead quedaba en esa columna
+  sin fecha ni hora — el closer no la veía en su Calendario, el bot no mandaba el recordatorio y el
+  embudo contaba una cita que nadie podía ir a buscar. El **bot está exento** porque llega ahí
+  después de reservar el bloque: frenarlo sería frenar el único camino que ya cumplía la regla. Solo
+  al ENTRAR a la etapa, y el intento rechazado queda en `lead_stage_changes` como bloqueado. Por eso
+  el pase manual al closer del Setter Funnel ("ya coordiné la reunión por mi cuenta") ahora pide
+  cargarla primero con "Agendar reunión", en vez de graduar el lead sin ella.
+- **"A este lead ya se le contestó" es una columna** (`leads.first_response_at` / `_by`) y no una
+  consulta sobre la tabla de mensajes. Se escribe sola desde los dos caminos por los que de verdad
+  se contesta (`leadFirstResponse.js`): cualquier saliente de WhatsApp —lo mande Avan, una persona
+  desde el panel o un asesor desde la app de WhatsApp Business vía el eco— y la **primera nota de la
+  ficha**, que es el único registro que deja una llamada (el teléfono no pasa por el sistema). El
+  cálculo anterior vivía solo en el exportable y miraba el primer saliente de la conversación, así
+  que dejaba fuera a los leads que son el problema: el de formulario que nunca escribió por WhatsApp
+  no tiene conversación, y no se podía distinguir "no se le contactó" de "se le llamó y nadie lo
+  registró" (12 de los 22 leads de "FORM | contrato | 25Oct", 31/10/2026). Nunca pisa la marca
+  existente —interesa la PRIMERA— y nunca puede tumbar un envío. Pasadas 24 h sin respuesta la
+  tarjeta de los dos tableros muestra un reloj (`src/leadFirstResponse.js`,
+  `needsFirstResponse()`): va como marca en el renglón del nombre y no como línea propia porque la
+  tarjeta tiene alto fijo, y un lead con proyecto abierto no avisa — el aviso sirve para perseguir
+  lo que falta, no para auditar el pasado.
+- En el reporte de Campañas, **"Cobrado" es lo `verificado`** y no lo `pagado`: de los tres estados
+  de una cuota, `verificado` es el único que suma en los libros de Finanzas (`ESTADOS_INGRESO`) —
+  `pagado` es "el cliente dice que pagó y Finanzas todavía no dio el visto bueno". Contando `pagado`
+  el reporte sumaba dinero que podía no haber llegado y dejaba FUERA el confirmado, así que el
+  ingreso y el ROAS por anuncio no coincidían con el Resumen Financiero. Por lo mismo `isWonLead()`
+  tiene un **tercer camino**: un lead con una cuota verificada es una venta cerrada aunque su
+  tarjeta se haya quedado sin mover (la plata es el hecho más difícil de discutir de los tres), y
+  sin él la hoja mostraba dinero cobrado en una fila cuya etapa decía "cotización" — S/ 2.300 en
+  "Acompañamiento 17 Sep" con cero leads en Ganado. El lead que todavía no se ganó y YA tiene
+  cronograma registrado se nombra **"Cuota pactada"** en la hoja: el precio está acordado y el
+  dinero no entró, y sin ese nombre se confundía con una cotización. Esa etiqueta es solo de la
+  hoja: los cuatro cajones de `crmStage` con los que se cuentan los leads por anuncio siguen siendo
+  cuatro, porque su suma tiene que ser el total de leads del anuncio.
+- **Las dos conciliaciones corren solas una vez al día** (`leadReconciliationSweep.js`, colgado del
+  barrido de diez minutos que ya existía; `LEAD_RECONCILIATION_HOUR`, 07:00 de Lima por defecto).
+  Recuperar leads dependía de que alguien apretara un botón, y así se perdió el 39% de los leads de
+  formulario de Meta de septiembre de 2026 (95 en el Administrador de anuncios contra 58 en la base)
+  sin que nada fallara a la vista: un lead perdido no falla, simplemente no está — y Meta solo
+  conserva los de un formulario **90 días**. Tres decisiones: **importa y no solo reporta** (un
+  informe que nadie mira es el mismo botón con otra forma, y las dos importaciones son idempotentes
+  porque cruzan por el id del lead en la plataforma y por teléfono antes de crear nada); mira una
+  **ventana de tres días** y no solo el día de ayer, así el día que falle lo cubre el siguiente; y el
+  fallo de una plataforma **no detiene a la otra** (son dos APIs con dos tokens, y el permiso de Lead
+  Generation de TikTok se cae solo). El día se marca como corrido ANTES de empezar, para que un
+  token rechazado no deje el barrido reintentando cada diez minutos. Los botones de cada
+  conciliación siguen existiendo para cuando hay que mirar el detalle ahora mismo.
+  La importación de TikTok, además, **completa las fichas que ya están en el CRM** a las que les
+  falta atribución (`#completeAttribution()`, cuenta `completados`): los 21 leads del 27 al 31/10
+  entraron con los ids y sin los nombres, y traer solo lo que falta por entero dejaría a medio
+  arreglar justo lo que se vino a arreglar. Solo escribe los huecos. El backfill de Meta
+  (`runMetaLeadgenBackfill()`) hace lo mismo con la atribución histórica preguntándole a la Graph
+  API; lo que Meta ya no devuelve queda en "sin dato" y no se inventa.
 - Lo que Meta nos manda **vuelve a Meta**: `metaConversionsService.js` le devuelve, por la
   **Conversions API**, en qué etapa del funnel terminó cada lead que llegó de un anuncio
   (`/api/meta-capi` bajo `webhooks.view`, pantalla en `MetaConversionsPanel.vue` dentro de

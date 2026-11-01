@@ -28,6 +28,7 @@ Variables requeridas en `.env` — referencia completa en `.env.example`:
 | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` | Conexión MySQL. |
 | `JWT_SECRET`, `JWT_EXPIRES_IN` | Firma de sesión del login interno. |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | Envío de correos (opcional; sin esto usa Ethereal de prueba). |
+| `LEAD_RECONCILIATION_HOUR`, `LEAD_RECONCILIATION_DAYS` | Conciliación diaria de leads de anuncios: hora de Lima a la que corre (7) y cuántos días hacia atrás revisa (3). Ver `leadReconciliationSweep.js`. |
 
 Crea la base de datos y aplica el esquema:
 
