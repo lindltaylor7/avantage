@@ -575,8 +575,9 @@ export class CampaignService {
           // deduce de su etapa (ver la migración de `qualified`).
           'qualified', 'qualified_at',
           // Con qué se decide si el contacto dejó algo con lo que trabajar o
-          // solo saludó.
-          'dni',
+          // solo saludó (ver `onlyGreeted`): sin la universidad, un lead que
+          // sí contó dónde estudia figuraría como que solo saludó.
+          'dni', 'university',
           // Las columnas con las que `leadOrigin()` contesta de dónde salió.
           ...LEAD_ORIGIN_COLUMNS.filter((c) => c !== 'created_at')),
       db('whatsapp_bot_sessions').whereIn('wa_id', waIds)
