@@ -126,7 +126,12 @@ export class WhatsappWebhookService {
           await this.leadService.findOrCreateFromWhatsApp({
             phone: senderId,
             fullName: contact?.profile?.name,
-            source: detectWhatsappChannel(message.referral)
+            source: detectWhatsappChannel(message.referral),
+            // El anuncio del que salió el clic, para que quede en el LEAD y no
+            // solo en el `referral` de este mensaje: este webhook responde 200
+            // antes de procesar, así que un mensaje que no se guarda deja al
+            // lead sin origen para siempre (ver `ctwaAttribution`).
+            referral: message.referral || null
           });
 
           // Mensajes de texto siempre; un audio solo si se pudo transcribir

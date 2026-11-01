@@ -139,7 +139,10 @@ export class YCloudWebhookService {
       await this.leadService.findOrCreateFromWhatsApp({
         phone: senderId,
         fullName: message.customerProfile?.name,
-        source: channel
+        source: channel,
+        // Ídem que en el webhook nativo: la atribución del clic se guarda en
+        // el lead, que es donde después se la va a leer.
+        referral: message.referral || null
       });
 
       // Texto siempre; un audio solo si se pudo transcribir (ver

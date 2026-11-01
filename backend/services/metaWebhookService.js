@@ -26,8 +26,16 @@ export { extractCustomFields, formatCustomFieldsNote, extractMetaLeadForm };
  * llegaron al CRM?" sin exportar a mano el CSV del Administrador de anuncios,
  * y `created_time` es el momento real del envío, distinto de cuándo el lead
  * entró a este sistema (ver la migración de atribución de Meta).
+ *
+ * Los tres `*_name` se piden aunque el nombre pueda resolverse después contra
+ * las métricas sincronizadas de la campaña: ahí solo están los anuncios que
+ * siguen entregando dentro de la ventana sincronizada, así que un anuncio
+ * pausado, borrado o de un mes anterior dejaba al lead sin nombre de campaña y
+ * la hoja de marketing lo mostraba como "Sin campaña asignada" teniendo su
+ * `ad_id` guardado. El nombre que manda la API al momento del alta es el que
+ * ese lead tuvo; el enlace sigue siendo por id.
  */
-export const META_LEAD_FIELDS = 'id,created_time,field_data,form_id,platform,ad_id,adset_id,campaign_id';
+export const META_LEAD_FIELDS = 'id,created_time,field_data,form_id,platform,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name';
 
 /**
  * Convierte la respuesta de la Graph API de UN lead en el prospecto del CRM.
@@ -78,6 +86,9 @@ export async function persistMetaLead(leadService, data) {
     adId: data.ad_id || null,
     adsetId: data.adset_id || null,
     campaignId: data.campaign_id || null,
+    adName: data.ad_name || null,
+    adsetName: data.adset_name || null,
+    campaignName: data.campaign_name || null,
     platform: data.platform || null,
     createdTime: data.created_time || null
   };
@@ -120,6 +131,9 @@ export async function persistMetaLead(leadService, data) {
     metaAdId: atribucion.adId,
     metaAdsetId: atribucion.adsetId,
     metaCampaignId: atribucion.campaignId,
+    metaAdName: atribucion.adName,
+    metaAdsetName: atribucion.adsetName,
+    metaCampaignName: atribucion.campaignName,
     metaPlatform: atribucion.platform,
     metaCreatedTime: atribucion.createdTime
   });

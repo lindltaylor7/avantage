@@ -148,7 +148,18 @@ const META_COLUMNS = [
   ['adId', /^(ad id|id del anuncio)$/],
   ['adgroupId', /^(adgroup id|ad group id|id del grupo de anuncios)$/],
   ['campaignId', /^(campaign id|id de la campana|id de campana)$/],
-  ['pageId', /^(page id|id de la pagina|id del formulario)$/]
+  ['pageId', /^(page id|id de la pagina|id del formulario)$/],
+  /*
+   * Los NOMBRES, que hasta ahora no se reconocían como metadatos: caían en las
+   * respuestas del formulario y terminaban escritos en las notas de la ficha
+   * como si la persona hubiera contestado "Nombre del anuncio: TT | WA |
+   * Asesor". Son, además, el dato que le faltaba a la hoja de marketing: el
+   * `ad_id` por sí solo no dice qué video se está mirando.
+   */
+  ['adName', /^(ad name|nombre del anuncio)$/],
+  ['adgroupName', /^(adgroup name|ad group name|nombre del grupo de anuncios)$/],
+  ['campaignName', /^(campaign name|nombre de la campana)$/],
+  ['pageName', /^(page name|nombre de la pagina|nombre del formulario)$/]
 ];
 
 /** Qué metadato es esta cabecera, o null si es una pregunta del formulario. */
@@ -222,7 +233,12 @@ export function parseLeadCsv(text) {
  * que es lo que permite reusar el extractor de aquel lado sin adaptadores.
  */
 export function leadFromRow(row, { pageId = null } = {}) {
-  const out = { leadId: null, createdTime: null, adId: null, adgroupId: null, campaignId: null, pageId, fieldData: [] };
+  const out = {
+    leadId: null, createdTime: null,
+    adId: null, adgroupId: null, campaignId: null, pageId,
+    adName: null, adgroupName: null, campaignName: null, pageName: null,
+    fieldData: []
+  };
 
   for (const [name, value] of Object.entries(row || {})) {
     const text = value == null ? '' : String(value).trim();
@@ -298,6 +314,13 @@ export async function persistTikTokLead(leadService, data) {
     adId: data.adId || null,
     adgroupId: data.adgroupId || null,
     campaignId: data.campaignId || null,
+    // Los nombres se copian tal como los manda TikTok. Antes el nombre del
+    // anuncio solo existía si la campaña estaba sincronizada y su métrica
+    // seguía en la ventana consultada, así que un lead de un video pausado
+    // salía en la hoja de marketing sin anuncio.
+    adName: data.adName || null,
+    adgroupName: data.adgroupName || null,
+    campaignName: data.campaignName || null,
     createdTime: data.createdTime || null
   };
 
@@ -335,6 +358,9 @@ export async function persistTikTokLead(leadService, data) {
     tiktokAdId: atribucion.adId,
     tiktokAdgroupId: atribucion.adgroupId,
     tiktokCampaignId: atribucion.campaignId,
+    tiktokAdName: atribucion.adName,
+    tiktokAdgroupName: atribucion.adgroupName,
+    tiktokCampaignName: atribucion.campaignName,
     tiktokCreatedTime: atribucion.createdTime
   });
 

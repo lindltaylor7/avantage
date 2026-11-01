@@ -12,6 +12,7 @@ import {
 import { CommissionService } from './commissionService.js';
 import { LeadRoutingService } from './leadRoutingService.js';
 import { MetaConversionsService } from './metaConversionsService.js';
+import { ctwaAttribution } from './leadOrigin.js';
 
 /**
  * Dígitos con los que se compara un teléfono.
@@ -315,6 +316,9 @@ export class LeadService {
     metaAdId,
     metaAdsetId,
     metaCampaignId,
+    metaAdName,
+    metaAdsetName,
+    metaCampaignName,
     metaPlatform,
     metaCreatedTime,
     tiktokLeadId,
@@ -322,7 +326,15 @@ export class LeadService {
     tiktokAdId,
     tiktokAdgroupId,
     tiktokCampaignId,
+    tiktokAdName,
+    tiktokAdgroupName,
+    tiktokCampaignName,
     tiktokCreatedTime,
+    ctwaAdId,
+    ctwaClid,
+    ctwaSourceType,
+    ctwaHeadline,
+    ctwaCreatedTime,
     autoRoute = true
   }) {
     /*
@@ -393,6 +405,11 @@ export class LeadService {
       meta_ad_id: metaAdId || null,
       meta_adset_id: metaAdsetId || null,
       meta_campaign_id: metaCampaignId || null,
+      // El nombre que la plataforma dio al momento del alta. Se copia y no se
+      // vuelve a resolver: el enlace es por id (ver `leadOrigin.js`).
+      meta_ad_name: metaAdName || null,
+      meta_adset_name: metaAdsetName || null,
+      meta_campaign_name: metaCampaignName || null,
       meta_platform: metaPlatform || null,
       meta_created_time: metaCreatedTime ? new Date(metaCreatedTime) : null,
       tiktok_lead_id: tiktokLeadId || null,
@@ -400,7 +417,19 @@ export class LeadService {
       tiktok_ad_id: tiktokAdId || null,
       tiktok_adgroup_id: tiktokAdgroupId || null,
       tiktok_campaign_id: tiktokCampaignId || null,
-      tiktok_created_time: tiktokCreatedTime ? new Date(tiktokCreatedTime) : null
+      tiktok_ad_name: tiktokAdName || null,
+      tiktok_adgroup_name: tiktokAdgroupName || null,
+      tiktok_campaign_name: tiktokCampaignName || null,
+      tiktok_created_time: tiktokCreatedTime ? new Date(tiktokCreatedTime) : null,
+      // El anuncio del que salió el clic que abrió esta conversación. Se
+      // escribe en el lead y no solo en el `referral` del mensaje porque el
+      // webhook responde 200 antes de procesar: un primer mensaje que no se
+      // guardó dejaba al lead sin origen y lo hacía pasar por orgánico.
+      ctwa_ad_id: ctwaAdId || null,
+      ctwa_clid: ctwaClid || null,
+      ctwa_source_type: ctwaSourceType || null,
+      ctwa_headline: ctwaHeadline || null,
+      ctwa_created_time: ctwaCreatedTime ? new Date(ctwaCreatedTime) : null
     });
     return this.getLeadById(id);
   }
@@ -431,6 +460,9 @@ export class LeadService {
       metaAdId: data.metaAdId,
       metaAdsetId: data.metaAdsetId,
       metaCampaignId: data.metaCampaignId,
+      metaAdName: data.metaAdName,
+      metaAdsetName: data.metaAdsetName,
+      metaCampaignName: data.metaCampaignName,
       metaPlatform: data.metaPlatform,
       metaCreatedTime: data.metaCreatedTime,
       tiktokLeadId: data.tiktokLeadId,
@@ -438,7 +470,15 @@ export class LeadService {
       tiktokAdId: data.tiktokAdId,
       tiktokAdgroupId: data.tiktokAdgroupId,
       tiktokCampaignId: data.tiktokCampaignId,
+      tiktokAdName: data.tiktokAdName,
+      tiktokAdgroupName: data.tiktokAdgroupName,
+      tiktokCampaignName: data.tiktokCampaignName,
       tiktokCreatedTime: data.tiktokCreatedTime,
+      ctwaAdId: data.ctwaAdId,
+      ctwaClid: data.ctwaClid,
+      ctwaSourceType: data.ctwaSourceType,
+      ctwaHeadline: data.ctwaHeadline,
+      ctwaCreatedTime: data.ctwaCreatedTime,
       // Por acá entran los leads de Meta, que SÍ se reparten; el alta manual
       // entra por `registerManualLead()`, que lo pone en `false`.
       autoRoute: data.autoRoute !== false
@@ -760,13 +800,16 @@ export class LeadService {
    * marcador y las respuestas del formulario a las notas, y completa la
    * atribución de Meta solo si estaba vacía.
    */
-  async attachMetaLeadToExisting(lead, { leadgenId, formId, adId, adsetId, campaignId, platform, createdTime, note }) {
+  async attachMetaLeadToExisting(lead, { leadgenId, formId, adId, adsetId, campaignId, adName, adsetName, campaignName, platform, createdTime, note }) {
     const patch = {};
     if (!lead.meta_leadgen_id && leadgenId) patch.meta_leadgen_id = leadgenId;
     if (!lead.meta_form_id && formId) patch.meta_form_id = formId;
     if (!lead.meta_ad_id && adId) patch.meta_ad_id = adId;
     if (!lead.meta_adset_id && adsetId) patch.meta_adset_id = adsetId;
     if (!lead.meta_campaign_id && campaignId) patch.meta_campaign_id = campaignId;
+    if (!lead.meta_ad_name && adName) patch.meta_ad_name = adName;
+    if (!lead.meta_adset_name && adsetName) patch.meta_adset_name = adsetName;
+    if (!lead.meta_campaign_name && campaignName) patch.meta_campaign_name = campaignName;
     if (!lead.meta_platform && platform) patch.meta_platform = platform;
     if (!lead.meta_created_time && createdTime) patch.meta_created_time = new Date(createdTime);
 
@@ -802,13 +845,16 @@ ${note}` : note;
    * WhatsApp y después llenó el formulario de TikTok es el caso normal, no la
    * excepción.
    */
-  async attachTikTokLeadToExisting(lead, { leadId, pageId, adId, adgroupId, campaignId, createdTime, note }) {
+  async attachTikTokLeadToExisting(lead, { leadId, pageId, adId, adgroupId, campaignId, adName, adgroupName, campaignName, createdTime, note }) {
     const patch = {};
     if (!lead.tiktok_lead_id && leadId) patch.tiktok_lead_id = leadId;
     if (!lead.tiktok_page_id && pageId) patch.tiktok_page_id = pageId;
     if (!lead.tiktok_ad_id && adId) patch.tiktok_ad_id = adId;
     if (!lead.tiktok_adgroup_id && adgroupId) patch.tiktok_adgroup_id = adgroupId;
     if (!lead.tiktok_campaign_id && campaignId) patch.tiktok_campaign_id = campaignId;
+    if (!lead.tiktok_ad_name && adName) patch.tiktok_ad_name = adName;
+    if (!lead.tiktok_adgroup_name && adgroupName) patch.tiktok_adgroup_name = adgroupName;
+    if (!lead.tiktok_campaign_name && campaignName) patch.tiktok_campaign_name = campaignName;
     if (!lead.tiktok_created_time && createdTime) patch.tiktok_created_time = new Date(createdTime);
 
     const notasPrevias = String(lead.additional_notes || '').trim();
@@ -975,17 +1021,45 @@ ${note}` : note;
    * Funnel de Ventas — ahí solo debe llegar una vez que se agenda una
    * llamada o se transfiere a un asesor (ver whatsappBotService.js).
    */
-  async findOrCreateFromWhatsApp({ phone, fullName, source }) {
+  async findOrCreateFromWhatsApp({ phone, fullName, source, referral = null }) {
+    const atribucion = ctwaAttribution(referral);
     const existing = await this.findByPhone(phone);
-    if (existing) return existing;
+    if (existing) return this.attachCtwaToExisting(existing, atribucion);
 
     return this.createLead({
       fullName: fullName || GENERIC_CONTACT_NAME,
       phone,
       topic: `Consulta por WhatsApp de ${fullName || phone}`,
       source: source || 'WhatsApp Directo',
-      status: 'conversacion_abierta'
+      status: 'conversacion_abierta',
+      ...atribucion
     });
+  }
+
+  /**
+   * Le escribe a un lead que ya existe la atribución del anuncio por el que
+   * acaba de llegar, si todavía no tenía ninguna.
+   *
+   * Hace falta porque el lead puede haber nacido por otro camino —un
+   * formulario, el evaluador, una carga a mano— y recién después hacer clic en
+   * un anuncio para escribir: ahí el clic es el único dato de atribución que
+   * va a existir de esa persona. No pisa lo que ya está escrito, por la misma
+   * razón que `attachMetaLeadToExisting`: el PRIMER origen es el que explica
+   * de dónde salió el contacto, y el segundo toque no lo reemplaza.
+   */
+  async attachCtwaToExisting(lead, atribucion) {
+    if (!lead || !atribucion || (!atribucion.ctwaAdId && !atribucion.ctwaClid)) return lead;
+
+    const patch = {};
+    if (!lead.ctwa_ad_id && atribucion.ctwaAdId) patch.ctwa_ad_id = atribucion.ctwaAdId;
+    if (!lead.ctwa_clid && atribucion.ctwaClid) patch.ctwa_clid = atribucion.ctwaClid;
+    if (!lead.ctwa_source_type && atribucion.ctwaSourceType) patch.ctwa_source_type = atribucion.ctwaSourceType;
+    if (!lead.ctwa_headline && atribucion.ctwaHeadline) patch.ctwa_headline = atribucion.ctwaHeadline;
+    if (!lead.ctwa_created_time && atribucion.ctwaCreatedTime) patch.ctwa_created_time = new Date(atribucion.ctwaCreatedTime);
+
+    if (!Object.keys(patch).length) return lead;
+    await db('leads').where({ id: lead.id }).update(patch);
+    return this.getLeadById(lead.id);
   }
 
   async getLeadById(id) {
