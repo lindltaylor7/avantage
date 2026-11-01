@@ -878,6 +878,27 @@ ${note}` : note;
    * rastro del segundo formulario es el marcador. Sin leerlo, la importación
    * volvería a dar de alta ese lead en cada pasada.
    */
+  /**
+   * La ficha de un lead de TikTok, buscada como se lo reconoce: por su columna
+   * y, si no, por el marcador de las notas.
+   *
+   * Los dos caminos y no solo el primero, por la misma razón que
+   * `getKnownTikTokLeadIds()`: cuando el formulario se colgó de una ficha que
+   * ya existía, el marcador de las notas es el único rastro que queda si esa
+   * ficha ya tenía su propio `tiktok_lead_id` de otro envío.
+   */
+  async findByTikTokLeadId(leadId) {
+    const id = String(leadId || '').trim();
+    if (!id) return null;
+
+    return db('leads')
+      .where((q) => q
+        .where('tiktok_lead_id', id)
+        .orWhere('additional_notes', 'like', `%[TikTok lead_id=${id}]%`))
+      .orderBy('id', 'asc')
+      .first();
+  }
+
   async getKnownTikTokLeadIds() {
     const rows = await db('leads')
       .select('tiktok_lead_id', 'additional_notes')

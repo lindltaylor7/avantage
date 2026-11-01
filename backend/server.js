@@ -42,6 +42,7 @@ import { MetaWebhookService } from './services/metaWebhookService.js';
 import { MetaLeadReconciliationService } from './services/metaLeadReconciliationService.js';
 import { mergeDuplicateMetaLeads } from './scripts/mergeDuplicateMetaLeads.js';
 import { runMetaLeadgenBackfill } from './scripts/backfillMetaLeadgenFields.js';
+import { LeadReconciliationSweep } from './services/leadReconciliationSweep.js';
 import { PageInteractionService } from './services/pageInteractionService.js';
 import { PageMessageService } from './services/pageMessageService.js';
 import { PageFollowerService } from './services/pageFollowerService.js';
@@ -87,6 +88,15 @@ const FOLLOWER_POLL_INTERVAL_MS = Number(process.env.META_FOLLOWER_POLL_INTERVAL
 // a la 1h de silencio, "Congelado" a las 2h) — no necesita ser muy fino,
 // los umbrales son de horas.
 const STALE_CONVERSATION_SWEEP_INTERVAL_MS = 10 * 60 * 1000;
+
+/*
+ * Conciliación diaria de leads de anuncios. La hora es de Lima y el barrido
+ * decide solo si ya le toca, así que se cuelga del mismo temporizador de diez
+ * minutos que el resto de los barridos (mismo patrón que la agenda diaria del
+ * vendedor) en vez de tener el suyo.
+ */
+const LEAD_RECONCILIATION_HOUR = Number(process.env.LEAD_RECONCILIATION_HOUR ?? 7);
+const LEAD_RECONCILIATION_DAYS = Number(process.env.LEAD_RECONCILIATION_DAYS ?? 3);
 
 dotenv.config();
 
@@ -189,6 +199,17 @@ const metaLeadReconciliationService = new MetaLeadReconciliationService(leadServ
 // versión de la API y el tratamiento de los errores que TikTok devuelve
 // dentro de un HTTP 200 (ver `tiktokLeadsService.js`).
 const tiktokLeadsService = new TikTokLeadsService({ ads: tiktokAdsService, leadService });
+/*
+ * Las dos conciliaciones, corriendo solas una vez al día. Dependían de que
+ * alguien apretara un botón, y así se perdió el 39% de los leads de formulario
+ * de septiembre de 2026 sin que nada fallara a la vista.
+ */
+const leadReconciliationSweep = new LeadReconciliationSweep({
+  metaReconciliation: metaLeadReconciliationService,
+  tiktokLeads: tiktokLeadsService,
+  hour: LEAD_RECONCILIATION_HOUR,
+  days: LEAD_RECONCILIATION_DAYS
+});
 const pageInteractionService = new PageInteractionService();
 const pageMessageService = new PageMessageService();
 const pageFollowerService = new PageFollowerService();
@@ -6163,6 +6184,15 @@ app.listen(PORT, () => {
     // diez minutos alcanza y el aviso sale entre las 8:00 y las 8:10.
     whatsappBotService.sendDailyAgendaToSalesperson().catch((error) => {
       console.error('❌ [WhatsApp Bot] Error al mandar la agenda diaria al vendedor:', error);
+    });
+    /*
+     * La conciliación de leads de anuncios. Va en este barrido y no en un
+     * temporizador propio porque el método ya decide solo si es su hora y si
+     * no corrió hoy; un fallo de una plataforma no detiene a la otra y nunca
+     * tumba el proceso (ver `leadReconciliationSweep.js`).
+     */
+    leadReconciliationSweep.runIfDue().catch((error) => {
+      console.error('❌ [Conciliación diaria] Error inesperado en el barrido:', error);
     });
   }, STALE_CONVERSATION_SWEEP_INTERVAL_MS);
 });

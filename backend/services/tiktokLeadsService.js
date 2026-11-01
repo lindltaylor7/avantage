@@ -367,6 +367,12 @@ export async function persistTikTokLead(leadService, data) {
   return { lead, created: true };
 }
 
+/** Las columnas que esta importación escribe, para saber si cambió algo. */
+const TIKTOK_ATTRIBUTION_COLUMNS = [
+  'tiktok_lead_id', 'tiktok_page_id', 'tiktok_ad_id', 'tiktok_adgroup_id', 'tiktok_campaign_id',
+  'tiktok_ad_name', 'tiktok_adgroup_name', 'tiktok_campaign_name', 'tiktok_created_time'
+];
+
 export class TikTokLeadsService {
   /**
    * @param {object} deps
@@ -628,6 +634,47 @@ export class TikTokLeadsService {
   }
 
   /**
+   * Le escribe a una ficha que ya existe la atribución de TikTok que le falte.
+   *
+   * Devuelve `true` solo si algo cambió, para que el reporte no cuente como
+   * arreglado un lead que ya estaba completo. La ficha se busca por el
+   * `lead_id` de TikTok —su columna o el marcador de las notas— y, como última
+   * opción, por teléfono: así se recupera también el lead que entró por
+   * WhatsApp antes de que su formulario se importara.
+   */
+  async #completeAttribution(lead) {
+    const ficha = await this.leadService.findByTikTokLeadId(lead.leadId)
+      || await this.#findByFormPhone(lead);
+    if (!ficha) return false;
+
+    const antes = await this.leadService.getLeadById(ficha.id);
+    await this.leadService.attachTikTokLeadToExisting(ficha, {
+      leadId: lead.leadId,
+      pageId: lead.pageId || null,
+      adId: lead.adId || null,
+      adgroupId: lead.adgroupId || null,
+      campaignId: lead.campaignId || null,
+      adName: lead.adName || null,
+      adgroupName: lead.adgroupName || null,
+      campaignName: lead.campaignName || null,
+      createdTime: parseTikTokTime(lead.createdTime),
+      // El marcador ya está escrito en la ficha; repetirlo solo ensuciaría
+      // las notas.
+      note: null
+    });
+    const despues = await this.leadService.getLeadById(ficha.id);
+
+    return TIKTOK_ATTRIBUTION_COLUMNS.some((col) => String(antes?.[col] ?? '') !== String(despues?.[col] ?? ''));
+  }
+
+  /** La ficha que tenga el teléfono que contestó este formulario. */
+  async #findByFormPhone(lead) {
+    const form = extractMetaLeadForm(lead.fieldData);
+    if (!form.phone) return null;
+    return this.leadService.findByPhone(form.phone);
+  }
+
+  /**
    * Compara lo que TikTok tiene contra lo que llegó al CRM y, si `apply`,
    * importa lo que falta.
    *
@@ -646,7 +693,13 @@ export class TikTokLeadsService {
       aviso,
       aplicado: apply,
       ventana: { from, to },
-      totals: { en_tiktok: 0, en_crm: 0, faltantes: 0, importados: 0, adjuntados: 0, fallidos: 0, sin_anuncio: 0 },
+      totals: {
+        en_tiktok: 0, en_crm: 0, faltantes: 0, importados: 0, adjuntados: 0, fallidos: 0,
+        sin_anuncio: 0,
+        // Fichas que ya estaban en el CRM y a las que esta corrida les
+        // completó la atribución que les faltaba (ver más abajo).
+        completados: 0
+      },
       forms: [],
       errores: []
     };
@@ -661,6 +714,7 @@ export class TikTokLeadsService {
         faltantes: 0,
         importados: 0,
         adjuntados: 0,
+        completados: 0,
         fallidos: 0,
         ejemplos_faltantes: []
       };
@@ -686,6 +740,29 @@ export class TikTokLeadsService {
         if (known.has(String(lead.leadId))) {
           row.en_crm++;
           report.totals.en_crm++;
+
+          /*
+           * Está en el CRM, pero puede estar a medias: los 21 leads que se
+           * importaron entre el 27 y el 31/10/2026 entraron con los ids de
+           * atribución y SIN los nombres (el importador los descartaba como
+           * si fueran respuestas del formulario), así que en la hoja de
+           * marketing salían con el anuncio en blanco. Completarlos es parte
+           * de conciliar: traer solo lo que falta por entero dejaría a medio
+           * arreglar justo lo que se vino a arreglar. Solo se escriben los
+           * huecos — `attachTikTokLeadToExisting()` nunca pisa lo que ya está.
+           */
+          if (apply) {
+            try {
+              const completado = await this.#completeAttribution(lead);
+              if (completado) {
+                row.completados++;
+                report.totals.completados++;
+              }
+            } catch (error) {
+              report.errores.push({ page_id: form.id, lead_id: lead.leadId, error: error.message });
+              console.error(`❌ [TikTok Leads] No se pudo completar el lead ${lead.leadId}:`, error.message);
+            }
+          }
           continue;
         }
 

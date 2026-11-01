@@ -11,10 +11,19 @@
  * (`phone_number`) sino el texto de la pregunta, así que hasta el 26/10/2026
  * el importador solo guardaba el nombre (ver `metaLeadFields.js`).
  *
- * Vuelve a pedirle el `field_data` a la Graph API usando el `leadgen_id`
- * que ya quedó guardado en `additional_notes` de cada lead, y solo
+ * Vuelve a pedirle el lead a la Graph API usando el `leadgen_id` que ya quedó
+ * guardado (en su columna o en el marcador de `additional_notes`), y solo
  * completa los campos que todavía están vacíos o en su valor por
  * defecto — nunca pisa un dato que el equipo ya haya corregido a mano.
+ *
+ * Desde el 01/11/2026 rescata además la **atribución**: el anuncio, el
+ * conjunto, la campaña, sus NOMBRES y la fecha de envío en Meta. Las fichas
+ * anteriores guardaban el `ad_id` y no el nombre, que se resolvía contra las
+ * métricas sincronizadas de la campaña —donde solo están los anuncios que
+ * siguen entregando—, así que un anuncio pausado dejaba al lead figurando
+ * como "Sin campaña asignada" en la hoja de marketing. Es la mitad
+ * recuperable de los datos históricos: lo que Meta ya no devuelve queda en
+ * "sin dato" y no se inventa.
  *
  * `runMetaLeadgenBackfill()` se reutiliza desde POST
  * /api/leads/backfill-meta-fields (server.js) para que corra DENTRO del
@@ -40,27 +49,59 @@ const HEADER_RE = /^\[Meta leadgen_id=\d+\]\s+form_id=\S+/;
 const DEFAULT_ACADEMIC_LEVEL = 'Pregrado (Bachiller/Título)';
 const DEFAULT_FIELD_OF_STUDY = 'General';
 
-async function fetchFieldData(leadgenId, token) {
-  const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${leadgenId}?fields=field_data&access_token=${encodeURIComponent(token)}`;
+/*
+ * Se le pide a Meta el formulario Y la atribución. Los `*_name` hacen falta
+ * acá tanto como en el alta: las fichas anteriores al 01/11/2026 guardaron el
+ * `ad_id` pero no el nombre del anuncio, y el nombre se resolvía contra las
+ * métricas sincronizadas de la campaña —donde solo están los anuncios que
+ * siguen entregando—, así que en la hoja de marketing salían sin campaña.
+ */
+const META_BACKFILL_FIELDS = 'field_data,created_time,form_id,platform,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name';
+
+async function fetchLead(leadgenId, token) {
+  const url = `https://graph.facebook.com/${GRAPH_API_VERSION}/${leadgenId}?fields=${META_BACKFILL_FIELDS}&access_token=${encodeURIComponent(token)}`;
   const response = await fetch(url);
   const data = await response.json();
   if (!response.ok) throw new Error(data?.error?.message || `HTTP ${response.status}`);
-  return data.field_data || [];
+  return data || {};
+}
+
+/**
+ * Qué columnas de atribución le faltan a esta ficha.
+ *
+ * Solo los huecos: un `ad_id` ya guardado no se vuelve a escribir, y un nombre
+ * que el equipo haya corregido a mano tampoco. Es la misma regla de
+ * `attachMetaLeadToExisting()`.
+ */
+function missingAttribution(lead) {
+  return [
+    'meta_leadgen_id', 'meta_form_id', 'meta_ad_id', 'meta_adset_id', 'meta_campaign_id',
+    'meta_ad_name', 'meta_adset_name', 'meta_campaign_name', 'meta_platform', 'meta_created_time'
+  ].filter((col) => !lead[col]);
 }
 
 export async function runMetaLeadgenBackfill() {
   const token = process.env.META_PAGE_ACCESS_TOKEN;
   if (!token) throw new Error('Falta META_PAGE_ACCESS_TOKEN en el entorno del servidor.');
 
-  const leads = await db('leads').where('additional_notes', 'like', '%[Meta leadgen_id=%');
+  /*
+   * Se recorren las fichas que llevan el marcador del formulario y, además,
+   * las que tienen el `leadgen_id` en su columna: desde que la atribución vive
+   * en columnas, el id puede estar ahí sin que el marcador esté en las notas
+   * (y es justo la ficha a la que le falta el nombre del anuncio).
+   */
+  const leads = await db('leads')
+    .where('additional_notes', 'like', '%[Meta leadgen_id=%')
+    .orWhereNotNull('meta_leadgen_id');
 
   const leadService = new LeadService();
   const result = { totalFound: leads.length, updated: [], skipped: 0, failed: [], phoneConflicts: [] };
 
   for (const lead of leads) {
-    const match = String(lead.additional_notes || '').match(LEADGEN_MARKER_RE);
-    if (!match) { result.skipped++; continue; }
-    const leadgenId = match[1];
+    const leadgenId = lead.meta_leadgen_id
+      || String(lead.additional_notes || '').match(LEADGEN_MARKER_RE)?.[1]
+      || null;
+    if (!leadgenId) { result.skipped++; continue; }
 
     const missingAcademicLevel = !lead.academic_level || lead.academic_level === DEFAULT_ACADEMIC_LEVEL;
     const missingFieldOfStudy = !lead.field_of_study || lead.field_of_study === DEFAULT_FIELD_OF_STUDY;
@@ -69,16 +110,44 @@ export async function runMetaLeadgenBackfill() {
     // y el lead no se cruza con el contacto que escriba después por WhatsApp.
     const missingPhone = !lead.phone;
     const missingEmail = !lead.email;
-    if (!missingAcademicLevel && !missingFieldOfStudy && !missingUniversity && !missingPhone && !missingEmail) {
+    // La atribución es la otra mitad del backfill: una ficha completa de datos
+    // personales puede estar igual de incompleta para marketing.
+    const faltaAtribucion = missingAttribution(lead);
+    if (!missingAcademicLevel && !missingFieldOfStudy && !missingUniversity && !missingPhone
+      && !missingEmail && !faltaAtribucion.length) {
       result.skipped++;
       continue;
     }
 
     try {
-      const fieldData = await fetchFieldData(leadgenId, token);
-      const custom = extractMetaLeadForm(fieldData);
+      const data = await fetchLead(leadgenId, token);
+      const custom = extractMetaLeadForm(data.field_data || []);
 
       const patch = {};
+
+      /*
+       * La atribución, campo por campo y solo donde falta. Lo que Meta no
+       * manda se queda sin escribir: "sin dato" es una respuesta legítima y
+       * rellenarlo con algo plausible es justo lo que hacía que un lead
+       * figurara en una campaña que no lo trajo.
+       */
+      const atribucion = {
+        meta_leadgen_id: leadgenId,
+        meta_form_id: data.form_id || null,
+        meta_ad_id: data.ad_id || null,
+        meta_adset_id: data.adset_id || null,
+        meta_campaign_id: data.campaign_id || null,
+        meta_ad_name: data.ad_name || null,
+        meta_adset_name: data.adset_name || null,
+        meta_campaign_name: data.campaign_name || null,
+        meta_platform: data.platform || null,
+        // El momento del envío en Meta, que no es cuándo entró acá: de esa
+        // diferencia depende que el reporte cierre contra el Ads Manager.
+        meta_created_time: data.created_time ? new Date(data.created_time) : null
+      };
+      for (const col of faltaAtribucion) {
+        if (atribucion[col]) patch[col] = atribucion[col];
+      }
       if (missingAcademicLevel && custom.academicLevel) patch.academic_level = custom.academicLevel;
       if (missingFieldOfStudy && custom.fieldOfStudy) patch.field_of_study = custom.fieldOfStudy;
       if (missingUniversity && custom.university) patch.university = custom.university;
