@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { db } from '../db/connection.js';
+import { stampFirstResponseByPhone } from './leadFirstResponse.js';
 import { firstRealName } from './contactName.js';
 import { whatsappMediaDir } from '../middleware/upload.js';
 import { isAdFormMessage } from './whatsappBotService.js';
@@ -287,6 +288,15 @@ export class WhatsappMessageService {
       .ignore();
 
     if (!id) return { record: await this.getByMessageId(messageId), isNew: false };
+
+    /*
+     * El eco es un asesor contestando desde la app de WhatsApp Business o
+     * desde el inbox del proveedor: cuenta como primera respuesta tanto como
+     * un envío desde el panel. Sin esto, el lead atendido por fuera figuraría
+     * como sin atender.
+     */
+    void stampFirstResponseByPhone(waId, { at: sentAt || new Date() });
+
     return { record: await this.getById(id), isNew: true };
   }
 
@@ -407,6 +417,16 @@ export class WhatsappMessageService {
       raw_payload: JSON.stringify(data)
     });
 
+    /*
+     * "A este lead ya se le contestó". Se marca acá —en el envío— y no
+     * calculándolo después sobre la tabla de mensajes porque el lead que
+     * importa es el que NO tiene conversación: el de formulario al que nadie
+     * escribió nunca, que es el que hay que poder listar como pendiente.
+     * No se espera: el mensaje ya salió, y lo que se perdería si falla es una
+     * marca de seguimiento (ver `leadFirstResponse.js`).
+     */
+    void stampFirstResponseByPhone(waId, { sentBy });
+
     return this.getById(id);
   }
 
@@ -472,6 +492,8 @@ export class WhatsappMessageService {
       sent_by: sentBy || null,
       raw_payload: JSON.stringify(data)
     });
+
+    void stampFirstResponseByPhone(waId, { sentBy });
 
     return this.getById(id);
   }
@@ -562,6 +584,8 @@ export class WhatsappMessageService {
       status: 'sent',
       raw_payload: JSON.stringify(sendData)
     });
+
+    void stampFirstResponseByPhone(waId);
 
     return this.getById(id);
   }

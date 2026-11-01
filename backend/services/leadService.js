@@ -1489,6 +1489,16 @@ ${note}` : note;
       }
     }
     if (data.source !== undefined) updatePayload.source = data.source;
+    /*
+     * La ATRIBUCIÓN no se edita por acá, y es a propósito: `meta_*`,
+     * `tiktok_*` y `ctwa_*` las escribe la plataforma al entrar el lead y
+     * nadie más (ver `leadOrigin.js`). Es lo que hace que la plataforma, la
+     * campaña, el anuncio y el "ID de origen" sean de solo lectura para
+     * cualquiera que use el panel: un id de anuncio corregido a mano es un
+     * lead acreditado a una campaña que no lo trajo, y de esos números cuelga
+     * el presupuesto. Lo que sí es libre es `source`, el canal escrito a mano
+     * de un lead que no vino de un anuncio — ahí no hay nada que falsear.
+     */
     if (data.overallViabilityScore !== undefined) updatePayload.overall_viability_score = data.overallViabilityScore;
     if (data.viabilityLevel !== undefined) updatePayload.viability_level = data.viabilityLevel;
     if (data.additionalNotes !== undefined || data.additional_notes !== undefined) {

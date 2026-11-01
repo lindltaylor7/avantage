@@ -262,6 +262,14 @@
                    columna, que es como se trabaja el tablero. -->
               <h4 class="card-lead-name" :title="getLeadFullName(lead)">
                 <span v-if="cameFromForm(lead)" class="card-form-mark" title="Llegó por formulario de Meta">📋</span>
+                <!-- Pasaron 24 h y nadie le contestó. Va como marca en el
+                     renglón del nombre y no como una línea propia: la tarjeta
+                     tiene alto fijo y una línea más deja de entrar. -->
+                <span
+                  v-if="needsFirstResponse(lead)"
+                  class="card-alert-mark"
+                  :title="`Nadie le respondió todavía (${waitingLabel(lead)})`"
+                >⏰</span>
                 {{ getLeadFullName(lead) }}
               </h4>
               <!-- La fecha de registro comparte renglón con el celular: una
@@ -1254,6 +1262,7 @@ import LeadConversation from '../components/LeadConversation.vue';
 import MetaReconciliationModal from '../components/MetaReconciliationModal.vue';
 import LeadAssignee from '../components/LeadAssignee.vue';
 import LeadQualification from '../components/LeadQualification.vue';
+import { needsFirstResponse, waitingLabel } from '../leadFirstResponse.js';
 import BulkLeadTeamModal from '../components/BulkLeadTeamModal.vue';
 import DuplicateLeadsModal from '../components/DuplicateLeadsModal.vue';
 import MeetingModal from '../components/MeetingModal.vue';
@@ -3584,6 +3593,15 @@ onMounted(() => {
 /* Marca de "llegó por formulario": va dentro del renglón del nombre para no
    sumar alto a la tarjeta. */
 .card-form-mark {
+  font-size: 0.72rem;
+  margin-right: 0.15rem;
+  cursor: help;
+}
+
+/* 24 h sin respuesta. Mismo tamaño que la marca de formulario: es una marca
+   en el renglón del nombre y no puede robarle ancho al nombre, que es lo
+   único que identifica al lead en la tarjeta. */
+.card-alert-mark {
   font-size: 0.72rem;
   margin-right: 0.15rem;
   cursor: help;
