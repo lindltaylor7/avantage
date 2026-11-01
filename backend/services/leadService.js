@@ -128,6 +128,14 @@ export function applyLeadVisibility(query, { viewerId = null, setterFunnelStatus
 }
 
 /** Los mismos dígitos, calculados en SQL sobre la columna `phone`. */
+/**
+ * La etapa que afirma que hay una reunión. Es la clave fija —la que pone el
+ * bot al reservar y la que traen de fábrica los dos tableros—: una columna que
+ * el equipo cree con otro nombre no se adivina, y adivinarla acá sería frenar
+ * movimientos legítimos por el parecido de una etiqueta.
+ */
+export const APPOINTMENT_STATUS = 'cita_agendada';
+
 export const PHONE_MATCH_KEY_SQL = "RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(leads.phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', ''), '.', ''), 9)";
 
 /**
@@ -687,13 +695,19 @@ export class LeadService {
         'closer.name as closer_name',
         // Quién lo cargó a mano, para que la ficha diga a quién preguntarle.
         // Solo lo tienen los leads del alta manual (ver `created_by`).
-        'autor.name as created_by_name'
+        'autor.name as created_by_name',
+        // Quién lo calificó. La ficha de los dos tableros sale de esta lista,
+        // así que el nombre tiene que viajar acá y no solo en `getLeadById`.
+        'calificador.name as qualified_by_name'
       )
       .leftJoin('projects', 'projects.lead_id', 'leads.id')
       .leftJoin('users as asesor', 'asesor.id', 'leads.assigned_user_id')
       .leftJoin('users as setter', 'setter.id', 'leads.setter_user_id')
       .leftJoin('users as closer', 'closer.id', 'leads.closer_user_id')
       .leftJoin('users as autor', 'autor.id', 'leads.created_by')
+      // Quién calificó el lead: la ficha lo muestra al lado de la marca, para
+      // poder preguntarle por un "No" que no se entiende.
+      .leftJoin('users as calificador', 'calificador.id', 'leads.qualified_by')
       .leftJoin('finance_income as pago', function () {
         this.on('pago.lead_id', '=', 'leads.id').andOn('pago.is_initial_payment', '=', db.raw('1'));
       })
@@ -878,6 +892,40 @@ ${note}` : note;
    * rastro del segundo formulario es el marcador. Sin leerlo, la importación
    * volvería a dar de alta ese lead en cada pasada.
    */
+  /**
+   * Marca el lead como calificado, no calificado, o sin calificar.
+   *
+   * Tres estados y no dos: `null` es "nadie lo miró todavía", y es un dato —el
+   * que separa al lead sin revisar del revisado y descartado—. La columna
+   * anterior no existía: "Calificado" se DERIVABA de que el lead hubiera
+   * salido de `nuevo`, con lo que decía "Sí" en 403 de 403 leads y no se podía
+   * medir la calidad de ningún anuncio.
+   *
+   * Lo marca una persona y nunca un automatismo: es un juicio sobre el
+   * contacto (tiene tesis en curso, está en el país, puede invertir), no algo
+   * que se deduzca de por dónde pasó la tarjeta. Queda escrito quién y cuándo
+   * para poder preguntarle.
+   *
+   * No toca el funnel: calificar es describir al lead, no moverlo. Por eso no
+   * pasa por `updateLeadStatus()` ni deja nada en `lead_stage_changes` — misma
+   * razón que asignar un responsable.
+   */
+  async setQualified(id, value, { actor = null } = {}) {
+    const lead = await db('leads').where({ id }).first();
+    if (!lead) return null;
+
+    const empty = value === null || value === undefined || value === '';
+    await db('leads').where({ id }).update({
+      qualified: empty ? null : !!value,
+      qualified_at: empty ? null : new Date(),
+      // Sin autor cuando se borra la marca: lo que no está calificado no lo
+      // calificó nadie.
+      qualified_by: empty ? null : (actor?.id || null)
+    });
+
+    return this.getLeadById(id);
+  }
+
   /**
    * La ficha de un lead de TikTok, buscada como se lo reconoce: por su columna
    * y, si no, por el marcador de las notas.
@@ -1097,13 +1145,15 @@ ${note}` : note;
         'asesor.email as assigned_user_email',
         'setter.name as setter_name',
         'closer.name as closer_name',
-        'autor.name as created_by_name'
+        'autor.name as created_by_name',
+        'calificador.name as qualified_by_name'
       )
       .leftJoin('projects', 'projects.lead_id', 'leads.id')
       .leftJoin('users as asesor', 'asesor.id', 'leads.assigned_user_id')
       .leftJoin('users as setter', 'setter.id', 'leads.setter_user_id')
       .leftJoin('users as closer', 'closer.id', 'leads.closer_user_id')
       .leftJoin('users as autor', 'autor.id', 'leads.created_by')
+      .leftJoin('users as calificador', 'calificador.id', 'leads.qualified_by')
       .leftJoin('finance_income as pago', function () {
         this.on('pago.lead_id', '=', 'leads.id').andOn('pago.is_initial_payment', '=', db.raw('1'));
       })
@@ -1269,6 +1319,43 @@ ${note}` : note;
         reason: reason || 'El lead ya está en el Funnel de Ventas: solo una persona puede devolverlo al Setter Funnel.'
       });
       return this.getLeadById(id);
+    }
+
+    /*
+     * "Cita agendada" es la única etapa que afirma un HECHO con fecha y hora,
+     * y hasta ahora se podía afirmar arrastrando una tarjeta: el lead quedaba
+     * en esa columna sin ninguna reunión detrás, así que el Calendario no la
+     * mostraba, el bot no mandaba su recordatorio y en el reporte el embudo
+     * decía que había una cita que nadie podía ir a buscar.
+     *
+     * Solo frena a una PERSONA: el bot llega a esta etapa después de reservar
+     * el bloque (`scheduledMeetingService`), así que para él la reunión existe
+     * siempre; frenarlo sería frenar el único camino que ya cumple la regla.
+     * Y solo al ENTRAR: un lead que ya estaba en la etapa puede moverse a
+     * cualquier otra sin que esto opine.
+     *
+     * El intento queda en la bitácora como bloqueado, igual que el del lead
+     * graduado: lo que se vino a arreglar es justamente lo que no dejaba
+     * rastro.
+     */
+    if (actorType === 'user' && status === APPOINTMENT_STATUS && current.status !== APPOINTMENT_STATUS) {
+      const meeting = await db('scheduled_meetings')
+        .where({ lead_id: id })
+        .whereNull('cancelled_at')
+        .first();
+
+      if (!meeting) {
+        await this.stageChanges.record(current.id, {
+          fromStatus: current.status,
+          toStatus: status,
+          actor,
+          blocked: true,
+          reason: 'Sin reunión agendada: la etapa de cita necesita su fecha y hora.'
+        });
+        const error = new Error('Para pasar el lead a "Cita Agendada" hay que agendar la reunión con su fecha y hora (botón "Agendar reunión" en la ficha).');
+        error.code = 'APPOINTMENT_REQUIRED';
+        throw error;
+      }
     }
 
     const patch = { status };

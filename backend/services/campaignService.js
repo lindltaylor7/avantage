@@ -67,7 +67,7 @@ const AD_IMAGE_MIME_TYPES = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image
 const APPOINTMENT_STATUSES = new Set(['cita_agendada']);
 
 /**
- * ¿Esta venta está cerrada? Dos caminos, y hacen falta los dos.
+ * ¿Esta venta está cerrada? Tres caminos, y hacen falta los tres.
  *
  * `wonStatuses` viene de `loadWinningStatuses()` y depende de que la columna
  * del tablero esté marcada como `final`. `projectLeadIds` es el respaldo: si
@@ -75,12 +75,19 @@ const APPOINTMENT_STATUSES = new Set(['cita_agendada']);
  * proyecto abierto, y mostrar como "en espera de la reunión" a un cliente al
  * que ya se le está entregando trabajo es el peor de los dos errores posibles.
  *
+ * `paidLeadIds` son los leads con al menos un ingreso **verificado**: Finanzas
+ * dio el visto bueno de que esa plata entró. Un cliente que ya pagó es una
+ * venta cerrada aunque su tarjeta se haya quedado sin mover, y sin este camino
+ * el reporte mostraba dinero cobrado en una fila cuya etapa decía
+ * "cotización" — el 17/09/2026, S/ 2.300 registrados en un anuncio con cero
+ * leads en Ganado. La plata es el hecho más difícil de discutir de los tres.
+ *
  * Vive fuera de la clase para poder probarla sin base de datos: es una regla
  * de negocio, no una consulta.
  */
-export function isWonLead(lead, wonStatuses, projectLeadIds) {
+export function isWonLead(lead, wonStatuses, projectLeadIds, paidLeadIds = new Set()) {
   if (!lead) return false;
-  return wonStatuses.has(lead.status) || projectLeadIds.has(lead.id);
+  return wonStatuses.has(lead.status) || projectLeadIds.has(lead.id) || paidLeadIds.has(lead.id);
 }
 
 /**
@@ -646,6 +653,8 @@ export class CampaignService {
      * manual — y los tres significan lo mismo.
      */
     const wonProjectLeadIds = new Set();
+    // Leads con al menos una cuota verificada: el tercer camino de `isWonLead`.
+    const paidLeadIds = new Set();
     const closedAtByLead = new Map();
 
     if (leadIds.length) {
@@ -683,8 +692,18 @@ export class CampaignService {
       for (const i of income) {
         const amount = Number(i.monto) || 0;
         billedByLead.set(i.lead_id, (billedByLead.get(i.lead_id) || 0) + amount);
-        if (String(i.estado).toLowerCase() === 'pagado') {
+        /*
+         * "Cobrado" es lo `verificado` y no lo `pagado`: de los tres estados
+         * de una cuota, `verificado` es el único que suma en los libros de
+         * Finanzas (ver `ESTADOS_INGRESO`) — `pagado` es "el cliente dice que
+         * pagó y Finanzas todavía no dio el visto bueno". Contando `pagado` el
+         * reporte sumaba dinero que podía no haber llegado y, peor, dejaba
+         * FUERA el dinero confirmado, así que el ingreso y el ROAS de cada
+         * anuncio no coincidían con el Resumen Financiero.
+         */
+        if (String(i.estado).toLowerCase() === 'verificado') {
           paidByLead.set(i.lead_id, (paidByLead.get(i.lead_id) || 0) + amount);
+          paidLeadIds.add(i.lead_id);
         }
         // Tener el cierre registrado en Finanzas implica que la propuesta ya
         // se hizo, aunque la cuota siga sin cobrarse.
@@ -715,7 +734,7 @@ export class CampaignService {
         || (lead && lead.overall_viability_score != null)
         || (lead && !['nuevo'].includes(lead.status));
       const hasAppointment = !!meeting || (lead && APPOINTMENT_STATUSES.has(lead.status));
-      const won = isWonLead(lead, wonStatuses, wonProjectLeadIds);
+      const won = isWonLead(lead, wonStatuses, wonProjectLeadIds, paidLeadIds);
       const lost = lead && LOST_STATUSES.has(lead.status);
 
       const quote = won && lead ? quoteByLead.get(lead.id) : null;
@@ -836,6 +855,25 @@ export class CampaignService {
     };
 
     /*
+     * La etapa de esta hoja es más fina que los cuatro cajones con los que se
+     * cuentan los leads por anuncio (`crmStage`), y tiene que serlo: ahí la
+     * suma de las cuatro columnas es siempre el total de leads del anuncio
+     * —una quinta los descuadraría—, mientras que acá cada fila es un lead y
+     * lo que se lee es su situación.
+     *
+     * "Cuota pactada" es el lead que todavía no se ganó y YA tiene un
+     * cronograma registrado en Finanzas: el precio está acordado y el dinero
+     * no entró. Sin ese nombre, la hoja mostraba un importe en una fila cuya
+     * etapa decía "cotización", que es lo que hacía imposible saber si una
+     * venta estaba cerrada o solo prometida.
+     */
+    const stageLabel = (c) => {
+      if (c.crmStage === 'ganado' || c.crmStage === 'descartado') return STAGE_LABELS[c.crmStage];
+      if ((c.billedRevenue || 0) > 0) return 'Cuota pactada';
+      return STAGE_LABELS[c.crmStage] || c.crmStage;
+    };
+
+    /*
      * Los leads que NO vinieron de un anuncio van en la misma hoja: la
      * pregunta que contesta es "¿de dónde salió cada lead?", y una hoja donde
      * solo figuran los de campaña no permite comprobar que ningún lead se haya
@@ -916,7 +954,7 @@ export class CampaignService {
         // Dónde está hoy: la columna del Kanban y, en paralelo, el cajón
         // comercial con el que se suman las cifras por anuncio.
         funnelColumn: lead ? (labelByKey.get(lead.status) || lead.status) : null,
-        commercialStage: STAGE_LABELS[c.crmStage] || c.crmStage,
+        commercialStage: stageLabel(c),
 
         closedAt: c.closedAt || null,
         quotedValue: c.quotedValue,

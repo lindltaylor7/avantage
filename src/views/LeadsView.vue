@@ -771,6 +771,12 @@
                 <span class="info-label">Closer:</span>
                 <LeadAssignee :lead="selectedLead" role="closer" show-name @assigned="onLeadAssigned" />
               </div>
+              <!-- La calificación la pone una persona y empieza vacía: de ella
+                   cuelga la medición de la calidad de cada anuncio. -->
+              <div class="info-item">
+                <span class="info-label">Calificado:</span>
+                <LeadQualification :lead="selectedLead" @qualified="onLeadAssigned" />
+              </div>
             </div>
 
             <div class="info-card-panel">
@@ -1247,6 +1253,7 @@ import SignedContractModal from '../components/SignedContractModal.vue';
 import LeadConversation from '../components/LeadConversation.vue';
 import MetaReconciliationModal from '../components/MetaReconciliationModal.vue';
 import LeadAssignee from '../components/LeadAssignee.vue';
+import LeadQualification from '../components/LeadQualification.vue';
 import BulkLeadTeamModal from '../components/BulkLeadTeamModal.vue';
 import DuplicateLeadsModal from '../components/DuplicateLeadsModal.vue';
 import MeetingModal from '../components/MeetingModal.vue';

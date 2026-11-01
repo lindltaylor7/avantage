@@ -2630,6 +2630,14 @@ app.patch('/api/leads/:id/status', requireAuth, requireAnyPermission('leads.view
 
     res.json({ lead, project });
   } catch (error) {
+    /*
+     * La etapa de cita exige su reunión (ver `updateLeadStatus`). Es un 409 y
+     * no un 500: no falló nada, falta un dato, y el mensaje dice cuál y dónde
+     * ponerlo.
+     */
+    if (error.code === 'APPOINTMENT_REQUIRED') {
+      return res.status(409).json({ error: error.message, code: error.code });
+    }
     console.error('❌ Error al actualizar el lead:', error);
     res.status(500).json({ error: 'Error al actualizar el lead.', details: error.message });
   }
@@ -2655,6 +2663,26 @@ app.patch('/api/leads/:id/assignee', requireAuth, requirePermission('leads.manag
     }
     console.error('❌ Error al asignar el lead:', error);
     res.status(500).json({ error: 'Error al asignar el lead.', details: error.message });
+  }
+});
+
+/**
+ * Calificación comercial del lead (`{ qualified: true | false | null }`).
+ *
+ * Es del que trabaja el lead y no del que reparte: el permiso es el de los dos
+ * tableros más `requireLeadVisible`, la misma regla de "cada quien ve sus
+ * leads". Va aparte de `PUT /api/leads/:id` —el formulario entero de la
+ * ficha— por lo mismo que la píldora de estado del Libro Diario: reenviar
+ * todos los campos para cambiar uno reescribe de paso lo que nadie tocó.
+ */
+app.patch('/api/leads/:id/qualified', requireAuth, requireAnyPermission('leads.view', 'setter.view'), requireLeadVisible, async (req, res) => {
+  try {
+    const lead = await leadService.setQualified(req.params.id, req.body?.qualified ?? null, { actor: req.user });
+    if (!lead) return res.status(404).json({ error: 'Lead no encontrado.' });
+    res.json({ lead });
+  } catch (error) {
+    console.error('❌ Error al calificar el lead:', error);
+    res.status(500).json({ error: 'Error al calificar el lead.', details: error.message });
   }
 });
 

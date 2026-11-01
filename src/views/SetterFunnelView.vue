@@ -1094,6 +1094,12 @@
               <span class="detail-label">🤝 Closer:</span>
               <LeadAssignee :lead="selectedLead" role="closer" show-name @assigned="onLeadAssigned" />
             </div>
+            <!-- La calificación la pone una persona y empieza vacía: de ella
+                 cuelga la medición de la calidad de cada anuncio. -->
+            <div class="detail-item">
+              <span class="detail-label">✅ Calificado:</span>
+              <LeadQualification :lead="selectedLead" @qualified="onLeadAssigned" />
+            </div>
             <div class="detail-item">
               <span class="detail-label">🎓 Grado Académico:</span>
               <span class="detail-value">{{ selectedLead.academic_level || 'No especificado' }}</span>
@@ -1171,6 +1177,7 @@ import { apiFetch } from '../apiClient.js';
 import LeadNotes from '../components/LeadNotes.vue';
 import LeadConversation from '../components/LeadConversation.vue';
 import LeadAssignee from '../components/LeadAssignee.vue';
+import LeadQualification from '../components/LeadQualification.vue';
 import BulkLeadTeamModal from '../components/BulkLeadTeamModal.vue';
 import MeetingModal from '../components/MeetingModal.vue';
 import LeadDuplicateAlert from '../components/LeadDuplicateAlert.vue';
@@ -1892,10 +1899,14 @@ async function onDrop(targetColKey) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: targetColKey })
     });
-    if (!res.ok) {
-      throw new Error('Error al actualizar estado');
-    }
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
+    /*
+     * El mensaje del servidor y no uno propio: hay movimientos que se rechazan
+     * por una razón concreta y accionable —la etapa de cita necesita su
+     * reunión agendada (409)— y "no se pudo guardar el cambio de etapa" deja a
+     * quien arrastró la tarjeta sin saber qué hacer.
+     */
+    if (!res.ok) throw new Error(data.error || 'Error al actualizar estado');
     if (data.project) {
       projectToast.value = {
         id: data.project.id,
@@ -1905,7 +1916,7 @@ async function onDrop(targetColKey) {
   } catch (err) {
     console.error('Error al mover lead:', err);
     leadToMove.status = oldStatus;
-    alert('No se pudo guardar el cambio de etapa.');
+    alert(err.message || 'No se pudo guardar el cambio de etapa.');
   }
 }
 
@@ -1921,8 +1932,9 @@ async function updateLeadStatusFromSelect(leadId, newStatus) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: newStatus })
     });
-    if (!res.ok) throw new Error('Error al actualizar');
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
+    // Ídem que al arrastrar: el desplegable es el mismo camino.
+    if (!res.ok) throw new Error(data.error || 'Error al actualizar');
     if (data.project) {
       projectToast.value = {
         id: data.project.id,
@@ -1932,7 +1944,7 @@ async function updateLeadStatusFromSelect(leadId, newStatus) {
   } catch (err) {
     console.error('Error al actualizar status:', err);
     lead.status = oldStatus;
-    alert('No se pudo actualizar el estado del lead.');
+    alert(err.message || 'No se pudo actualizar el estado del lead.');
   }
 }
 
@@ -1945,10 +1957,15 @@ const handoffToast = ref(null);
  * deja el lead en `cita_agendada`, que es el único estado que gradúa al Funnel
  * de Ventas.
  *
- * NO crea una reunión en `scheduled_meetings` a propósito: esa tabla alimenta
- * los recordatorios que el bot manda por WhatsApp, y una cita coordinada a
- * mano ya la está siguiendo la persona que la agendó — inventar ahí una fila
- * haría que el bot le escribiera al contacto por su cuenta.
+ * Desde el 01/11/2026 ese pase exige que la reunión esté agendada en el panel
+ * (el servidor responde 409 y el mensaje dice dónde agendarla). Antes no creaba
+ * ninguna fila en `scheduled_meetings` a propósito —se temía que el bot le
+ * escribiera al contacto por una cita que seguía una persona—, pero el precio
+ * era un lead en la columna de cita sin fecha ni hora: el closer no la veía en
+ * su Calendario, el reporte contaba una cita que nadie podía ir a buscar y no
+ * había forma de medir cuántas citas trajo cada anuncio. La reunión se carga
+ * desde la misma ficha ("Agendar reunión"), queda con `source: 'manual'` y sin
+ * `wa_id`, así que el bot no tiene a quién escribirle.
  */
 async function handOffToCloser(lead) {
   if (!lead || handingOff.value) return;
@@ -1957,7 +1974,9 @@ async function handOffToCloser(lead) {
     `¿Pasar a "${name}" al Funnel de Ventas?
 
 `
-    + 'Úsalo cuando ya coordinaste la reunión por tu cuenta. El lead sale del Setter Funnel '
+    + 'Úsalo cuando ya coordinaste la reunión por tu cuenta y la cargaste en el panel '
+    + '("Agendar reunión" en esta misma ficha): sin su fecha y hora el pase se rechaza, '
+    + 'porque el closer no vería la cita en su Calendario. El lead sale del Setter Funnel '
     + 'y el closer lo ve en la columna "Nuevo".'
   );
   if (!ok) return;
