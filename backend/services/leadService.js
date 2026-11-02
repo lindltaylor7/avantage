@@ -12,6 +12,7 @@ import {
 import { CommissionService } from './commissionService.js';
 import { LeadRoutingService } from './leadRoutingService.js';
 import { MetaConversionsService } from './metaConversionsService.js';
+import { TikTokConversionsService } from './tiktokConversionsService.js';
 import { ctwaAttribution, leadOrigin } from './leadOrigin.js';
 import { ATTRIBUTION_METHODS, confidenceFor, writesAttribution } from './attributionEvidence.js';
 
@@ -288,12 +289,18 @@ export function duplicateLeadError(duplicates) {
  * del chatbot y prospectos capturados en la Base de Datos).
  */
 export class LeadService {
-  constructor({ stageChangeService, userService, commissionService, routingService, metaConversionsService } = {}) {
+  constructor({ stageChangeService, userService, commissionService, routingService, metaConversionsService, tiktokConversionsService } = {}) {
     this.stageChanges = stageChangeService || new LeadStageChangeService();
     this.users = userService || new UserService();
     this.commissions = commissionService || new CommissionService();
     this.routing = routingService || new LeadRoutingService({ userService: this.users });
     this.metaConversions = metaConversionsService || new MetaConversionsService();
+    /*
+     * La misma vuelta para TikTok. Queda apagada sin credenciales y no se
+     * intenta nada, así que instanciarla acá no tiene costo (ver
+     * `tiktokConversionsService.js`).
+     */
+    this.tiktokConversions = tiktokConversionsService || new TikTokConversionsService();
   }
 
   async createLead({
@@ -1532,6 +1539,23 @@ export class LeadService {
      * que se cayó por un timeout de Meta, no.
      */
     void this.metaConversions.reportStageChange({ ...current, status }, {
+      status,
+      movedAt: new Date(),
+      stageChangeId
+    });
+
+    /*
+     * Y lo mismo para TikTok, por las mismas razones y con el mismo cuidado:
+     * sin esperarla, porque es otra llamada HTTP en el camino de arrastrar una
+     * tarjeta, y sin que pueda tumbar el movimiento.
+     *
+     * Son dos llamadas y no una con un `if`: un lead puede tener atribución de
+     * las dos plataformas (el contacto que llenó el formulario de TikTok y
+     * además escribió desde un anuncio de Meta es el caso normal), y cada
+     * plataforma tiene que enterarse del desenlace del lead que ELLA mandó.
+     * Cada servicio se omite solo cuando el lead no trae su identificador.
+     */
+    void this.tiktokConversions.reportStageChange({ ...current, status }, {
       status,
       movedAt: new Date(),
       stageChangeId

@@ -34,6 +34,7 @@ import { MetaAdsService } from './services/metaAdsService.js';
 import { TikTokAdsService } from './services/tiktokAdsService.js';
 import { TikTokLeadsService } from './services/tiktokLeadsService.js';
 import { AttributionConflictService } from './services/attributionConflictService.js';
+import { TikTokConversionsService, TIKTOK_EVENT_NAMES } from './services/tiktokConversionsService.js';
 import { CampaignExportService } from './services/campaignExportService.js';
 import { UserService } from './services/userService.js';
 import { RoleService } from './services/roleService.js';
@@ -152,7 +153,26 @@ const collectionService = new CollectionService({ commissionService });
 // etapa en la que terminó. Se inyecta en leadService porque el disparador es el
 // cambio de etapa, que tiene un único camino (`updateLeadStatus`).
 const metaConversionsService = new MetaConversionsService();
-const leadService = new LeadService({ commissionService, metaConversionsService });
+/*
+ * La misma vuelta para TikTok, y por eso el servicio de anuncios se instancia
+ * acá arriba: de él sale el objetivo de optimización de cada grupo, que es lo
+ * que contesta si la campaña de verdad APRENDE de los eventos que le mandamos
+ * — que TikTok acepte un evento y que optimice por él son dos cosas distintas,
+ * y dar la segunda por buena porque pasó la primera es el fallo silencioso de
+ * esta integración.
+ *
+ * Las dos conversiones se inyectan en `leadService` porque el disparador es el
+ * cambio de etapa, que tiene un único camino (`updateLeadStatus`). Y son dos y
+ * no una con un `if`: un lead puede tener atribución de las dos plataformas, y
+ * cada una tiene que enterarse del desenlace del lead que ELLA mandó.
+ */
+const tiktokAdsService = new TikTokAdsService();
+const tiktokConversionsService = new TikTokConversionsService({ ads: tiktokAdsService });
+const leadService = new LeadService({
+  commissionService,
+  metaConversionsService,
+  tiktokConversionsService
+});
 const funnelColumnService = new FunnelColumnService();
 // Las etapas del Setter Funnel: tabla aparte de las de Ventas a propósito, ver
 // la cabecera de `setterFunnelColumnService.js`.
@@ -183,7 +203,6 @@ const leadStageChangeService = new LeadStageChangeService();
 const leadReportService = new LeadReportService({ leadService, stageChangeService: leadStageChangeService });
 const campaignService = new CampaignService();
 const metaAdsService = new MetaAdsService();
-const tiktokAdsService = new TikTokAdsService();
 const campaignExportService = new CampaignExportService({ campaignService });
 const userService = new UserService();
 const leadRoutingService = new LeadRoutingService({ userService });
@@ -3153,6 +3172,71 @@ app.get('/api/meta-capi', requireAuth, requirePermission('webhooks.view'), async
 });
 
 /** Guarda el mapeo etapa → nombre del evento. */
+// =====================================================================
+// CONVERSIONES HACIA TIKTOK (Events API) — /api/tiktok-capi
+// =====================================================================
+/*
+ * La vuelta del circuito con TikTok, hermana de `/api/meta-capi`: sus
+ * formularios instantáneos nos dejan leads y esto le devuelve en qué etapa
+ * terminó cada uno, para que pueda optimizar por calidad de lead y no solo por
+ * "formularios llenados" — que es justo la métrica que se llena de leads que no
+ * contestan.
+ *
+ * Mismo permiso que la de Meta (`webhooks.view`) y por la misma razón: es la
+ * misma plomería con otro proveedor, y la configura la misma persona. El envío
+ * en sí no pasa por acá: lo dispara `leadService.updateLeadStatus()`.
+ */
+app.get('/api/tiktok-capi', requireAuth, requirePermission('webhooks.view'), async (req, res) => {
+  try {
+    const { sourceId, enabled, missing } = tiktokConversionsService.config();
+    const [stages, events, summary, elegibilidad] = await Promise.all([
+      tiktokConversionsService.stages(),
+      tiktokConversionsService.recent({ limit: 30 }),
+      tiktokConversionsService.summary(),
+      /*
+       * La elegibilidad va en la MISMA respuesta y no en un botón aparte: es la
+       * pregunta que hay que hacerse antes de creerle a esta integración, porque
+       * TikTok acepta los eventos y la campaña puede seguir optimizando a clics.
+       * Escondida detrás de un clic, nadie la hace.
+       */
+      tiktokConversionsService.checkEligibility()
+    ]);
+
+    res.json({
+      // Del token solo viaja si está puesto: un secreto no se devuelve a la
+      // pantalla ni para mostrarlo tachado.
+      config: { enabled, sourceId: sourceId || null, missing },
+      stages,
+      events,
+      summary,
+      elegibilidad,
+      eventos_validos: TIKTOK_EVENT_NAMES
+    });
+  } catch (error) {
+    console.error('❌ Error al leer la integración de conversiones de TikTok:', error);
+    res.status(500).json({ error: 'Error al leer la integración.', details: error.message });
+  }
+});
+
+app.put('/api/tiktok-capi/mapping', requireAuth, requirePermission('webhooks.view'), async (req, res) => {
+  try {
+    const rows = Array.isArray(req.body?.mapping) ? req.body.mapping : [];
+    const stages = await tiktokConversionsService.saveMapping(rows);
+    res.json({ stages });
+  } catch (error) {
+    /*
+     * Un nombre de evento inválido es un 422 y no un 500: lo escribió una
+     * persona y se arregla eligiendo otro. Devolverlo como error del servidor
+     * manda a revisar el log en vez de la pantalla.
+     */
+    if (error.code === 'INVALID_EVENT_NAME') {
+      return res.status(422).json({ error: error.message, code: error.code });
+    }
+    console.error('❌ Error al guardar el mapeo de conversiones de TikTok:', error);
+    res.status(500).json({ error: 'Error al guardar el mapeo.', details: error.message });
+  }
+});
+
 app.put('/api/meta-capi/mapping', requireAuth, requirePermission('webhooks.view'), async (req, res) => {
   try {
     const rows = Array.isArray(req.body?.mapping) ? req.body.mapping : [];

@@ -1157,6 +1157,49 @@ antes de tocar el arranque de producción.
   script imprime el número y nombra las dos lecturas; declarar roto el dato desde la cifra es el
   mismo error con el signo cambiado. No imprime teléfonos ni correos: de cada lead salen el id, el
   origen y los datos académicos, que es lo que hace falta para juzgar la calificación.
+- **Lo que TikTok nos manda también vuelve a TikTok** (`tiktokConversionsService.js`, Events API,
+  `/api/tiktok-capi` bajo `webhooks.view`, tablas `tiktok_capi_stage_events` y
+  `tiktok_capi_events`). Es la hermana de la integración con Meta y existe por el mismo agujero
+  visto desde el otro lado: TikTok nos entrega los leads —a mano, porque no hay webhook— y nunca
+  se enteraba de lo que pasó después, así que su optimización solo puede perseguir «más
+  formularios llenados», que es justo la métrica que se llena de leads que no contestan: la
+  campaña aprende a traer gente que completa un formulario, no gente que compra.
+  **El identificador es el `lead_id` de TikTok y nada más** (`leads.tiktok_lead_id`, preservado
+  tal cual y guardado también en la bitácora, para que el envío se pueda explicar si la ficha se
+  borra o se fusiona). No hay equivalente del `ctwa_clid`: TikTok no manda referral al chat, así
+  que un lead del evaluador, del alta manual o de WhatsApp orgánico **no se reporta** — forzarlo
+  con un identificador aproximado le enseñaría a la campaña una conversión que no trajo. No viaja
+  ningún dato de contacto (con el `lead_id` la plataforma ya sabe quién es) ni ningún importe.
+  El `event_time` es el del **hecho real**: `tiktok_created_time` para el alta —un lead que la
+  importación rescató tres días después tiene las dos fechas muy separadas— y el momento del
+  movimiento para los cambios de etapa; un evento anterior a la generación del lead se **ajusta al
+  alta** en vez de perderse, porque la causa normal es una fecha corregida a mano. La
+  deduplicación es doble: `tiktok_capi_events` evita el reenvío local y el `event_id` es
+  **determinista** (`crm-<lead>-<evento>`), así que un reenvío llega con el mismo id y TikTok lo
+  descarta — con un id al azar, reabrir y volver a ganar se contaría como una segunda venta.
+  **Que TikTok acepte un evento no significa que la campaña optimice por él.** La aceptación es
+  del Events API; la optimización depende del `optimization_goal` del grupo y de que el evento
+  figure en el origen. Dar la segunda por buena porque pasó la primera es el fallo silencioso de
+  esta integración —el mismo que en Meta era mandar al conjunto de datos equivocado—, así que
+  `checkEligibility()` lee el objetivo de los grupos y viaja en la MISMA respuesta del `GET` y no
+  detrás de un botón: escondida detrás de un clic, nadie la hace. Sin servicio de anuncios dice
+  `no_comprobado` y **no** «todo bien». Y la Business API responde **HTTP 200 con el fallo**
+  **adentro** (`code` distinto de 0), así que se mira el código y no el estado: un rechazo anotado
+  como enviado no se reintenta nunca.
+  Los **nombres de evento no son libres**: el conjunto lo fija TikTok (`TIKTOK_EVENT_NAMES`), y
+  `saveMapping()` rechaza con 422 cualquier otro — un nombre propio se aceptaría en la pantalla y
+  se rechazaría en el envío, un error que recién se ve días después. Lo que el equipo elige es QUÉ
+  etapa manda cada evento estándar, y eso es una tabla y no una constante porque las columnas del
+  funnel las crea el equipo y sus claves se generan solas.
+  El disparador es `leadService.updateLeadStatus()` —el punto único por el que cambia la etapa— y
+  se lanza **sin esperarlo**, junto al de Meta: son dos llamadas y no una con un `if`, porque un
+  lead puede tener atribución de las dos plataformas y cada una tiene que enterarse del desenlace
+  del lead que ELLA mandó. Las credenciales son del `.env` (`TIKTOK_EVENTS_SOURCE_ID`,
+  `TIKTOK_EVENTS_ACCESS_TOKEN`, que cae a `TIKTOK_ACCESS_TOKEN`); sin ellas queda apagada.
+  **Lo que todavía no está verificado**: este entorno no tiene credenciales de TikTok, así que la
+  forma del payload sale de la documentación del Events API 2.0 y no de una respuesta observada —a
+  diferencia de la de Meta, que quedó funcionando el 20/10/2026 con los dos canales enviando—. El
+  primer envío real hay que mirarlo con `GET /api/tiktok-capi` en la mano.
 - **Cada quien ve sus leads.** Los dos tableros (y la Base de Datos) muestran solo los leads cuyo
   responsable es quien mira; `leads.manage_all` —"administrador del área comercial"— es el que ve el
   total y el **único** que puede asignar (`PATCH /api/leads/:id/assignee` lo exige, y el círculo de
