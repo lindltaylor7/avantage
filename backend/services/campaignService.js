@@ -739,8 +739,17 @@ export class CampaignService {
       const lost = lead && LOST_STATUSES.has(lead.status);
 
       const quote = won && lead ? quoteByLead.get(lead.id) : null;
-      const paidRevenue = lead ? paidByLead.get(lead.id) || 0 : 0;
-      const billedRevenue = lead ? billedByLead.get(lead.id) || 0 : 0;
+      /*
+       * `null` es "no se puede saber" y `0` es "no entró nada", y son dos
+       * cosas distintas que estaban colapsadas en cero. Un contacto SIN ficha
+       * en el CRM —alguien que escribió desde un anuncio y a quien nadie
+       * registró— no tiene cobros que consultar: decir "S/ 0" de él es
+       * afirmar que no pagó nada, cuando lo que pasa es que no sabemos. Con
+       * ficha, el cero sí es un cero: esa persona está en la base y no tiene
+       * ninguna cuota verificada.
+       */
+      const paidRevenue = lead ? paidByLead.get(lead.id) || 0 : null;
+      const billedRevenue = lead ? billedByLead.get(lead.id) || 0 : null;
       const hasProposal = lead ? proposalLeadIds.has(lead.id) : false;
 
       // Etapa comercial del reporte por anuncio: cuatro cajones excluyentes y
@@ -933,6 +942,22 @@ export class CampaignService {
         // y en la hoja se compara dígito por dígito contra el Ads Manager.
         adSourceId: bareSourceId(ad.adSourceId || origin.adId || null),
         platformLeadId: origin.platformLeadId,
+        /*
+         * Con qué evidencia se supo de dónde salió este lead. Sin esto la hoja
+         * afirma una plataforma y no deja comprobar cómo se llegó a ella, que
+         * es justo lo que hacía imposible auditar los leads atribuidos por
+         * coincidencia de teléfono (ver `attributionEvidence.js`).
+         */
+        attributionMethod: origin.method,
+        attributionConfidence: origin.confidence,
+        attributionReconciledAt: origin.reconciledAt,
+        /*
+         * La ficha que tiene atribución de más de una plataforma: el origen es
+         * el sellado y esto es lo que llegó después. Va a la hoja porque es la
+         * lista de fichas que hay que revisar, y escondido no se revisa.
+         */
+        attributionConflict: !!origin.conflict,
+        secondaryPlatforms: (origin.secondary || []).map((s) => s.platform).join(' + ') || null,
         // El id interno de la campaña del CRM, con el que el exportable
         // respeta el filtro de campañas de la pantalla.
         crmCampaignId: campaign?.id || null,
@@ -959,8 +984,9 @@ export class CampaignService {
 
         closedAt: c.closedAt || null,
         quotedValue: c.quotedValue,
-        paidRevenue: c.paidRevenue || 0,
-        billedRevenue: c.billedRevenue || 0
+        // Se pasan tal cual: `null` (sin ficha, no se puede saber) no es 0.
+        paidRevenue: c.paidRevenue ?? null,
+        billedRevenue: c.billedRevenue ?? null
       };
     };
 
@@ -1148,7 +1174,15 @@ export class CampaignService {
 
     for (const c of contacts) {
       const ad = this.#resolveContactAd(c, campaign, metaAds);
-      const key = ad.adId ? `ad:${ad.adId}` : `src:${ad.adSourceId || 'sin-origen'}`;
+      /*
+       * La plataforma entra en la clave. Los ids de anuncio de Meta y de
+       * TikTok son los dos numéricos y la hoja los publica pelados, así que
+       * sin esto dos anuncios distintos podrían caer en la misma fila y
+       * sumar sus leads y su dinero como si fueran uno. Es la misma razón por
+       * la que `campaign_ads.ad_source_id` lleva el prefijo `tt:`.
+       */
+      const plataforma = c.platform || 'na';
+      const key = ad.adId ? `${plataforma}|ad:${ad.adId}` : `${plataforma}|src:${ad.adSourceId || 'sin-origen'}`;
 
       let group = groups.get(key);
       if (!group) {
@@ -1170,6 +1204,14 @@ export class CampaignService {
           won: 0,
           paidRevenue: 0,
           billedRevenue: 0,
+          /*
+           * Contactos de este anuncio SIN ficha en el CRM. Su dinero no es cero,
+           * es desconocido, y una suma no puede sumar un desconocido: sin este
+           * conteo el total de abajo se lee como completo cuando puede no
+           * estarlo, que es el error que lleva a apagar un anuncio que sí
+           * vendía.
+           */
+          sinFicha: 0,
           quotedValue: 0
         };
         groups.set(key, group);
@@ -1183,6 +1225,7 @@ export class CampaignService {
       else if (c.crmStage === 'cotizacion') group.quotation += 1;
       else if (c.crmStage === 'descartado') group.discarded += 1;
       else group.followUp += 1;
+      if (c.paidRevenue === null) group.sinFicha += 1;
       group.paidRevenue += c.paidRevenue || 0;
       group.billedRevenue += c.billedRevenue || 0;
       group.quotedValue += c.quotedValue || 0;

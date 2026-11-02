@@ -859,6 +859,18 @@ antes de tocar el arranque de producción.
   reglas de redacción, y la diferencia importa: **`-` es "acá no hay nada que poner"** (un lead
   orgánico no tiene anuncio) y **`sin dato` es "esto vino de un anuncio y el dato falta"**, que es
   lo que marketing va a buscar y nunca trata como cero.
+  La hoja publica además **con qué evidencia** se supo cada origen —«Fuente de atribución»,
+  «Confianza de atribución», «Conciliado» y «Plataforma secundaria»— y la **versión del esquema**
+  (`LEAD_TRAIL_SCHEMA_VERSION`, hoy 2), por fila y no en una celda al margen: una fila copiada a
+  otra herramienta tiene que poder decir sola con qué esquema se generó, y sin la fuente la hoja
+  afirma una plataforma sin dejar comprobar cómo se llegó a ella.
+  Y hay una tercera convención, que es de dinero: **`0` es "no entró nada" y `sin dato` es "no se
+  puede saber"**. Un contacto sin ficha en el CRM no tiene cobros que consultar, y escribir «S/ 0»
+  de él afirma que no pagó nada cuando lo que pasa es que no lo sabemos — con eso se apaga un
+  anuncio que sí vendía. En el agregado por anuncio la diferencia viaja como `sinFicha`, el conteo
+  de contactos cuyo dinero no se puede sumar: una suma no puede sumar un desconocido, y sin el
+  conteo el total se lee como completo cuando puede no estarlo. La clave de agrupación por anuncio
+  lleva la **plataforma** adelante, porque los ids de Meta y de TikTok son los dos numéricos.
 - La **calificación comercial** es un dato propio en TRES estados (`leads.qualified`, vacío por
   defecto; `PATCH /api/leads/:id/qualified`, `LeadQualification.vue` en la ficha de los dos
   tableros). Antes se **derivaba** de que el lead hubiera salido de `nuevo`, con lo que decía "Sí"

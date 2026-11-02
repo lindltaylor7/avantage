@@ -87,6 +87,35 @@ const DATETIME_FMT = 'dd/mm/yyyy hh:mm';
  */
 const TEXT_FMT = '@';
 
+/*
+ * Versión del esquema de la hoja "Ruta de leads".
+ *
+ * Va como COLUMNA y no solo en una celda al margen: esta hoja es un contrato
+ * con marketing y su importador busca las columnas por el nombre del
+ * encabezado, así que una fila copiada a otra herramienta tiene que poder
+ * decir sola con qué esquema se generó. Sin eso, el día que una columna cambie
+ * de significado no hay forma de saber si un archivo viejo se puede comparar
+ * con uno nuevo.
+ *
+ *  1 = hasta el 31/10/2026. El origen se deducía en cada lectura del orden en
+ *      que estaban escritas las columnas de atribución, y no se publicaba con
+ *      qué evidencia se lo supo.
+ *  2 = desde el 01/11/2026. El origen es un sello (`leads.origin_platform`) y
+ *      la hoja publica la fuente de la atribución, su confianza, la fecha de
+ *      conciliación y la plataforma secundaria. "Cobrado" distingue el cero
+ *      del desconocido.
+ */
+export const LEAD_TRAIL_SCHEMA_VERSION = 2;
+
+/** Cómo se nombra en la hoja cada método de emparejamiento. */
+const ATTRIBUTION_METHOD_LABELS = {
+  platform_lead_id: 'ID del lead en la plataforma',
+  note_marker: 'Marcador en las notas',
+  webhook: 'Recepción del webhook',
+  phone_match: 'Coincidencia de teléfono',
+  manual: 'Cargado a mano'
+};
+
 /**
  * Convierte el `YYYY-MM-DD` de Meta a una fecha local. `new Date('2026-09-17')`
  * la interpretaría como UTC y en Perú (UTC-5) retrocedería un día.
@@ -281,6 +310,16 @@ function leadTrailColumns(currency) {
     { header: 'ID de origen', key: 'adSourceId', width: 20, fmt: TEXT_FMT },
     { header: 'Titular del anuncio', key: 'adHeadline', width: 38 },
     { header: 'ID del lead en la plataforma', key: 'platformLeadId', width: 30, fmt: TEXT_FMT },
+    // Con qué evidencia se supo todo lo anterior. Sin estas tres la hoja
+    // afirma una plataforma y no deja comprobar cómo se llegó a ella.
+    { header: 'Fuente de atribución', key: 'attributionMethod', width: 26 },
+    { header: 'Confianza de atribución', key: 'attributionConfidence', width: 22 },
+    { header: 'Conciliado', key: 'attributionReconciledAt', width: 18, fmt: DATETIME_FMT },
+    // La ficha con atribución de más de una plataforma: el origen es el
+    // sellado y acá sale lo que llegó después. Es la lista de lo que hay que
+    // revisar, y escondida no se revisa.
+    { header: 'Plataforma secundaria', key: 'secondaryPlatforms', width: 22 },
+    { header: 'Versión del esquema', key: 'schemaVersion', width: 19, fmt: INT_FMT },
     // ── Qué pasó después ──
     // Cuándo entró el lead EN LA PLATAFORMA (`created_time`), que no es
     // cuándo se dio de alta acá: un lead que la conciliación rescató tres
@@ -598,7 +637,28 @@ export class CampaignExportService {
         closedAt: toLocalDateTime(row.closedAt),
         // Sin lead en el CRM no hay columna: el contacto escribió pero nadie
         // lo registró todavía, y decirlo es más útil que dejar la celda vacía.
-        funnelColumn: row.funnelColumn || 'Sin lead en el CRM'
+        funnelColumn: row.funnelColumn || 'Sin lead en el CRM',
+
+        /*
+         * Las dos convenciones de esta hoja, aplicadas también acá: `-` es "no
+         * corresponde" y `sin dato` es "esto vino de un anuncio y el dato
+         * falta". Un lead orgánico no tiene fuente de atribución que publicar;
+         * uno pagado que no la tiene es justo lo que marketing va a buscar.
+         */
+        attributionMethod: ATTRIBUTION_METHOD_LABELS[row.attributionMethod] || faltante,
+        attributionConfidence: row.attributionConfidence || faltante,
+        attributionReconciledAt: toLocalDateTime(row.attributionReconciledAt),
+        secondaryPlatforms: row.secondaryPlatforms || '-',
+        schemaVersion: LEAD_TRAIL_SCHEMA_VERSION,
+
+        /*
+         * `null` es "no se puede saber" y `0` es "no entró nada". Un contacto
+         * sin ficha en el CRM no tiene cobros que consultar, y escribir S/ 0
+         * de él afirma que no pagó nada cuando lo que pasa es que no lo
+         * sabemos — con eso se apaga un anuncio que sí vendía.
+         */
+        paidRevenue: row.paidRevenue ?? 'sin dato',
+        billedRevenue: row.billedRevenue ?? 'sin dato'
       });
     }
 
