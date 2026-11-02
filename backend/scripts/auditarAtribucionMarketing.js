@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { db } from '../db/connection.js';
 import { leadOrigin, LEAD_ORIGIN_COLUMNS, PLATFORMS, bareSourceId } from '../services/leadOrigin.js';
 import { levelLabel, LEVELS } from '../services/smartPlusLevel.js';
+import { buildStageResolver, loadFunnelStageIndex } from '../services/funnelStageLabel.js';
 
 /**
  * ¿Dice la base lo que dice la hoja de marketing?
@@ -194,17 +195,42 @@ async function main() {
   }
 
   // -- 5. Sin campaña asignada ----------------------------------------------
+  /*
+   * "Sin campaña" son DOS cosas y hay que separarlas, porque se arreglan
+   * distinto y una de las dos no está rota.
+   *
+   * `leadOrigin()` es puro y no consulta tablas, así que de un clic que abre
+   * WhatsApp devuelve el id del anuncio y `campaignName: null`: la campaña de
+   * ese anuncio la resuelve el reporte cruzando `ctwa_ad_id` contra
+   * `campaign_ads`. Contarlos como "sin campaña" infla el problema — en el
+   * corte del 27/10 al 02/11 daba 76 donde marketing veía 13 — y manda a
+   * investigar 63 leads que tienen su anuncio perfectamente identificado.
+   *
+   * El que de verdad no tiene de dónde agarrarse es el que no trae NINGÚN id
+   * de anuncio: ese es el que no va a aparecer en ninguna campaña.
+   */
   titulo('5) Leads sin campaña asignada, y qué plataforma les corresponde');
   const sinCampana = resueltos.filter(({ origin }) => !origin.campaignId && !origin.campaignName);
-  linea(`   ${sinCampana.length} de ${leads.length} lead(s) del rango.`);
-  linea('   "Plataforma = Meta" sin campaña es legítimo en dos casos y solo en esos: que el');
-  linea('   `source` diga "... Ads" (se sabe la plataforma, no el anuncio) o que el lead');
-  linea('   traiga un clic de WhatsApp (ctwa) sin id de anuncio. Cualquier otro es "Otro".');
+  const conAnuncio = sinCampana.filter(({ origin }) => origin.adId);
+  const huerfanos = sinCampana.filter(({ origin }) => !origin.adId);
+
+  linea(`   ${huerfanos.length} lead(s) de ${leads.length} sin ningún id de anuncio:`);
+  linea('   esos son los que no van a figurar en ninguna campaña.');
+  if (conAnuncio.length) {
+    linea();
+    linea(`   (Otros ${conAnuncio.length} traen id de anuncio pero su campaña no se resuelve acá:`);
+    linea('    son clics que abren WhatsApp, y el reporte les pone la campaña cruzando');
+    linea('    `ctwa_ad_id` contra `campaign_ads`. No son un problema y no se listan.)');
+  }
   linea();
-  for (const { lead, origin } of sinCampana) {
+  linea('   "Plataforma = Meta" sin anuncio es legítimo solo si el `source` dice "... Ads"');
+  linea('   (se sabe la plataforma, no el anuncio). Cualquier otro caso es "Otro", y el');
+  linea('   que entró por WhatsApp sin referral de anuncio es "Orgánico" — que NO es lo');
+  linea('   mismo que "sin plataforma": se sabe por dónde llegó, no hay anuncio detrás.');
+  linea();
+  for (const { lead, origin } of huerfanos) {
     const sospechoso = origin.platform === PLATFORMS.meta
       && !lead.ctwa_clid
-      && !lead.ctwa_ad_id
       && !/ ads|meta ads/i.test(String(lead.source || ''));
     linea(`   ${sospechoso ? '(!)' : '   '} #${lead.id} ${lead.full_name}`
       + ` · ${origin.platform} / ${origin.channel}`
@@ -228,6 +254,13 @@ async function main() {
   const proyectos = await db('projects').select('lead_id', 'created_at').whereIn('lead_id', ids);
   const proyectoDe = new Map(proyectos.map((p) => [p.lead_id, p.created_at]));
 
+  /*
+   * Las claves de las columnas las genera el servidor (`col_mtc9ogeu_kpk`), así
+   * que una etapa impresa en crudo no le dice nada a nadie. Se nombra con el
+   * mismo resolvedor que el tablero y la bandeja de WhatsApp.
+   */
+  const stageOf = buildStageResolver(await loadFunnelStageIndex());
+
   const conDinero = resueltos.filter(({ lead }) => Number(lead.total_amount) > 0
     || cuotas.some((c) => c.lead_id === lead.id)
     || proyectoDe.has(lead.id));
@@ -243,7 +276,8 @@ async function main() {
     linea();
     linea(`   #${lead.id} ${lead.full_name} · ${origin.platform}`
       + ` · campaña ${origin.campaignName || origin.campaignId || 'sin campaña'}`);
-    linea(`      etapa ${lead.status} · proyecto abierto ${dia(proyectoDe.get(lead.id))}`
+    const etapa = stageOf(lead);
+    linea(`      etapa ${etapa?.label || lead.status} · proyecto abierto ${dia(proyectoDe.get(lead.id))}`
       + `${lead.deal_cancelled_at ? ` · VENTA NO CONCRETADA ${dia(lead.deal_cancelled_at)}` : ''}`);
     linea(`      precio pactado ${money(lead.total_amount)}`
       + ` · cobrado (verificado) ${money(suma('verificado'))}`
