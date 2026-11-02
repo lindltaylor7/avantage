@@ -12,7 +12,8 @@ import {
 import { CommissionService } from './commissionService.js';
 import { LeadRoutingService } from './leadRoutingService.js';
 import { MetaConversionsService } from './metaConversionsService.js';
-import { ctwaAttribution } from './leadOrigin.js';
+import { ctwaAttribution, leadOrigin } from './leadOrigin.js';
+import { ATTRIBUTION_METHODS, confidenceFor, writesAttribution } from './attributionEvidence.js';
 
 /**
  * Dígitos con los que se compara un teléfono.
@@ -381,7 +382,7 @@ export class LeadService {
     const assignedText = assignedTo || 'Kevin';
     if (!assignedUser) assignedUser = await this.users.findCommercialByName(assignedText);
 
-    const [id] = await db('leads').insert({
+    const fila = {
       topic: topic || 'Asesoría de Tesis',
       academic_level: academicLevel || 'Pregrado (Bachiller/Título)',
       field_of_study: fieldOfStudy || 'General',
@@ -438,7 +439,32 @@ export class LeadService {
       ctwa_source_type: ctwaSourceType || null,
       ctwa_headline: ctwaHeadline || null,
       ctwa_created_time: ctwaCreatedTime ? new Date(ctwaCreatedTime) : null
-    });
+    };
+
+    /*
+     * El sello del origen, escrito UNA vez y en el único momento en que se
+     * sabe con certeza: el alta. Después de esto, ninguna conciliación lo
+     * reescribe — lo que llegue más tarde se informa como secundario (ver
+     * `leadOrigin()`). Antes el origen se DEDUCÍA en cada lectura del orden
+     * en que estaban escritas las columnas, así que una ficha de Meta a la
+     * que se le colgaba un formulario de TikTok pasaba a ser de TikTok en
+     * todas las hojas de marketing.
+     *
+     * Y queda escrito con qué evidencia: un id que emitió la plataforma es
+     * alta (no se llega a él por descarte), lo que cargó una persona es
+     * media, y el resto no tiene atribución que respaldar y va en null, que
+     * es información y no un hueco.
+     */
+    const method = (tiktokLeadId || metaLeadgenId)
+      ? ATTRIBUTION_METHODS.platformLeadId
+      : ctwaClid ? ATTRIBUTION_METHODS.webhook
+      : createdBy ? ATTRIBUTION_METHODS.manual
+      : null;
+    fila.origin_platform = leadOrigin(fila).platform;
+    fila.attribution_method = method;
+    fila.attribution_confidence = confidenceFor(method);
+
+    const [id] = await db('leads').insert(fila);
     return this.getLeadById(id);
   }
 
@@ -814,28 +840,46 @@ export class LeadService {
    * marcador y las respuestas del formulario a las notas, y completa la
    * atribución de Meta solo si estaba vacía.
    */
-  async attachMetaLeadToExisting(lead, { leadgenId, formId, adId, adsetId, campaignId, adName, adsetName, campaignName, platform, createdTime, note }) {
+  async attachMetaLeadToExisting(lead, { leadgenId, formId, adId, adsetId, campaignId, adName, adsetName, campaignName, platform, createdTime, note, method = null }) {
     const patch = {};
-    if (!lead.meta_leadgen_id && leadgenId) patch.meta_leadgen_id = leadgenId;
-    if (!lead.meta_form_id && formId) patch.meta_form_id = formId;
-    if (!lead.meta_ad_id && adId) patch.meta_ad_id = adId;
-    if (!lead.meta_adset_id && adsetId) patch.meta_adset_id = adsetId;
-    if (!lead.meta_campaign_id && campaignId) patch.meta_campaign_id = campaignId;
-    if (!lead.meta_ad_name && adName) patch.meta_ad_name = adName;
-    if (!lead.meta_adset_name && adsetName) patch.meta_adset_name = adsetName;
-    if (!lead.meta_campaign_name && campaignName) patch.meta_campaign_name = campaignName;
-    if (!lead.meta_platform && platform) patch.meta_platform = platform;
-    if (!lead.meta_created_time && createdTime) patch.meta_created_time = new Date(createdTime);
+
+    /*
+     * La misma regla que en TikTok, y por la misma razón: solo la evidencia
+     * independiente —el `leadgen_id` que emitió Meta para este envío, o su
+     * marcador en las notas— habilita escribir la atribución. Un match por los
+     * últimos 9 dígitos del teléfono alcanza para colgar el envío de la ficha
+     * que ya existe (una persona es un lead) y no para decir de qué anuncio
+     * salió.
+     *
+     * Acá el riesgo es menor que en TikTok porque el webhook trae el envío con
+     * su id y el camino por teléfono es el raro, pero la regla se escribe igual
+     * en los dos lados: la próxima conciliación que alguien agregue va a copiar
+     * la que encuentre, y si una de las dos es laxa el agujero vuelve.
+     */
+    const puedeAtribuir = writesAttribution(method);
+
+    if (puedeAtribuir) {
+      if (!lead.meta_leadgen_id && leadgenId) patch.meta_leadgen_id = leadgenId;
+      if (!lead.meta_form_id && formId) patch.meta_form_id = formId;
+      if (!lead.meta_ad_id && adId) patch.meta_ad_id = adId;
+      if (!lead.meta_adset_id && adsetId) patch.meta_adset_id = adsetId;
+      if (!lead.meta_campaign_id && campaignId) patch.meta_campaign_id = campaignId;
+      if (!lead.meta_ad_name && adName) patch.meta_ad_name = adName;
+      if (!lead.meta_adset_name && adsetName) patch.meta_adset_name = adsetName;
+      if (!lead.meta_campaign_name && campaignName) patch.meta_campaign_name = campaignName;
+      if (!lead.meta_platform && platform) patch.meta_platform = platform;
+      if (!lead.meta_created_time && createdTime) patch.meta_created_time = new Date(createdTime);
+    }
 
     // El marcador va SIEMPRE a las notas aunque la columna ya esté ocupada por
     // un envío anterior: es lo que hace que la conciliación reconozca este
     // leadgen_id como ya visto y no lo reporte como faltante para siempre.
     const notasPrevias = String(lead.additional_notes || '').trim();
     if (note && !notasPrevias.includes(`[Meta leadgen_id=${leadgenId}]`)) {
-      patch.additional_notes = notasPrevias ? `${notasPrevias}
-
-${note}` : note;
+      patch.additional_notes = notasPrevias ? `${notasPrevias}\n\n${note}` : note;
     }
+
+    Object.assign(patch, this.#evidenceFor(lead, method));
 
     if (Object.keys(patch).length) await db('leads').where({ id: lead.id }).update(patch);
     return this.getLeadById(lead.id);
@@ -859,27 +903,78 @@ ${note}` : note;
    * WhatsApp y después llenó el formulario de TikTok es el caso normal, no la
    * excepción.
    */
-  async attachTikTokLeadToExisting(lead, { leadId, pageId, adId, adgroupId, campaignId, adName, adgroupName, campaignName, createdTime, note }) {
+  async attachTikTokLeadToExisting(lead, { leadId, pageId, adId, adgroupId, campaignId, adName, adgroupName, campaignName, createdTime, note, method = null }) {
     const patch = {};
-    if (!lead.tiktok_lead_id && leadId) patch.tiktok_lead_id = leadId;
-    if (!lead.tiktok_page_id && pageId) patch.tiktok_page_id = pageId;
-    if (!lead.tiktok_ad_id && adId) patch.tiktok_ad_id = adId;
-    if (!lead.tiktok_adgroup_id && adgroupId) patch.tiktok_adgroup_id = adgroupId;
-    if (!lead.tiktok_campaign_id && campaignId) patch.tiktok_campaign_id = campaignId;
-    if (!lead.tiktok_ad_name && adName) patch.tiktok_ad_name = adName;
-    if (!lead.tiktok_adgroup_name && adgroupName) patch.tiktok_adgroup_name = adgroupName;
-    if (!lead.tiktok_campaign_name && campaignName) patch.tiktok_campaign_name = campaignName;
-    if (!lead.tiktok_created_time && createdTime) patch.tiktok_created_time = new Date(createdTime);
 
+    /*
+     * Acá está la regla que costó un error real. `method` es CÓMO se encontró
+     * esta ficha, y solo la evidencia independiente —el id que emitió TikTok
+     * para este envío, o el marcador que ese id dejó en las notas— habilita
+     * escribir la atribución. Un match por los últimos 9 dígitos del teléfono
+     * NO alcanza: con las dos plataformas corriendo sobre el mismo público, el
+     * contacto que llenó el formulario de TikTok y además escribió por WhatsApp
+     * desde un anuncio de Meta es el caso normal, y escribirle `tiktok_*` lo
+     * convertía en un lead de TikTok en todas las hojas de marketing.
+     *
+     * El `tiktok_lead_id` está gateado como el resto a propósito: de esa
+     * columna cuelga el bloque de TikTok de `leadOrigin()`, así que escribirla
+     * ES atribuir, no solo etiquetar.
+     */
+    const puedeAtribuir = writesAttribution(method);
+
+    if (puedeAtribuir) {
+      if (!lead.tiktok_lead_id && leadId) patch.tiktok_lead_id = leadId;
+      if (!lead.tiktok_page_id && pageId) patch.tiktok_page_id = pageId;
+      if (!lead.tiktok_ad_id && adId) patch.tiktok_ad_id = adId;
+      if (!lead.tiktok_adgroup_id && adgroupId) patch.tiktok_adgroup_id = adgroupId;
+      if (!lead.tiktok_campaign_id && campaignId) patch.tiktok_campaign_id = campaignId;
+      if (!lead.tiktok_ad_name && adName) patch.tiktok_ad_name = adName;
+      if (!lead.tiktok_adgroup_name && adgroupName) patch.tiktok_adgroup_name = adgroupName;
+      if (!lead.tiktok_campaign_name && campaignName) patch.tiktok_campaign_name = campaignName;
+      if (!lead.tiktok_created_time && createdTime) patch.tiktok_created_time = new Date(createdTime);
+    }
+
+    /*
+     * El marcador va SIEMPRE, incluso con evidencia débil y aunque la columna
+     * ya esté ocupada por otro envío: es lo que hace que la importación
+     * reconozca este `lead_id` como ya visto y no lo reporte como faltante en
+     * cada corrida. Es un acuse de "este envío ya se miró en esta ficha", no
+     * una afirmación sobre de dónde salió el lead.
+     */
     const notasPrevias = String(lead.additional_notes || '').trim();
     if (note && !notasPrevias.includes(`[TikTok lead_id=${leadId}]`)) {
-      patch.additional_notes = notasPrevias ? `${notasPrevias}
-
-${note}` : note;
+      patch.additional_notes = notasPrevias ? `${notasPrevias}\n\n${note}` : note;
     }
+
+    Object.assign(patch, this.#evidenceFor(lead, method));
 
     if (Object.keys(patch).length) await db('leads').where({ id: lead.id }).update(patch);
     return this.getLeadById(lead.id);
+  }
+
+  /**
+   * Las columnas de evidencia que deja una conciliación al mirar esta ficha.
+   *
+   * La fecha se escribe aunque la atribución no se haya podido resolver: "ya
+   * se comparó contra la plataforma y quedó pendiente" es distinto de "nunca se
+   * la comparó", y esa es la diferencia entre un pendiente y un agujero que
+   * nadie vio.
+   *
+   * El método NO se degrada: una ficha emparejada en su día por su `lead_id`
+   * no pasa a `phone_match` porque una corrida posterior la encontrara por el
+   * teléfono. Lo mejor que se supo sobre esta ficha sigue siendo lo que se
+   * supo.
+   */
+  #evidenceFor(lead, method) {
+    if (!method) return {};
+
+    const patch = { attribution_reconciled_at: new Date() };
+    const yaFuerte = lead.attribution_confidence === 'alta';
+    if (!yaFuerte || writesAttribution(method)) {
+      patch.attribution_method = method;
+      patch.attribution_confidence = confidenceFor(method);
+    }
+    return patch;
   }
 
   /**
@@ -1054,6 +1149,33 @@ ${note}` : note;
       .whereNotNull('meta_ad_id')
       .andWhere('meta_ad_id', '!=', '');
     return new Set(rows.map((row) => String(row.meta_leadgen_id)));
+  }
+
+  /**
+   * TODAS las fichas cuyo teléfono coincide, y no solo la que gana el
+   * desempate.
+   *
+   * `findByPhone()` elige una para que el bot y las altas no dupliquen a una
+   * persona, y para eso el desempate está bien. Pero para ATRIBUIR —decirle
+   * a marketing de qué anuncio salió este lead— quedarse con la primera es
+   * una moneda al aire: dos fichas con el mismo sufijo de 9 dígitos pueden
+   * ser dos personas distintas, y el presupuesto se reparte con eso.
+   *
+   * Por eso la conciliación pregunta por acá: con más de una candidata el
+   * caso va a `attribution_conflicts` para que lo resuelva una persona, en
+   * vez de escribirle la campaña a la que el ORDER BY dejó arriba.
+   */
+  async findAllByPhone(phone) {
+    const exact = await db('leads').where({ phone });
+    if (exact.length) return exact;
+
+    const key = phoneMatchKey(phone);
+    if (!key) return [];
+
+    return db('leads')
+      .whereRaw(`${PHONE_MATCH_KEY_SQL} = ?`, [key])
+      .orderByRaw('CASE WHEN leads.sales_funnel_at IS NULL THEN 1 ELSE 0 END')
+      .orderBy('leads.created_at', 'desc');
   }
 
   /**

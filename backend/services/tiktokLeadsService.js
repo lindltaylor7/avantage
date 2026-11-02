@@ -4,6 +4,14 @@ import {
   extractMetaLeadForm,
   formatCustomFieldsNote
 } from './metaLeadFields.js';
+import {
+  ATTRIBUTION_METHODS,
+  CONFLICT_REASONS,
+  demoteLaunderedMarker,
+  resolveMatch,
+  writesAttribution
+} from './attributionEvidence.js';
+import { phoneMatchKey } from './leadService.js';
 
 /**
  * Importación de los leads de **formulario instantáneo de TikTok** (TikTok
@@ -277,6 +285,65 @@ export function parseTikTokTime(value) {
 }
 
 /**
+ * La atribución de un envío de TikTok, con los nombres de campo que esperan
+ * `attachTikTokLeadToExisting` y `createProspect`.
+ *
+ * Vive en un solo sitio porque la escriben los DOS caminos —el alta y la
+ * conciliación que completa fichas— y es justo la clase de objeto que, copiado,
+ * termina guardando un campo de más en uno y de menos en el otro: ahí las dos
+ * mitades de la misma tabla dejan de ser comparables, que es exactamente lo que
+ * esta importación existe para medir.
+ *
+ * Los nombres se copian tal como los manda TikTok y no se resuelven después
+ * contra las métricas sincronizadas: ahí solo están los anuncios que siguen
+ * entregando, así que un lead de un video pausado salía en la hoja de marketing
+ * sin anuncio teniendo su `ad_id` guardado.
+ */
+export function atribucionDe(lead = {}) {
+  return {
+    leadId: lead.leadId ? String(lead.leadId) : null,
+    pageId: lead.pageId || null,
+    adId: lead.adId || null,
+    adgroupId: lead.adgroupId || null,
+    campaignId: lead.campaignId || null,
+    adName: lead.adName || null,
+    adgroupName: lead.adgroupName || null,
+    campaignName: lead.campaignName || null
+  };
+}
+
+/**
+ * Anota un pendiente desde el camino de alta, que es una función de módulo y no
+ * tiene el servicio a mano.
+ *
+ * Nunca puede tumbar la importación: traer los leads que faltan es el objetivo,
+ * y perderlos porque la tabla de pendientes falló sería cambiar un problema por
+ * uno peor.
+ */
+async function recordPersistConflict(conflicts, { leadId, reason, phone, candidates, payload }) {
+  const ids = (candidates || []).map((c) => c?.id).filter(Boolean);
+
+  if (!conflicts) {
+    console.warn(`⚠️ [TikTok Leads] Lead ${leadId}: ${reason} (fichas ${ids.join(', ') || 'ninguna'}). `
+      + 'La atribución NO se escribió y no hay dónde anotar el pendiente.');
+    return;
+  }
+
+  try {
+    await conflicts.record({
+      platform: 'TikTok',
+      platformLeadId: leadId,
+      phoneKey: phoneMatchKey(phone),
+      reason,
+      candidateLeadIds: ids,
+      payload
+    });
+  } catch (error) {
+    console.error(`❌ [TikTok Leads] No se pudo anotar el pendiente del lead ${leadId}:`, error.message);
+  }
+}
+
+/**
  * Da de alta (o cuelga de la ficha que ya existe) un lead de formulario de
  * TikTok. Es `persistMetaLead` para la otra plataforma y se mantiene como
  * **camino único**: la importación y cualquier cosa que venga después —un
@@ -284,7 +351,7 @@ export function parseTikTokTime(value) {
  * entrar por acá, o las dos mitades de la misma tabla dejan de ser
  * comparables.
  */
-export async function persistTikTokLead(leadService, data) {
+export async function persistTikTokLead(leadService, data, { conflicts = null } = {}) {
   const leadId = String(data.leadId || '');
   const form = extractMetaLeadForm(data.fieldData);
 
@@ -308,35 +375,69 @@ export async function persistTikTokLead(leadService, data) {
     console.warn(`⚠️ [TikTok Leads] El lead ${leadId} llegó sin celular. Preguntas recibidas: ${keys}`);
   }
 
-  const atribucion = {
-    leadId: leadId || null,
-    pageId: data.pageId || null,
-    adId: data.adId || null,
-    adgroupId: data.adgroupId || null,
-    campaignId: data.campaignId || null,
-    // Los nombres se copian tal como los manda TikTok. Antes el nombre del
-    // anuncio solo existía si la campaña estaba sincronizada y su métrica
-    // seguía en la ventana consultada, así que un lead de un video pausado
-    // salía en la hoja de marketing sin anuncio.
-    adName: data.adName || null,
-    adgroupName: data.adgroupName || null,
-    campaignName: data.campaignName || null,
-    createdTime: data.createdTime || null
-  };
+  const atribucion = { ...atribucionDe({ ...data, leadId }), createdTime: data.createdTime || null };
 
   /*
    * Una persona es un lead, no uno por cada formulario que llena. Acá pesa
    * todavía más que en Meta: estas campañas corren a la vez que las de Meta
    * sobre el mismo público, así que el contacto que ya escribió por WhatsApp
    * y además llenó el formulario de TikTok es el caso normal.
+   *
+   * Pero reconocer a la persona y acreditarle el anuncio son dos preguntas
+   * distintas, y el teléfono solo contesta la primera. Por eso se pide primero
+   * el `lead_id` —evidencia que emitió TikTok para este envío— y las candidatas
+   * por teléfono se piden TODAS: con más de una no hay nada que elegir, hay un
+   * caso que resolver (ver `attributionEvidence.js`).
    */
-  const existente = phone ? await leadService.findByPhone(phone) : null;
-  if (existente) {
-    const lead = await leadService.attachTikTokLeadToExisting(existente, {
-      ...atribucion,
-      note: notesParts.join('\n')
+  const porId = leadId ? await leadService.findByTikTokLeadId(leadId) : null;
+  const porTelefono = (!porId && phone) ? await leadService.findAllByPhone(phone) : [];
+  const match = resolveMatch({ byPlatformLeadId: porId, phoneCandidates: porTelefono });
+  const method = demoteLaunderedMarker(match.method, match.lead);
+
+  if (match.ambiguous) {
+    /*
+     * Dos fichas con el mismo sufijo de teléfono pueden ser dos personas. No se
+     * elige ninguna y tampoco se abre una tercera: la persona ya está en el
+     * funnel —por eso hay fichas que coinciden— así que lo único pendiente es
+     * de qué anuncio salió, y eso queda anotado con las candidatas y con los
+     * datos del envío, que es lo que hace falta para decidirlo después (TikTok
+     * conserva los leads de un formulario solo 90 días).
+     */
+    await recordPersistConflict(conflicts, {
+      leadId,
+      reason: CONFLICT_REASONS.multiplePhoneMatch,
+      phone,
+      candidates: match.candidates,
+      payload: { ...atribucion, form }
     });
-    return { lead, created: false };
+    return { lead: null, created: false, pendiente: true };
+  }
+
+  if (match.lead) {
+    const lead = await leadService.attachTikTokLeadToExisting(match.lead, {
+      ...atribucion,
+      note: notesParts.join('\n'),
+      method
+    });
+
+    /*
+     * Con el teléfono como única evidencia el envío queda colgado de la ficha
+     * —el marcador en las notas— y su atribución NO escrita. Es la diferencia
+     * entre "esta persona también llenó un formulario de TikTok" y "esta
+     * persona vino de TikTok": lo segundo decide presupuesto.
+     */
+    if (!writesAttribution(method)) {
+      await recordPersistConflict(conflicts, {
+        leadId,
+        reason: CONFLICT_REASONS.phoneOnlyMatch,
+        phone,
+        candidates: [match.lead],
+        payload: { ...atribucion, form }
+      });
+      return { lead, created: false, pendiente: true };
+    }
+
+    return { lead, created: false, pendiente: false };
   }
 
   const lead = await leadService.createProspect({
@@ -364,7 +465,7 @@ export async function persistTikTokLead(leadService, data) {
     tiktokCreatedTime: atribucion.createdTime
   });
 
-  return { lead, created: true };
+  return { lead, created: true, pendiente: false };
 }
 
 /** Las columnas que esta importación escribe, para saber si cambió algo. */
@@ -381,9 +482,16 @@ export class TikTokLeadsService {
    *   tratamiento de los errores que TikTok devuelve dentro de un HTTP 200.
    * @param {object} deps.leadService
    */
-  constructor({ ads, leadService, fetchImpl } = {}) {
+  constructor({ ads, leadService, conflicts = null, fetchImpl } = {}) {
     this.ads = ads;
     this.leadService = leadService;
+    /*
+     * Dónde se anotan los emparejamientos que no se pudieron resolver. Es
+     * opcional para no romper a los tests que construyen el servicio con lo
+     * mínimo, pero sin él un caso ambiguo se descarta en silencio — y un
+     * lead descartado en silencio es lo que esto vino a terminar.
+     */
+    this.conflicts = conflicts;
     this.fetch = fetchImpl || ((...args) => globalThis.fetch(...args));
   }
 
@@ -634,44 +742,125 @@ export class TikTokLeadsService {
   }
 
   /**
-   * Le escribe a una ficha que ya existe la atribución de TikTok que le falte.
+   * Le escribe a una ficha que ya existe la atribución de TikTok que le falte
+   * —**si** hay con qué respaldarla—.
    *
-   * Devuelve `true` solo si algo cambió, para que el reporte no cuente como
-   * arreglado un lead que ya estaba completo. La ficha se busca por el
-   * `lead_id` de TikTok —su columna o el marcador de las notas— y, como última
-   * opción, por teléfono: así se recupera también el lead que entró por
-   * WhatsApp antes de que su formulario se importara.
+   * Acá vivía el error que destapó todo esto. La ficha se buscaba por el
+   * `lead_id` de TikTok y, si no aparecía, por los **últimos 9 dígitos del
+   * teléfono**; con eso bastaba para escribirle campaña, grupo y anuncio. Como
+   * `leadOrigin()` preguntaba por las columnas `tiktok_*` antes que por las
+   * demás, esa ficha pasaba a ser "TikTok" en todas las hojas de marketing y
+   * tapaba su origen real. Y lo hacía sola: la conciliación diaria corre con
+   * `apply: true`.
+   *
+   * Ahora el teléfono alcanza para **colgar el envío** de la ficha (una persona
+   * es un lead, no uno por cada formulario que llena) y no para **atribuirlo**.
+   * Los tres desenlaces, y ninguno escribe una campaña que no se pueda
+   * respaldar:
+   *
+   *  - evidencia independiente (el `lead_id` o su marcador): se atribuye;
+   *  - un solo candidato por teléfono: se marca la ficha, se anota el pendiente
+   *    y la atribución queda sin escribir;
+   *  - varios candidatos: no se toca ninguna ficha y se anota el pendiente con
+   *    todas las candidatas, que es lo que una persona necesita para decidir.
+   *
+   * Devuelve `{ completado, pendiente }` en vez de un booleano porque el
+   * reporte tiene que poder decir las dos cosas: un pendiente no es un lead
+   * arreglado, pero tampoco es un lead que no pasó nada.
    */
   async #completeAttribution(lead) {
-    const ficha = await this.leadService.findByTikTokLeadId(lead.leadId)
-      || await this.#findByFormPhone(lead);
-    if (!ficha) return false;
+    const form = extractMetaLeadForm(lead.fieldData);
+    const porId = await this.leadService.findByTikTokLeadId(lead.leadId);
 
-    const antes = await this.leadService.getLeadById(ficha.id);
-    await this.leadService.attachTikTokLeadToExisting(ficha, {
-      leadId: lead.leadId,
-      pageId: lead.pageId || null,
-      adId: lead.adId || null,
-      adgroupId: lead.adgroupId || null,
-      campaignId: lead.campaignId || null,
-      adName: lead.adName || null,
-      adgroupName: lead.adgroupName || null,
-      campaignName: lead.campaignName || null,
+    /*
+     * Las candidatas por teléfono se piden TODAS y no la que gana el desempate:
+     * quedarse con la primera es la asignación arbitraria que esto evita. Solo
+     * se pregunta si el id no resolvió nada, para no gastar la consulta en el
+     * camino bueno, que es el normal.
+     */
+    const porTelefono = (!porId && form.phone)
+      ? await this.leadService.findAllByPhone(form.phone)
+      : [];
+
+    const match = resolveMatch({ byPlatformLeadId: porId, phoneCandidates: porTelefono });
+    /*
+     * El marcador de las notas vale lo que valió la evidencia que lo escribió:
+     * si una corrida anterior colgó este envío por teléfono, encontrarlo hoy
+     * por su marcador no lo vuelve evidencia fuerte (ver
+     * `demoteLaunderedMarker`).
+     */
+    const method = demoteLaunderedMarker(match.method, match.lead);
+    // El payload lleva además las respuestas del formulario: quien resuelva
+    // el pendiente las necesita, y TikTok conserva los leads de un formulario
+    // solo 90 días — pasado ese plazo ya no hay a quién volver a pedírselas.
+    const payload = { ...atribucionDe(lead), form };
+
+    if (match.ambiguous) {
+      await this.#recordConflict(lead, {
+        reason: CONFLICT_REASONS.multiplePhoneMatch,
+        phone: form.phone,
+        candidates: match.candidates,
+        payload
+      });
+      return { completado: false, pendiente: true };
+    }
+
+    if (!match.lead) return { completado: false, pendiente: false };
+
+    const antes = await this.leadService.getLeadById(match.lead.id);
+    await this.leadService.attachTikTokLeadToExisting(match.lead, {
+      ...payload,
       createdTime: parseTikTokTime(lead.createdTime),
       // El marcador ya está escrito en la ficha; repetirlo solo ensuciaría
       // las notas.
-      note: null
+      note: null,
+      method
     });
-    const despues = await this.leadService.getLeadById(ficha.id);
+    const despues = await this.leadService.getLeadById(match.lead.id);
 
-    return TIKTOK_ATTRIBUTION_COLUMNS.some((col) => String(antes?.[col] ?? '') !== String(despues?.[col] ?? ''));
+    if (!writesAttribution(method)) {
+      await this.#recordConflict(lead, {
+        reason: CONFLICT_REASONS.phoneOnlyMatch,
+        phone: form.phone,
+        candidates: [match.lead],
+        payload
+      });
+      return { completado: false, pendiente: true };
+    }
+
+    const completado = TIKTOK_ATTRIBUTION_COLUMNS
+      .some((col) => String(antes?.[col] ?? '') !== String(despues?.[col] ?? ''));
+    return { completado, pendiente: false };
   }
 
-  /** La ficha que tenga el teléfono que contestó este formulario. */
-  async #findByFormPhone(lead) {
-    const form = extractMetaLeadForm(lead.fieldData);
-    if (!form.phone) return null;
-    return this.leadService.findByPhone(form.phone);
+  /**
+   * Anota un emparejamiento sin resolver.
+   *
+   * Nunca puede tumbar la corrida: traer los leads que faltan es el objetivo, y
+   * perderlos porque la tabla de pendientes falló sería cambiar un problema por
+   * uno peor. Sin servicio de conflictos queda el aviso en el log, que es lo
+   * único que hay cuando el servicio no está inyectado (los tests).
+   */
+  async #recordConflict(lead, { reason, phone, candidates, payload }) {
+    const ids = (candidates || []).map((c) => c?.id).filter(Boolean);
+    if (!this.conflicts) {
+      console.warn(`⚠️ [TikTok Leads] Lead ${lead.leadId}: ${reason} (fichas ${ids.join(', ') || 'ninguna'}). `
+        + 'La atribución NO se escribió y no hay dónde anotar el pendiente.');
+      return;
+    }
+
+    try {
+      await this.conflicts.record({
+        platform: 'TikTok',
+        platformLeadId: lead.leadId,
+        phoneKey: phoneMatchKey(phone),
+        reason,
+        candidateLeadIds: ids,
+        payload
+      });
+    } catch (error) {
+      console.error(`❌ [TikTok Leads] No se pudo anotar el pendiente del lead ${lead.leadId}:`, error.message);
+    }
   }
 
   /**
@@ -698,7 +887,15 @@ export class TikTokLeadsService {
         sin_anuncio: 0,
         // Fichas que ya estaban en el CRM y a las que esta corrida les
         // completó la atribución que les faltaba (ver más abajo).
-        completados: 0
+        completados: 0,
+        /*
+         * Envíos que no se pudieron atribuir con evidencia independiente y
+         * quedaron anotados en `attribution_conflicts` para que los resuelva
+         * una persona. Se cuentan aparte de `fallidos` a propósito: no falló
+         * nada, falta decidir — y mezclarlos haría que un pendiente se lea
+         * como un error del que no hay que hacer nada.
+         */
+        pendientes: 0
       },
       forms: [],
       errores: []
@@ -715,6 +912,7 @@ export class TikTokLeadsService {
         importados: 0,
         adjuntados: 0,
         completados: 0,
+        pendientes: 0,
         fallidos: 0,
         ejemplos_faltantes: []
       };
@@ -753,10 +951,14 @@ export class TikTokLeadsService {
            */
           if (apply) {
             try {
-              const completado = await this.#completeAttribution(lead);
+              const { completado, pendiente } = await this.#completeAttribution(lead);
               if (completado) {
                 row.completados++;
                 report.totals.completados++;
+              }
+              if (pendiente) {
+                row.pendientes++;
+                report.totals.pendientes++;
               }
             } catch (error) {
               report.errores.push({ page_id: form.id, lead_id: lead.leadId, error: error.message });
@@ -780,18 +982,34 @@ export class TikTokLeadsService {
         if (!apply) continue;
 
         try {
-          const { lead: prospect, created } = await persistTikTokLead(this.leadService, {
+          const { lead: prospect, created, pendiente } = await persistTikTokLead(this.leadService, {
             ...lead,
             createdTime: parseTikTokTime(lead.createdTime)
-          });
+          }, { conflicts: this.conflicts });
+          if (pendiente) {
+            row.pendientes++;
+            report.totals.pendientes++;
+          }
           // Conocido en el acto: si el mismo lead_id volviera a aparecer en
           // esta misma corrida (dos formularios que lo comparten), no se
           // duplica.
           known.add(String(lead.leadId));
 
-          if (created) {
+          /*
+           * Sin ficha devuelta el envío no se dio de alta ni se colgó de
+           * ninguna: el teléfono coincidió con más de una y se anotó el
+           * pendiente. No se cuenta como "adjuntado" —no se adjuntó a nada— ni
+           * se abre una tercera ficha: la persona ya está en el funnel (por eso
+           * hay fichas que coinciden) y lo único que falta es decidir de cuál es
+           * este formulario.
+           */
+          if (!prospect) {
+            console.warn(`⚠️ [TikTok Leads] Lead ${lead.leadId}: el teléfono coincide con varias fichas. `
+              + 'Queda pendiente de resolución y su atribución no se escribió.');
+          } else if (created) {
             row.importados++;
             report.totals.importados++;
+            console.log(`📥 [TikTok Leads] Lead ${lead.leadId} importado como prospecto #${prospect.id}.`);
           } else {
             // "Adjuntado" se cuenta aparte de "importado" porque no es lo
             // mismo para quien lee el reporte: un lead nuevo es una persona
@@ -799,11 +1017,9 @@ export class TikTokLeadsService {
             // una ficha que el equipo ya tenía.
             row.adjuntados++;
             report.totals.adjuntados++;
+            console.log(`🔗 [TikTok Leads] Lead ${lead.leadId} colgado del lead existente #${prospect.id} `
+              + (pendiente ? '(mismo teléfono: atribución pendiente).' : '(mismo lead_id).'));
           }
-
-          console.log(created
-            ? `📥 [TikTok Leads] Lead ${lead.leadId} importado como prospecto #${prospect.id}.`
-            : `🔗 [TikTok Leads] Lead ${lead.leadId} colgado del lead existente #${prospect.id} (mismo teléfono).`);
         } catch (error) {
           row.fallidos++;
           report.totals.fallidos++;

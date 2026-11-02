@@ -160,11 +160,16 @@ export class LeadReconciliationSweep {
             importados: report.totals.importados,
             adjuntados: report.totals.adjuntados,
             completados: report.totals.completados,
+            // Envíos que quedaron sin atribuir porque el teléfono era la única
+            // evidencia. No son errores y no se cuentan como tales: son casos
+            // que esperan que una persona los resuelva.
+            pendientes: report.totals.pendientes,
             sin_anuncio: report.totals.sin_anuncio
           };
           console.log(`🔄 [Conciliación diaria] TikTok ${since} → ${until}: ${report.totals.en_tiktok} en TikTok, `
             + `${report.totals.importados} importados, ${report.totals.adjuntados} adjuntados, `
-            + `${report.totals.completados} fichas completadas.`);
+            + `${report.totals.completados} fichas completadas, `
+            + `${report.totals.pendientes} pendientes de resolución.`);
         } catch (error) {
           resumen.errores.push({ plataforma: 'tiktok', error: error.message });
           console.error('❌ [Conciliación diaria] TikTok:', error.message);

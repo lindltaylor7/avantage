@@ -33,6 +33,7 @@ import { CampaignService } from './services/campaignService.js';
 import { MetaAdsService } from './services/metaAdsService.js';
 import { TikTokAdsService } from './services/tiktokAdsService.js';
 import { TikTokLeadsService } from './services/tiktokLeadsService.js';
+import { AttributionConflictService } from './services/attributionConflictService.js';
 import { CampaignExportService } from './services/campaignExportService.js';
 import { UserService } from './services/userService.js';
 import { RoleService } from './services/roleService.js';
@@ -198,7 +199,18 @@ const metaLeadReconciliationService = new MetaLeadReconciliationService(leadServ
 // anuncios y no el token: de ahí salen la cuenta publicitaria resuelta, la
 // versión de la API y el tratamiento de los errores que TikTok devuelve
 // dentro de un HTTP 200 (ver `tiktokLeadsService.js`).
-const tiktokLeadsService = new TikTokLeadsService({ ads: tiktokAdsService, leadService });
+/*
+ * Los emparejamientos de atribución que ninguna evidencia independiente pudo
+ * resolver. Sin esta tabla, un envío cuyo teléfono coincide con dos fichas se
+ * descartaba en silencio o —peor— se le escribía la campaña a la que el
+ * ORDER BY dejaba arriba.
+ */
+const attributionConflictService = new AttributionConflictService();
+const tiktokLeadsService = new TikTokLeadsService({
+  ads: tiktokAdsService,
+  leadService,
+  conflicts: attributionConflictService
+});
 /*
  * Las dos conciliaciones, corriendo solas una vez al día. Dependían de que
  * alguien apretara un botón, y así se perdió el 39% de los leads de formulario
@@ -4869,12 +4881,71 @@ app.post('/api/campaigns/tiktok/leads', requireAuth, requireAnyPermission('campa
       to: req.body?.to || null,
       apply: true
     });
-    console.log(`📥 [TikTok Leads] ${report.totals.importados} importados, ${report.totals.adjuntados} adjuntados a fichas existentes.`);
+    console.log(`📥 [TikTok Leads] ${report.totals.importados} importados, ${report.totals.adjuntados} adjuntados a fichas existentes, `
+      + `${report.totals.pendientes} pendientes de resolución.`);
     res.json(report);
   } catch (error) {
     console.error('❌ Error al importar los leads de TikTok:', error);
     const status = ['NO_TOKEN', 'NOT_CONFIGURED', 'NO_AD_ACCOUNT'].includes(error.code) ? 400 : 502;
     res.status(status).json({ error: error.message, code: error.code || null, tiktokCode: error.tiktokCode || null });
+  }
+});
+
+/*
+ * Emparejamientos de atribución sin resolver.
+ *
+ * Son los envíos de una plataforma que no se pudieron acreditar con evidencia
+ * independiente: el teléfono coincidió con más de una ficha, o coincidió con
+ * una sola y el teléfono era lo único que había. Antes de que esta lista
+ * existiera, esos casos se resolvían escribiéndole la campaña a la ficha que el
+ * `ORDER BY` dejaba arriba — un número que parece cierto y que nadie puede
+ * auditar.
+ *
+ * El listado pagina y dice `total` y `truncated` aparte: "12 pendientes" tiene
+ * que ser el total y no el tamaño de la página disfrazado de dato.
+ */
+app.get('/api/attribution/conflicts', requireAuth, requireAnyPermission('campaigns.view', 'leads.view'), async (req, res) => {
+  try {
+    const resolved = req.query.resolved === 'true' ? true
+      : req.query.resolved === 'all' ? null
+      : false;
+
+    const [listado, resumen] = await Promise.all([
+      attributionConflictService.list({
+        platform: req.query.platform || null,
+        reason: req.query.reason || null,
+        resolved,
+        limit: req.query.limit,
+        offset: req.query.offset
+      }),
+      attributionConflictService.summary()
+    ]);
+
+    res.json({ ...listado, resumen });
+  } catch (error) {
+    console.error('❌ Error al listar los pendientes de atribución:', error);
+    res.status(500).json({ error: 'No se pudieron listar los pendientes de atribución.' });
+  }
+});
+
+/*
+ * Cerrar un pendiente. **No escribe la atribución**: eso se hace sobre el lead,
+ * por los mismos métodos que todo lo demás, y queda registrado como decisión de
+ * una persona (método `manual`). Acá se asienta que alguien lo resolvió y
+ * quién, que es lo que convierte la lista en algo que se puede cerrar.
+ */
+app.patch('/api/attribution/conflicts/:id/resolve', requireAuth, requireAnyPermission('campaigns.view', 'leads.manage_all'), async (req, res) => {
+  try {
+    const conflicto = await attributionConflictService.resolve(req.params.id, {
+      resolution: req.body?.resolution || null,
+      notes: req.body?.notes || null,
+      actor: req.user
+    });
+    if (!conflicto) return res.status(404).json({ error: 'Ese pendiente de atribución no existe.' });
+    res.json(conflicto);
+  } catch (error) {
+    console.error('❌ Error al resolver el pendiente de atribución:', error);
+    res.status(500).json({ error: 'No se pudo resolver el pendiente de atribución.' });
   }
 });
 

@@ -802,6 +802,52 @@ antes de tocar el arranque de producción.
   columnas no están en ella. Un id de anuncio corregido a mano es un lead acreditado a una campaña
   que no lo trajo, y de esos números cuelga el presupuesto. Lo que sí es libre es `source`, el canal
   escrito a mano de un lead que no vino de un anuncio.
+- **Coincidir no es identificar.** El origen de un lead es un **sello**
+  (`leads.origin_platform`), escrito una vez al nacer la ficha y nunca reescrito, y queda asentado
+  con qué evidencia se lo supo (`attribution_method`, `attribution_confidence`,
+  `attribution_reconciled_at`). La regla vive en `backend/services/attributionEvidence.js`
+  (`resolveMatch()`, `writesAttribution()`, `demoteLaunderedMarker()`).
+  Vino de un error que corría solo: la importación de TikTok, cuando no encontraba la ficha por el
+  `lead_id` del envío, la buscaba por los **últimos 9 dígitos del teléfono** y con eso le escribía
+  campaña, grupo y anuncio. Como `leadOrigin()` preguntaba por las columnas `tiktok_*` **antes** que
+  por las demás, esa ficha pasaba a ser "TikTok" en todas las hojas de marketing y tapaba su origen
+  real; y la conciliación diaria corre con `apply: true`, así que eso se escribía sin que nadie lo
+  mirara. Que TikTok reporte 21 leads y el CRM tenga 21 fichas del mismo corte **no empareja ninguna
+  de las 21 con ninguna de las otras**.
+  Solo la evidencia **independiente** habilita escribir la atribución: el id que la plataforma
+  emitió para ESE envío (`tiktok_lead_id`, `meta_leadgen_id`), su marcador en las notas, o la
+  recepción del webhook. El teléfono sigue sirviendo para **no duplicar a una persona**, que es otro
+  problema: dos fichas de la misma persona son un estorbo, una ficha con la plataforma equivocada es
+  un presupuesto mal repartido. Con el teléfono como única evidencia el envío se cuelga de la ficha
+  —el marcador en las notas, que es lo que impide volver a darlo de alta en cada pasada— y la
+  atribución **no se escribe**. El `tiktok_lead_id` está gateado como el resto a propósito: de esa
+  columna cuelga el bloque de TikTok de `leadOrigin()`, así que escribirla ES atribuir.
+  `demoteLaunderedMarker()` cierra el camino que lavaba la evidencia débil: un envío colgado por
+  teléfono deja igual su marcador, y en la corrida siguiente ese marcador se encontraría como
+  evidencia ALTA — el teléfono habría atribuido el lead dos días después y por la puerta de atrás.
+  La ficha recuerda con qué se la emparejó y una confianza baja no se asciende sola.
+  **Las coincidencias ambiguas no se asignan: se anotan.** `findAllByPhone()` devuelve TODAS las
+  candidatas (y no la que gana el `ORDER BY`, que entre dos personas con el mismo sufijo es una
+  moneda al aire); con más de una no se toca ninguna ficha y el caso va a `attribution_conflicts`
+  (`attributionConflictService.js`, `GET /api/attribution/conflicts`,
+  `PATCH /api/attribution/conflicts/:id/resolve`) con las candidatas, el motivo
+  (`multiple_phone_match` · `phone_only_match` · `origin_conflict`) y el **payload** del envío —la
+  atribución y las respuestas del formulario—, porque TikTok conserva los leads de un formulario
+  solo 90 días y después ya no hay a quién volvérselos a pedir. Tampoco se abre una tercera ficha:
+  la persona ya está en el funnel (por eso hay fichas que coinciden) y lo único pendiente es de qué
+  anuncio salió. El registro es **idempotente** por (plataforma, id del envío) y no reabre un caso
+  ya resuelto: la conciliación diaria vuelve a encontrarlo en cada corrida mientras nadie lo
+  resuelva, y una fila por día es la forma más común de que una lista de pendientes deje de mirarse.
+  Resolver **no escribe la atribución** —eso se hace sobre el lead, con método `manual`—: asienta que
+  alguien lo decidió y quién.
+  Los pendientes se cuentan **aparte de los fallidos** en el reporte de la importación y en el
+  resumen del barrido diario (`totals.pendientes`): no falló nada, falta decidir, y mezclarlos hace
+  que un pendiente se lea como un error del que no hay que hacer nada.
+  `leadOrigin()` cambia en consecuencia: lo que llegó después del sello se informa en `secondary` y
+  la ficha queda marcada con `conflict: true` en vez de que la columna nueva reescriba la historia.
+  Sin sello —las fichas anteriores a la migración, que el backfill sella con el MISMO
+  `leadOrigin()` y no con una copia de sus reglas— gana la evidencia **más antigua**, que es lo más
+  cerca de "cuál fue primero" a lo que se puede llegar sin preguntarle nada a nadie.
 - La hoja **"Ruta de leads"** del exportable de Campañas es un **contrato con marketing**: su
   importador busca las columnas por el **nombre del encabezado** (sin distinguir mayúsculas ni
   tildes), así que renombrar una la deja fuera del reporte sin que nada falle a la vista. Lleva una
