@@ -180,6 +180,33 @@ export const CTWA_LEAD_SPEC = {
   origin: 'whatsapp'
 };
 
+/**
+ * ¿Esta conversación trajo a una persona que NO estaba en el CRM?
+ *
+ * La respuesta es si la ficha nació de ESTA conversación, y se contesta
+ * comparando cuándo se creó la ficha con cuándo llegó el primer mensaje: una
+ * ficha anterior al mensaje es alguien que el equipo ya tenía y que volvió a
+ * escribir desde un anuncio.
+ *
+ * El margen de cinco minutos no es un detalle: el lead que nace del primer
+ * mensaje se crea en el mismo acto de recibirlo, pero las dos marcas de tiempo
+ * las escriben caminos distintos (el webhook y el alta), así que comparar por
+ * igualdad estricta contaría como "ya estaba" a la persona que acaba de
+ * llegar. Un lead de formulario que después escribe por WhatsApp sí queda del
+ * lado correcto: entre el formulario y el mensaje pasan minutos u horas.
+ *
+ * Sin ficha no hay oportunidad que contar: el contacto escribió y nadie lo
+ * registró, que es la brecha que `onlyGreeted` mide aparte.
+ */
+const NEW_OPPORTUNITY_MARGIN_MS = 5 * 60 * 1000;
+
+export function isNewOpportunity(contact) {
+  const nacida = contact?.lead?.created_at ? Date.parse(contact.lead.created_at) : null;
+  const primerMensaje = contact?.firstMessageAt ? Date.parse(contact.firstMessageAt) : null;
+  if (!nacida || !primerMensaje) return false;
+  return nacida >= primerMensaje - NEW_OPPORTUNITY_MARGIN_MS;
+}
+
 export function formContactsFromLeads(rows, waIdByKey = new Map(), spec = META_FORM_SPEC) {
   return rows
     .filter((row) => row[spec.adColumn])
@@ -1059,6 +1086,25 @@ export class CampaignService {
 
   #summariseGroup(contacts, campaign) {
     const conversations = contacts.length;
+    /*
+     * Los tres niveles de WhatsApp, que se confundían en uno.
+     *
+     *  1. `metaMessagingStarted` — el EVENTO ATRIBUIDO: lo que Meta cuenta como
+     *     conversación iniciada, o sea cualquier clic que abre el chat. Es de
+     *     la plataforma y siempre va a ser el número más grande.
+     *  2. `conversations` — la CONVERSACIÓN ENTRANTE que el CRM reconoce y
+     *     atribuye a este anuncio.
+     *  3. `newOpportunities` — la conversación que trajo a una persona que NO
+     *     estaba: la ficha nació de ella. El resto son clientes y contactos
+     *     que el equipo ya tenía y volvieron a escribir desde un anuncio.
+     *
+     * Sin el tercero, el costo por conversación se lee como costo por persona
+     * nueva, y un anuncio de retargeting —que por definición le habla a quien
+     * ya está en la base— parece tan eficiente como uno que trae gente nueva.
+     * Los tres se publican juntos justamente para que la brecha entre ellos se
+     * pueda explicar en vez de discutir.
+     */
+    const newOpportunities = contacts.filter((c) => isNewOpportunity(c)).length;
     const responded = contacts.filter((c) => c.responded).length;
     const qualified = contacts.filter((c) => c.qualified).length;
     const appointments = contacts.filter((c) => c.hasAppointment).length;
@@ -1083,6 +1129,7 @@ export class CampaignService {
     }
     funnel.push(
       { key: 'conversacion', label: 'Conversaciones atribuidas (CRM)', count: conversations },
+      { key: 'oportunidad', label: 'Personas nuevas (no estaban en el CRM)', count: newOpportunities },
       { key: 'respondido', label: 'Avan respondió', count: responded },
       { key: 'calificado', label: 'Calificado (informe de viabilidad)', count: qualified },
       { key: 'cita_agendada', label: 'Cita agendada', count: appointments },
@@ -1093,6 +1140,7 @@ export class CampaignService {
       funnel,
       metrics: {
         conversations,
+        newOpportunities,
         responded,
         qualified,
         appointments,

@@ -1,5 +1,15 @@
 import { LeadService } from './leadService.js';
 import { META_LEAD_FIELDS, persistMetaLead } from './metaWebhookService.js';
+import { extractMetaLeadForm } from './metaLeadFields.js';
+import { PHONE_MATCH_KEY_SQL } from './leadService.js';
+import { db } from '../db/connection.js';
+import {
+  BUCKETS,
+  COMPARABILIDAD,
+  classifySubmission,
+  emptyBuckets,
+  phoneKeyOf
+} from './reconciliationBuckets.js';
 
 const GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v21.0';
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
@@ -235,6 +245,36 @@ export class MetaLeadReconciliationService {
    * dos fechas es lo que haría que la comparación contra el Administrador de
    * anuncios no cerrara nunca.
    */
+  /**
+   * Las fichas que ya existen para los teléfonos de un lote de envíos,
+   * indexadas por los últimos 9 dígitos.
+   *
+   * Una consulta para todo el lote y no una por envío: esto corre sobre todos
+   * los formularios de la cuenta en el barrido diario. Se queda con la ficha
+   * más ANTIGUA de cada teléfono porque la pregunta es "¿esta persona ya
+   * estaba?", y eso lo contesta la primera vez que entró.
+   */
+  async #existingByPhoneKey(metaLeads) {
+    const keys = [...new Set(
+      (metaLeads || [])
+        .map((lead) => phoneKeyOf(extractMetaLeadForm(lead.field_data).phone))
+        .filter(Boolean)
+    )];
+    if (!keys.length) return new Map();
+
+    const rows = await db('leads')
+      .select('id', 'created_at', 'phone')
+      .whereRaw(`${PHONE_MATCH_KEY_SQL} IN (${keys.map(() => '?').join(', ')})`, keys)
+      .orderBy('created_at', 'asc');
+
+    const out = new Map();
+    for (const row of rows) {
+      const key = phoneKeyOf(row.phone);
+      if (key && !out.has(key)) out.set(key, row);
+    }
+    return out;
+  }
+
   async reconcile({ since = null, until = null, apply = false } = {}) {
     if (!this.token) {
       throw new Error('Falta META_PAGE_ACCESS_TOKEN en el entorno del servidor.');
@@ -282,9 +322,30 @@ export class MetaLeadReconciliationService {
        * daría por cerrada una comparación que no cerró. Se arregla con el
        * botón de completar datos del formulario, no volviendo a importar.
        */
-      totals: { en_meta: 0, en_crm: 0, sin_anuncio: 0, faltantes: 0, importados: 0, adjuntados: 0, fallidos: 0 },
+      totals: {
+        en_meta: 0, en_crm: 0, sin_anuncio: 0, faltantes: 0, importados: 0, adjuntados: 0, fallidos: 0,
+        /*
+         * Los cinco cajones del corte, con las MISMAS definiciones que la
+         * importación de TikTok (`reconciliationBuckets.js`). Sin ellos, "faltan
+         * 37" podía ser 37 leads perdidos o 12 duplicados + 9 reingresos + 6
+         * formularios sin un dato de contacto + 10 entregados tarde, y tres de
+         * esos cinco no se arreglan: están bien así. Compartir el módulo es lo
+         * que permite comparar esta conciliación con la otra.
+         */
+        cajones: emptyBuckets()
+      },
+      comparabilidad: COMPARABILIDAD,
       errores: []
     };
+
+    /*
+     * De la CORRIDA y no del formulario: un mismo envío puede venir en dos
+     * formularios y la misma persona puede haber llenado dos. Reiniciarlos por
+     * formulario contaría el repetido como nuevo en el segundo.
+     */
+    const seenLeadIds = new Set();
+    const seenPhoneKeys = new Set();
+    const windowStart = sinceTs !== null ? new Date(sinceTs) : null;
 
     for (const form of forms) {
       const row = {
@@ -298,6 +359,7 @@ export class MetaLeadReconciliationService {
         importados: 0,
         adjuntados: 0,
         fallidos: 0,
+        cajones: emptyBuckets(),
         ejemplos_faltantes: []
       };
 
@@ -311,8 +373,55 @@ export class MetaLeadReconciliationService {
         continue;
       }
 
+      /*
+       * Las fichas que ya existen para los teléfonos de este formulario, en UNA
+       * consulta. Distingue al reingreso —la persona que ya estaba ANTES del
+       * corte y volvió a llenar el formulario— del alta nueva, que es la
+       * diferencia que explica por qué el total de Meta es legítimamente mayor
+       * que el de altas del CRM.
+       */
+      const fichasPorTelefono = await this.#existingByPhoneKey(metaLeads);
+
       for (const lead of metaLeads) {
+        const respuestas = extractMetaLeadForm(lead.field_data);
+        const phoneKey = phoneKeyOf(respuestas.phone);
+        const cajon = classifySubmission(
+          {
+            platformLeadId: lead.id,
+            phone: respuestas.phone,
+            email: respuestas.email,
+            createdTime: lead.created_time
+          },
+          {
+            windowStart,
+            seenLeadIds,
+            seenPhoneKeys,
+            existingLead: phoneKey ? fichasPorTelefono.get(phoneKey) || null : null
+          }
+        );
+
+        /*
+         * El envío anterior al corte se CUENTA y recién después se saltea.
+         * Antes `inRange` lo descartaba en silencio, así que un formulario que
+         * Meta entregó tarde no aparecía en ninguna cifra — y es justo el caso
+         * que impide que el reporte cierre contra el Administrador de anuncios,
+         * porque el lead pertenece al día en que la persona lo llenó.
+         */
+        if (cajon === BUCKETS.retrasado) {
+          row.cajones[cajon]++;
+          report.totals.cajones[cajon]++;
+          continue;
+        }
         if (!inRange(lead.created_time)) continue;
+
+        row.cajones[cajon]++;
+        report.totals.cajones[cajon]++;
+        seenLeadIds.add(String(lead.id));
+        if (phoneKey) seenPhoneKeys.add(phoneKey);
+
+        // Un envío que Meta devolvió dos veces no se procesa dos veces: contarlo
+        // como faltante infla la brecha que la conciliación viene a explicar.
+        if (cajon === BUCKETS.duplicado) continue;
 
         const platform = lead.platform || 'desconocida';
         report.by_platform[platform] ??= { en_meta: 0, en_crm: 0, faltantes: 0, importados: 0, adjuntados: 0 };

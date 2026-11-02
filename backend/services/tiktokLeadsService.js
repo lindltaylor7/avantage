@@ -11,7 +11,14 @@ import {
   resolveMatch,
   writesAttribution
 } from './attributionEvidence.js';
-import { phoneMatchKey } from './leadService.js';
+import { PHONE_MATCH_KEY_SQL, phoneMatchKey } from './leadService.js';
+import {
+  BUCKETS,
+  COMPARABILIDAD,
+  classifySubmission,
+  emptyBuckets,
+  phoneKeyOf
+} from './reconciliationBuckets.js';
 
 /**
  * Importación de los leads de **formulario instantáneo de TikTok** (TikTok
@@ -550,6 +557,37 @@ export class TikTokLeadsService {
     }
   }
 
+  /**
+   * Las fichas que ya existen para los teléfonos de un lote de envíos,
+   * indexadas por los últimos 9 dígitos.
+   *
+   * Una consulta para todo el lote y no una por envío, por la misma razón que
+   * el resto del sistema: esto corre sobre cien formularios en el barrido
+   * diario. Se queda con la ficha **más antigua** de cada teléfono porque la
+   * pregunta es "¿esta persona ya estaba?", y la respuesta la da la primera
+   * vez que entró, no la última.
+   */
+  async #existingByPhoneKey(leads) {
+    const keys = [...new Set(
+      (leads || [])
+        .map((lead) => phoneKeyOf(extractMetaLeadForm(lead.fieldData).phone))
+        .filter(Boolean)
+    )];
+    if (!keys.length) return new Map();
+
+    const rows = await db('leads')
+      .select('id', 'created_at', 'phone')
+      .whereRaw(`${PHONE_MATCH_KEY_SQL} IN (${keys.map(() => '?').join(', ')})`, keys)
+      .orderBy('created_at', 'asc');
+
+    const out = new Map();
+    for (const row of rows) {
+      const key = phoneKeyOf(row.phone);
+      if (key && !out.has(key)) out.set(key, row);
+    }
+    return out;
+  }
+
   /** Los `page_id` que ya tienen al menos un lead en el CRM. */
   async #knownPageIds() {
     const rows = await db('leads')
@@ -895,11 +933,37 @@ export class TikTokLeadsService {
          * nada, falta decidir — y mezclarlos haría que un pendiente se lea
          * como un error del que no hay que hacer nada.
          */
-        pendientes: 0
+        pendientes: 0,
+        /*
+         * Los cinco cajones de los envíos del corte (ver
+         * `reconciliationBuckets.js`). Sin ellos, "faltan 37" podía ser 37
+         * leads perdidos o 12 duplicados + 9 reingresos + 6 formularios sin un
+         * dato de contacto + 10 entregados tarde — y tres de esos cinco no se
+         * arreglan, están bien así. Su suma es el total de envíos, que es lo
+         * único que permite afirmar que la comparación cerró.
+         */
+        cajones: emptyBuckets()
       },
+      /*
+       * Qué universo cuenta cada cifra, escrito en la respuesta y no solo en un
+       * comentario del código: el error que evita se comete leyendo la
+       * pantalla, exigiendo que el CRM dé el mismo número que la columna de
+       * «conversiones» del Ads Manager, que no cuenta envíos de formulario.
+       */
+      comparabilidad: COMPARABILIDAD,
       forms: [],
       errores: []
     };
+
+    /*
+     * Los dos conjuntos son de la CORRIDA y no del formulario: un mismo envío
+     * puede venir en dos formularios, y la misma persona puede haber llenado
+     * dos. Reiniciarlos por formulario contaría ese repetido como nuevo en el
+     * segundo.
+     */
+    const seenLeadIds = new Set();
+    const seenPhoneKeys = new Set();
+    const windowStart = from ? new Date(`${from}T00:00:00-05:00`) : null;
 
     for (const form of forms.slice(0, MAX_FORMS)) {
       const row = {
@@ -914,6 +978,7 @@ export class TikTokLeadsService {
         completados: 0,
         pendientes: 0,
         fallidos: 0,
+        cajones: emptyBuckets(),
         ejemplos_faltantes: []
       };
 
@@ -930,10 +995,48 @@ export class TikTokLeadsService {
         continue;
       }
 
+      /*
+       * Las fichas que ya existen para los teléfonos de ESTE formulario, en UNA
+       * consulta y no una por envío. Hace falta para distinguir al reingreso
+       * —la persona que ya estaba antes del corte y volvió a llenar el
+       * formulario— del lead nuevo, que es la diferencia que explica por qué el
+       * total de la plataforma es legítimamente mayor que el de altas del CRM.
+       */
+      const fichasPorTelefono = await this.#existingByPhoneKey(leads);
+
       for (const lead of leads) {
         if (!lead.leadId) continue;
         row.en_tiktok++;
         report.totals.en_tiktok++;
+
+        const respuestas = extractMetaLeadForm(lead.fieldData);
+        const phoneKey = phoneKeyOf(respuestas.phone);
+        const cajon = classifySubmission(
+          {
+            platformLeadId: lead.leadId,
+            phone: respuestas.phone,
+            email: respuestas.email,
+            createdTime: parseTikTokTime(lead.createdTime)
+          },
+          {
+            windowStart,
+            seenLeadIds,
+            seenPhoneKeys,
+            existingLead: phoneKey ? fichasPorTelefono.get(phoneKey) || null : null
+          }
+        );
+        row.cajones[cajon]++;
+        report.totals.cajones[cajon]++;
+        seenLeadIds.add(String(lead.leadId));
+        if (phoneKey) seenPhoneKeys.add(phoneKey);
+
+        /*
+         * Un envío que la plataforma devolvió dos veces no se procesa dos veces.
+         * Antes esto lo cubría a medias `known`, que solo conoce lo que ya está
+         * en el CRM: dos formularios que comparten un envío nuevo lo daban de
+         * alta y después lo adjuntaban, contando una persona como dos.
+         */
+        if (cajon === BUCKETS.duplicado) continue;
 
         if (known.has(String(lead.leadId))) {
           row.en_crm++;

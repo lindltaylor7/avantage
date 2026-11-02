@@ -127,6 +127,7 @@ export class LeadReconciliationSweep {
             en_meta: report.totals.en_meta,
             en_crm: report.totals.en_crm,
             faltantes: report.totals.faltantes,
+            cajones: report.totals.cajones,
             importados: report.totals.importados,
             // Un "adjuntado" es la misma persona que ya era lead: es el
             // duplicado que explica por qué el CRM cuenta menos que Meta.
@@ -164,6 +165,9 @@ export class LeadReconciliationSweep {
             // evidencia. No son errores y no se cuentan como tales: son casos
             // que esperan que una persona los resuelva.
             pendientes: report.totals.pendientes,
+            // Los cinco cajones del corte: sin ellos, una diferencia nunca se
+            // termina de explicar y la alarma que deja no se puede cerrar.
+            cajones: report.totals.cajones,
             sin_anuncio: report.totals.sin_anuncio
           };
           console.log(`🔄 [Conciliación diaria] TikTok ${since} → ${until}: ${report.totals.en_tiktok} en TikTok, `

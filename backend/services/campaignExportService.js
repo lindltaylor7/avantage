@@ -460,6 +460,16 @@ function campaignColumns(currency) {
     { header: 'Conversaciones (Meta)', key: 'metaMessagingStarted', width: 20, fmt: INT_FMT },
     // ── Funnel real del CRM ──
     { header: 'Conversaciones atribuidas (CRM)', key: 'conversations', width: 27, fmt: INT_FMT },
+    /*
+     * El tercer nivel de WhatsApp, que faltaba. "Conversaciones (Meta)" es el
+     * evento atribuido —cualquier clic que abre el chat—, "Conversaciones
+     * atribuidas (CRM)" es la que el CRM reconoce, y esta es la que trajo a una
+     * persona que NO estaba. Sin ella el costo por conversación se lee como
+     * costo por persona nueva, y un anuncio de retargeting —que por definición
+     * le habla a quien ya está en la base— parece tan eficiente como uno que
+     * trae gente nueva.
+     */
+    { header: 'Personas nuevas (CRM)', key: 'newOpportunities', width: 22, fmt: INT_FMT },
     { header: 'Respondidos', key: 'responded', width: 13, fmt: INT_FMT },
     { header: 'Calificados', key: 'qualified', width: 13, fmt: INT_FMT },
     { header: 'Citas agendadas', key: 'appointments', width: 16, fmt: INT_FMT },

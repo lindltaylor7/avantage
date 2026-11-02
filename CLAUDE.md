@@ -938,6 +938,45 @@ antes de tocar el arranque de producción.
   arreglar justo lo que se vino a arreglar. Solo escribe los huecos. El backfill de Meta
   (`runMetaLeadgenBackfill()`) hace lo mismo con la atribución histórica preguntándole a la Graph
   API; lo que Meta ya no devuelve queda en "sin dato" y no se inventa.
+- **Una conciliación tiene cinco cajones, no dos** (`backend/services/reconciliationBuckets.js`,
+  compartido por las conciliaciones de Meta y de TikTok). Las dos reportaban «en la plataforma»,
+  «en el CRM», «faltantes» y «fallidos», y con eso una diferencia nunca se terminaba de explicar:
+  «faltan 37» podía ser 37 leads perdidos, o 12 **duplicados** que la plataforma devuelve dos
+  veces, 9 **reingresos** —personas que ya estaban en el CRM de antes del corte y volvieron a
+  llenar el formulario—, 6 **inválidos** sin un dato con el que llamar a nadie y 10 **retrasados**
+  entregados fuera de su propio corte. Cada uno se arregla distinto y tres de los cinco **no se
+  arreglan: están bien así**. Mezclados, la conciliación produce una alarma que nadie puede cerrar
+  — y una alarma que nadie puede cerrar se deja de mirar.
+  Los cajones son **excluyentes y ordenados por prioridad**, y eso es una propiedad y no un
+  detalle: su suma tiene que ser el total de envíos del corte, que es lo único que permite afirmar
+  que la comparación cerró. El duplicado va primero (si no, un envío repetido y sin teléfono se
+  contaría dos veces), el retraso antes que el reingreso (lo que define al retraso es CUÁNDO se
+  envió, no si la persona ya estaba), y una ficha creada **dentro** del corte no vuelve reingreso a
+  su propio envío — eso esconderría el alta que sí ocurrió. El módulo es **puro** y repite
+  `phoneKeyOf` en vez de importar `leadService`, con un test que lo compara contra `phoneMatchKey`:
+  el día que se separen, un envío se clasificaría como nuevo y después se emparejaría con una ficha
+  existente. Los dos conjuntos de «ya visto» son de la **corrida** y no del formulario: un mismo
+  envío puede venir en dos formularios. En Meta el envío anterior al corte se **cuenta y recién
+  después se saltea** (antes `inRange` lo descartaba en silencio, así que un formulario entregado
+  tarde no aparecía en ninguna cifra).
+  **Y el reporte dice qué universo cuenta cada cifra** (`COMPARABILIDAD`, en la respuesta y no solo
+  en un comentario): el campo «conversiones» del Administrador de anuncios **no** cuenta envíos de
+  formulario —cuenta el evento de conversión configurado en la campaña, que puede ser un clic, un
+  mensaje iniciado o una compra—, así que exigir que el CRM dé ese mismo número manda a buscar
+  leads que nunca existieron. Para comparar contra el Ads Manager se mira su reporte de clientes
+  potenciales del formulario, no la columna de conversiones de la campaña.
+- **WhatsApp tiene tres niveles y no uno** (`isNewOpportunity()` en `campaignService.js`):
+  «Conversaciones (Meta)» es el **evento atribuido** —cualquier clic que abre el chat, siempre el
+  número más grande—, «Conversaciones atribuidas (CRM)» es la **conversación entrante** que el CRM
+  reconoce, y «Personas nuevas (CRM)» es la que trajo a alguien que **no estaba**: la ficha nació
+  de esa conversación. Sin el tercero, el costo por conversación se lee como costo por persona
+  nueva, y un anuncio de retargeting —que por definición le habla a quien ya está en la base—
+  parece tan eficiente como uno que trae gente nueva. Los tres se publican juntos para que la
+  brecha entre ellos se pueda explicar en vez de discutir. El margen de cinco minutos existe
+  porque las dos marcas de tiempo las escriben caminos distintos (el webhook y el alta), así que
+  comparar por igualdad contaría como «ya estaba» a quien acaba de llegar; un lead de formulario
+  que después escribe por WhatsApp queda del lado correcto, porque entre el formulario y el mensaje
+  pasan minutos u horas.
 - Lo que Meta nos manda **vuelve a Meta**: `metaConversionsService.js` le devuelve, por la
   **Conversions API**, en qué etapa del funnel terminó cada lead que llegó de un anuncio
   (`/api/meta-capi` bajo `webhooks.view`, pantalla en `MetaConversionsPanel.vue` dentro de
