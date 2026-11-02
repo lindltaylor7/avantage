@@ -69,6 +69,29 @@ antes de tocar el arranque de producción.
   despliegues).
 - **`db/connection.js`** exporta una única instancia de Knex (`db`) reutilizada por todos los
   servicios — no crear conexiones nuevas por request.
+- **Dos reglas de las migraciones**, las dos salidas del mismo fallo en producción (01/11/2026) y
+  comprobadas por `__tests__/migrationHygiene.test.js`:
+  (1) **Una migración puede importar funciones puras pero NUNCA una lista de columnas.** La
+  migración de atribución hacía su backfill con `.select('id', ...LEAD_ORIGIN_COLUMNS)` para no
+  repetir la lista; después se le agregaron a esa constante las columnas de Smart+, que las crea
+  una migración **posterior**, así que la de atribución empezó a pedirle a MySQL columnas que
+  todavía no existían y murió con «Unknown column». La función es la lógica y conviene que sea una
+  sola —una copia en la migración dice lo viejo el día que alguien corrija la original—, pero una
+  lista de columnas es una **foto del esquema en ese punto de la historia** y no puede venir de un
+  archivo que sigue creciendo. Se congela en el propio archivo.
+  (2) **En MySQL el DDL no es transaccional**, así que toda migración tiene que poder
+  **reintentarse**: `hasColumn()` antes de agregar una columna, `hasTable()` antes de crear una
+  tabla, y una consulta a `information_schema.STATISTICS` antes de crear un índice (knex no tiene
+  `hasIndex`). Cuando aquella murió en el backfill, sus cuatro columnas ya estaban agregadas y
+  knex no pudo deshacerlas ni registró la migración: el reintento chocó contra «Duplicate column
+  name» y quedó trabado sin forma de avanzar ni de volver atrás. El `down()` se escribe simétrico
+  por lo mismo — uno que asume el estado completo no se puede correr después de un `up()` que
+  murió a la mitad, que es lo único para lo que existe. El ayudante de índices se **repite** en
+  cada migración en vez de vivir en un módulo compartido: lo que una migración importa de afuera
+  tiene que poder cambiar sin cambiarla.
+  Las migraciones **ya aplicadas no se reescriben** para cumplir esto: cambiar una que corrió en
+  producción es la otra forma de dejar la base y el código diciendo cosas distintas. El test las
+  exige desde `20261125000000`.
 - **`db/migrations/`**: una migración por cambio de esquema, nombradas por timestamp
   (`YYYYMMDDHHMMSS_descripcion.js`), cada una con `up()`/`down()`. Ver `backend/db/README.md` para
   el propósito de cada tabla y las relaciones entre ellas (leads → projects → tasks/quotes,

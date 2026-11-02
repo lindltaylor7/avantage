@@ -36,6 +36,77 @@ npm run migrate:make -- nombre_migracion  # crea un nuevo archivo de migración
 Los archivos de migración viven en `backend/db/migrations/` y se ejecutan en orden por su prefijo de
 timestamp. Cada uno exporta `up()` (aplicar cambio) y `down()` (revertirlo).
 
+### Dos reglas para escribir una migración
+
+Las dos salieron del mismo fallo en producción, el 01/11/2026, y las comprueba
+`backend/services/__tests__/migrationHygiene.test.js`.
+
+**1. Una migración puede importar funciones puras, nunca una lista de columnas.**
+
+`20261125000000_create_attribution_evidence.js` hacía su backfill con
+`.select('id', ...LEAD_ORIGIN_COLUMNS)`, importando esa constante de
+`leadOrigin.js` para no repetir la lista. Después se le agregaron a esa constante
+las columnas de Smart+ (`tiktok_parent_ad_id` y compañía), que las crea
+`20261127000000` — una migración **posterior**. Resultado: la de atribución
+empezó a pedirle a MySQL columnas que en su momento no existían y murió con
+`Unknown column 'tiktok_parent_ad_id'`.
+
+La distinción que importa: la **función** es la lógica, y conviene que sea una
+sola (una copia dentro de la migración va a decir lo viejo el día que alguien
+corrija la original). La **lista de columnas** es una foto del esquema en ese
+punto de la historia, y por definición no puede venir de un archivo que sigue
+creciendo. Se congela en el propio archivo de la migración.
+
+**2. En MySQL el DDL no es transaccional: toda migración tiene que poder
+reintentarse.**
+
+Cuando aquella murió en el backfill, sus cuatro columnas ya estaban agregadas.
+knex no pudo deshacerlas —MySQL hace commit implícito en cada DDL— y tampoco
+registró la migración como aplicada, así que el reintento chocó contra
+`Duplicate column name 'origin_platform'` y quedó trabado: ni avanzaba ni se
+podía revertir sin tocar la base a mano.
+
+Entonces, en toda migración nueva:
+
+```js
+// Columnas: una por una, y solo las que falten. Agregarlas en un solo
+// `alterTable` es más rápido, pero si una ya está el ALTER entero falla.
+for (const [nombre, definir] of NUEVAS) {
+  if (await knex.schema.hasColumn('leads', nombre)) continue;
+  await knex.schema.alterTable('leads', definir);
+}
+
+// Tablas
+if (!(await knex.schema.hasTable('mi_tabla'))) { /* createTable */ }
+
+// Índices: knex no tiene `hasIndex`, así que se pregunta a information_schema
+// por el nombre que knex le pone por convención (`<tabla>_<columna>_index`).
+async function hasIndex(knex, tabla, indice) {
+  const [rows] = await knex.raw(
+    `SELECT 1 FROM information_schema.STATISTICS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ? LIMIT 1`,
+    [tabla, indice]
+  );
+  return rows.length > 0;
+}
+```
+
+Ese `hasIndex` se **repite** en cada migración en vez de vivir en un módulo
+compartido, y es a propósito: lo que una migración importa de afuera tiene que
+poder cambiar sin cambiarla (es la regla 1 otra vez).
+
+El `down()` se escribe simétrico —quitando solo lo que esté— porque uno que
+asume el estado completo no se puede correr después de un `up()` que murió a la
+mitad, que es justamente la única situación para la que existe.
+
+Y un backfill que sella un dato va con `whereNull(<la columna>)`: no es solo
+para que el reintento sea rápido, es que un sello se escribe una vez y volver a
+pasarle por encima rompe la regla que la migración vino a establecer.
+
+**Las migraciones ya aplicadas no se reescriben** para cumplir nada de esto:
+cambiar una que corrió en producción es la otra forma de dejar la base y el
+código diciendo cosas distintas. El test las exige desde `20261125000000`.
+
 ### Migraciones existentes
 
 | Archivo | Descripción |

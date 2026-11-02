@@ -25,33 +25,68 @@
  * Va en la misma tabla y no en una nueva: es un atributo de ESA reunión, nace
  * y muere con ella, y partirlo obligaría a unir dos tablas en cada lectura de
  * la agenda.
+ *
+ * Cada paso pregunta antes de hacer porque en MySQL el DDL **no es
+ * transaccional**: una migración que muere a la mitad deja su DDL aplicado y a
+ * sí misma sin registrar, y el reintento choca contra "Duplicate column name"
+ * sin forma de avanzar ni de volver atrás. Pasó el 01/11/2026 con la migración
+ * de atribución y la única salida fue tocar la base a mano.
  */
-export async function up(knex) {
-  await knex.schema.alterTable('scheduled_meetings', (table) => {
-    /*
-     * 'asistio' | 'no_asistio'. Texto y no booleano porque el tercer estado ya
-     * es el null, y porque esto crece: "reprogramada en el acto" y "asistió
-     * tarde" son desenlaces que el equipo distingue al hablar, y agregarlos a
-     * un booleano obliga a una migración de datos.
-     */
-    table.string('attendance', 16).nullable();
-    table.timestamp('attendance_at').nullable();
-    table.integer('attendance_by').unsigned().nullable()
-      .references('id').inTable('users').onDelete('SET NULL');
 
-    // De este campo cuelgan los conteos del reporte por anuncio y del reporte
-    // de setters, que filtran por él sobre rangos de fechas.
-    table.index('attendance');
-  });
+/** Las columnas nuevas, para poder agregar solo las que falten. */
+const NUEVAS = [
+  /*
+   * 'asistio' | 'no_asistio'. Texto y no booleano porque el tercer estado ya
+   * es el null, y porque esto crece: "reprogramada en el acto" y "asistió
+   * tarde" son desenlaces que el equipo distingue al hablar, y agregarlos a un
+   * booleano obliga a una migración de datos.
+   */
+  ['attendance', (table) => table.string('attendance', 16).nullable()],
+  ['attendance_at', (table) => table.timestamp('attendance_at').nullable()],
+  ['attendance_by', (table) => table.integer('attendance_by').unsigned().nullable()
+    .references('id').inTable('users').onDelete('SET NULL')]
+];
+
+/*
+ * Se repite en cada migración en vez de vivir en un módulo compartido, y es a
+ * propósito: una migración es una foto de un momento del esquema, así que lo
+ * que importa de afuera tiene que poder cambiar sin cambiarla. Un ayudante
+ * compartido que alguien corrija el año que viene reescribiría lo que hizo esta.
+ */
+async function hasIndex(knex, tabla, indice) {
+  const [rows] = await knex.raw(
+    `SELECT 1 FROM information_schema.STATISTICS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ? LIMIT 1`,
+    [tabla, indice]
+  );
+  return rows.length > 0;
+}
+
+export async function up(knex) {
+  for (const [nombre, definir] of NUEVAS) {
+    if (await knex.schema.hasColumn('scheduled_meetings', nombre)) continue;
+    await knex.schema.alterTable('scheduled_meetings', definir);
+  }
+
+  // De este campo cuelgan los conteos del reporte por anuncio y del reporte de
+  // setters, que filtran por él sobre rangos de fechas.
+  if (!(await hasIndex(knex, 'scheduled_meetings', 'scheduled_meetings_attendance_index'))) {
+    await knex.schema.alterTable('scheduled_meetings', (table) => table.index('attendance'));
+  }
 }
 
 export async function down(knex) {
-  await knex.schema.alterTable('scheduled_meetings', (table) => {
-    table.dropIndex('attendance');
-    table.dropForeign('attendance_by');
+  if (await hasIndex(knex, 'scheduled_meetings', 'scheduled_meetings_attendance_index')) {
+    await knex.schema.alterTable('scheduled_meetings', (table) => table.dropIndex('attendance'));
+  }
 
-    table.dropColumn('attendance_by');
-    table.dropColumn('attendance_at');
-    table.dropColumn('attendance');
-  });
+  for (const [nombre] of [...NUEVAS].reverse()) {
+    if (!(await knex.schema.hasColumn('scheduled_meetings', nombre))) continue;
+    await knex.schema.alterTable('scheduled_meetings', (table) => {
+      // La clave foránea se suelta antes de la columna: MySQL no deja dropear
+      // una columna que todavía sostiene una restricción.
+      if (nombre === 'attendance_by') table.dropForeign(nombre);
+      table.dropColumn(nombre);
+    });
+  }
 }

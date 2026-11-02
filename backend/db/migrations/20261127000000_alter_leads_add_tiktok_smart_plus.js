@@ -9,9 +9,9 @@
  * gasto se reporta al padre y, según el endpoint, la descarga de leads puede
  * traer el padre, la pieza, o ninguno de los dos.
  *
- * Hasta ahora el CRM guardaba un solo `tiktok_ad_id` y nada más, así que de un
- * lead de Smart+ no se podía decir qué pieza lo trajo **ni se podía decir que no
- * se sabía**: salía como un lead de ese anuncio, igual que uno de una campaña
+ * Hasta ahora el CRM guardaba un solo `tiktok_ad_id`, así que de un lead de
+ * Smart+ no se podía decir qué pieza lo trajo **ni se podía decir que no se
+ * sabía**: salía como un lead de ese anuncio, igual que uno de una campaña
  * simple. Las columnas que se agregan son las que permiten distinguir las dos
  * situaciones.
  *
@@ -48,38 +48,64 @@
  * la atribución de TikTok vive aparte de la de Meta: de `meta_leadgen_id`
  * cuelgan la conciliación y el backfill de Meta, que le preguntan a la Graph API
  * por cada id que encuentran.
+ *
+ * Cada paso pregunta antes de hacer porque en MySQL el DDL **no es
+ * transaccional**: una migración que muere a la mitad deja su DDL aplicado y a
+ * sí misma sin registrar, y el reintento choca contra "Duplicate column name"
+ * sin forma de avanzar ni de volver atrás (pasó el 01/11/2026 con la migración
+ * de atribución).
  */
+
+/** Las columnas nuevas, para poder agregar solo las que falten. */
+const NUEVAS = [
+  // Los ids de TikTok tienen 19 dígitos y viajan como texto: cualquier paso por
+  // `Number` les cambia los últimos (ver `leadOrigin.js`).
+  ['tiktok_parent_ad_id', (table) => table.string('tiktok_parent_ad_id', 40).nullable()],
+  ['tiktok_creative_id', (table) => table.string('tiktok_creative_id', 40).nullable()],
+  ['tiktok_video_id', (table) => table.string('tiktok_video_id', 60).nullable()],
+  ['tiktok_video_name', (table) => table.string('tiktok_video_name', 255).nullable()],
+  ['tiktok_creative_valid_from', (table) => table.timestamp('tiktok_creative_valid_from').nullable()],
+  ['tiktok_creative_valid_to', (table) => table.timestamp('tiktok_creative_valid_to').nullable()]
+];
+
+/*
+ * Se repite en cada migración en vez de vivir en un módulo compartido, y es a
+ * propósito: una migración es una foto de un momento del esquema, así que lo
+ * que importa de afuera tiene que poder cambiar sin cambiarla.
+ */
+async function hasIndex(knex, tabla, indice) {
+  const [rows] = await knex.raw(
+    `SELECT 1 FROM information_schema.STATISTICS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ? LIMIT 1`,
+    [tabla, indice]
+  );
+  return rows.length > 0;
+}
+
 export async function up(knex) {
-  await knex.schema.alterTable('leads', (table) => {
-    // Los ids de TikTok tienen 19 dígitos y viajan como texto: cualquier paso
-    // por `Number` les cambia los últimos (ver `leadOrigin.js`).
-    table.string('tiktok_parent_ad_id', 40).nullable();
-    table.string('tiktok_creative_id', 40).nullable();
-    table.string('tiktok_video_id', 60).nullable();
-    table.string('tiktok_video_name', 255).nullable();
+  for (const [nombre, definir] of NUEVAS) {
+    if (await knex.schema.hasColumn('leads', nombre)) continue;
+    await knex.schema.alterTable('leads', definir);
+  }
 
-    table.timestamp('tiktok_creative_valid_from').nullable();
-    table.timestamp('tiktok_creative_valid_to').nullable();
-
-    /*
-     * El índice va en el PADRE y no en la pieza: es el nivel por el que se
-     * agrupa para cruzar contra el gasto, y mientras TikTok no entregue el nivel
-     * hijo la pieza va a estar vacía en casi todas las filas — un índice sobre
-     * una columna vacía cuesta escrituras y no ahorra lecturas.
-     */
-    table.index('tiktok_parent_ad_id');
-  });
+  /*
+   * El índice va en el PADRE y no en la pieza: es el nivel por el que se agrupa
+   * para cruzar contra el gasto, y mientras TikTok no entregue el nivel hijo la
+   * pieza va a estar vacía en casi todas las filas — un índice sobre una columna
+   * vacía cuesta escrituras y no ahorra lecturas.
+   */
+  if (!(await hasIndex(knex, 'leads', 'leads_tiktok_parent_ad_id_index'))) {
+    await knex.schema.alterTable('leads', (table) => table.index('tiktok_parent_ad_id'));
+  }
 }
 
 export async function down(knex) {
-  await knex.schema.alterTable('leads', (table) => {
-    table.dropIndex('tiktok_parent_ad_id');
+  if (await hasIndex(knex, 'leads', 'leads_tiktok_parent_ad_id_index')) {
+    await knex.schema.alterTable('leads', (table) => table.dropIndex('tiktok_parent_ad_id'));
+  }
 
-    table.dropColumn('tiktok_creative_valid_to');
-    table.dropColumn('tiktok_creative_valid_from');
-    table.dropColumn('tiktok_video_name');
-    table.dropColumn('tiktok_video_id');
-    table.dropColumn('tiktok_creative_id');
-    table.dropColumn('tiktok_parent_ad_id');
-  });
+  for (const [nombre] of [...NUEVAS].reverse()) {
+    if (!(await knex.schema.hasColumn('leads', nombre))) continue;
+    await knex.schema.alterTable('leads', (table) => table.dropColumn(nombre));
+  }
 }
