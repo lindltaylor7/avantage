@@ -19,6 +19,13 @@ import {
   emptyBuckets,
   phoneKeyOf
 } from './reconciliationBuckets.js';
+import {
+  BRIDGE_SCHEMAS,
+  MINIMUM_ACCESS,
+  bridgeEnvelope,
+  listCapNotice,
+  pageCapNotice
+} from './bridgeContract.js';
 
 /**
  * Importación de los leads de **formulario instantáneo de TikTok** (TikTok
@@ -174,7 +181,23 @@ const META_COLUMNS = [
   ['adName', /^(ad name|nombre del anuncio)$/],
   ['adgroupName', /^(adgroup name|ad group name|nombre del grupo de anuncios)$/],
   ['campaignName', /^(campaign name|nombre de la campana)$/],
-  ['pageName', /^(page name|nombre de la pagina|nombre del formulario)$/]
+  ['pageName', /^(page name|nombre de la pagina|nombre del formulario)$/],
+  /*
+   * La jerarquía de Smart+. No se sabe si esta cuenta las entrega —TikTok no
+   * expone el nivel hijo hoy— pero las cabeceras se reconocen igual por dos
+   * razones: el día que aparezcan se capturan solas, y mientras no aparezcan
+   * NO caen en las respuestas del formulario, que es donde terminaban los
+   * nombres del anuncio antes de reconocerlos (escritos en las notas de la
+   * ficha como si la persona hubiera contestado "ID del video: 7412").
+   *
+   * Los tres son identificadores DISTINTOS: el anuncio compra el presupuesto,
+   * la pieza es la combinación que armó TikTok, y el video es el archivo
+   * subido. Un mismo video vive en varias piezas.
+   */
+  ['parentAdId', /^(parent ad id|smart ad id|id del anuncio padre|id del anuncio principal)$/],
+  ['creativeId', /^(creative id|ad creative id|id de la creatividad|id del creativo)$/],
+  ['videoId', /^(video id|material id|id del video|id del material)$/],
+  ['videoName', /^(video name|material name|nombre del video|nombre del material)$/]
 ];
 
 /** Qué metadato es esta cabecera, o null si es una pregunta del formulario. */
@@ -315,7 +338,18 @@ export function atribucionDe(lead = {}) {
     campaignId: lead.campaignId || null,
     adName: lead.adName || null,
     adgroupName: lead.adgroupName || null,
-    campaignName: lead.campaignName || null
+    campaignName: lead.campaignName || null,
+    /*
+     * La jerarquía de Smart+, si la descarga la trajo. Vacía es el caso normal
+     * hoy y significa "la pieza es desconocida", que es un valor y no un hueco:
+     * un reporte que lo muestra permite ir a buscar el acceso que falta, uno
+     * que lo rellena con el video que más impresiones tuvo ese día no — y de
+     * ese número cuelga cortar una pieza que quizá era la que vendía.
+     */
+    parentAdId: lead.parentAdId || null,
+    creativeId: lead.creativeId || null,
+    videoId: lead.videoId || null,
+    videoName: lead.videoName || null
   };
 }
 
@@ -469,6 +503,10 @@ export async function persistTikTokLead(leadService, data, { conflicts = null } 
     tiktokAdName: atribucion.adName,
     tiktokAdgroupName: atribucion.adgroupName,
     tiktokCampaignName: atribucion.campaignName,
+    tiktokParentAdId: atribucion.parentAdId,
+    tiktokCreativeId: atribucion.creativeId,
+    tiktokVideoId: atribucion.videoId,
+    tiktokVideoName: atribucion.videoName,
     tiktokCreatedTime: atribucion.createdTime
   });
 
@@ -478,7 +516,11 @@ export async function persistTikTokLead(leadService, data, { conflicts = null } 
 /** Las columnas que esta importación escribe, para saber si cambió algo. */
 const TIKTOK_ATTRIBUTION_COLUMNS = [
   'tiktok_lead_id', 'tiktok_page_id', 'tiktok_ad_id', 'tiktok_adgroup_id', 'tiktok_campaign_id',
-  'tiktok_ad_name', 'tiktok_adgroup_name', 'tiktok_campaign_name', 'tiktok_created_time'
+  'tiktok_ad_name', 'tiktok_adgroup_name', 'tiktok_campaign_name', 'tiktok_created_time',
+  // La jerarquía de Smart+ entra en la comparación: una corrida que completa
+  // solo la pieza creativa SÍ arregló algo, y sin esto el reporte diría que no
+  // cambió nada.
+  'tiktok_parent_ad_id', 'tiktok_creative_id', 'tiktok_video_id', 'tiktok_video_name'
 ];
 
 export class TikTokLeadsService {
@@ -519,10 +561,27 @@ export class TikTokLeadsService {
    */
   async listForms(advertiserId) {
     try {
+      /*
+       * El aviso de recorte se recoge acá y viaja al reporte: una cuenta con
+       * más formularios que el tope de páginas del paginador dejaba fuera los
+       * últimos sin que nada lo dijera, y sus leads no figuraban ni como
+       * presentes ni como faltantes.
+       */
+      const recortes = [];
       const list = await this.ads.apiPaged('page/get/', {
         advertiser_id: advertiserId,
         business_type: 'LEAD_GEN',
         page_size: FORMS_PAGE_SIZE
+      }, {
+        onTruncate: ({ paginasLeidas, paginasTotales, tope }) => {
+          const aviso = pageCapNotice({
+            que: 'Formularios instantáneos de TikTok',
+            paginasLeidas,
+            paginasTotales,
+            tope
+          });
+          if (aviso) recortes.push(aviso);
+        }
       });
       const forms = list.map((page) => ({
         id: String(page.page_id ?? page.id ?? ''),
@@ -530,11 +589,12 @@ export class TikTokLeadsService {
         status: page.status || page.page_status || null
       })).filter((f) => f.id);
 
-      if (forms.length) return { forms, source: 'tiktok', aviso: null };
+      if (forms.length) return { forms, source: 'tiktok', aviso: null, recortes };
       return {
         forms,
         source: 'tiktok',
-        aviso: 'La cuenta no tiene ningún formulario instantáneo (Instant Page) de generación de leads.'
+        aviso: 'La cuenta no tiene ningún formulario instantáneo (Instant Page) de generación de leads.',
+        recortes
       };
     } catch (error) {
       const known = await this.#knownPageIds();
@@ -586,6 +646,21 @@ export class TikTokLeadsService {
       if (key && !out.has(key)) out.set(key, row);
     }
     return out;
+  }
+
+  /**
+   * La misma descarga que usa la importación, expuesta para diagnosticar.
+   *
+   * Existe porque la pregunta "¿qué nivel de la jerarquía trae la descarga?"
+   * no se puede contestar leyendo el código —depende de la cuenta y de la
+   * versión de la API— y la alternativa era hacer pública la privada o
+   * copiarla en el script, que es como se llega a que el diagnóstico pruebe
+   * un camino distinto del que corre en producción.
+   *
+   * Solo LEE: devuelve las filas tal como vienen y no da de alta nada.
+   */
+  async fetchLeadsForDiagnosis(pageId, advertiserId, { from = null, to = null } = {}) {
+    return this.#fetchLeadsForPage(advertiserId, pageId, { from, to });
   }
 
   /** Los `page_id` que ya tienen al menos un lead en el CRM. */
@@ -910,7 +985,25 @@ export class TikTokLeadsService {
    */
   async run({ from = null, to = null, apply = false } = {}) {
     const advertiser = await this.ads.resolveAdvertiser();
-    const { forms, source, aviso } = await this.listForms(advertiser.id);
+    const { forms, source, aviso, recortes = [] } = await this.listForms(advertiser.id);
+
+    /*
+     * Los formularios que de verdad se van a recorrer, y el aviso si quedaron
+     * afuera. `forms.slice(0, MAX_FORMS)` recortaba en silencio: en una cuenta
+     * con más de cien formularios, los que sobraban no se comparaban contra
+     * nada y sus leads no figuraban ni como presentes ni como faltantes — una
+     * comparación recortada que devolvía un resultado con pinta de completo.
+     */
+    const revisados = forms.slice(0, MAX_FORMS);
+    const avisos = [
+      ...recortes,
+      listCapNotice({
+        que: 'Formularios instantáneos revisados',
+        revisados: revisados.length,
+        totales: forms.length,
+        tope: MAX_FORMS
+      })
+    ].filter(Boolean);
 
     const known = await this.leadService.getKnownTikTokLeadIds();
 
@@ -951,6 +1044,30 @@ export class TikTokLeadsService {
        * «conversiones» del Ads Manager, que no cuenta envíos de formulario.
        */
       comparabilidad: COMPARABILIDAD,
+      /*
+       * El sobre del puente: cuántos formularios hay, cuántos se revisaron, con
+       * qué límites y si algo quedó fuera. Un consumidor automático tiene que
+       * poder contestar "¿me falta algo?" sin leer este archivo.
+       */
+      ...bridgeEnvelope({
+        esquema: BRIDGE_SCHEMAS.tiktokLeads,
+        totalFilas: forms.length,
+        filas: revisados.length,
+        limites: {
+          formularios_max: MAX_FORMS,
+          formularios_por_pagina: FORMS_PAGE_SIZE,
+          intentos_estado_tarea: TASK_POLL_ATTEMPTS,
+          intentos_descarga: DOWNLOAD_RETRY_ATTEMPTS
+        },
+        avisos
+      }),
+      /*
+       * El acceso mínimo que hace falta y qué deja de funcionar sin él. Va en la
+       * respuesta porque el reflejo ante un 403 de una API de anuncios es pedir
+       * todos los permisos y reautorizar, y eso amplía el alcance del token a
+       * ciegas (ver `MINIMUM_ACCESS`).
+       */
+      acceso_minimo: MINIMUM_ACCESS,
       forms: [],
       errores: []
     };
@@ -965,7 +1082,7 @@ export class TikTokLeadsService {
     const seenPhoneKeys = new Set();
     const windowStart = from ? new Date(`${from}T00:00:00-05:00`) : null;
 
-    for (const form of forms.slice(0, MAX_FORMS)) {
+    for (const form of revisados) {
       const row = {
         page_id: form.id,
         nombre: form.name,

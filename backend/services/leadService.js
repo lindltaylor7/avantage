@@ -339,6 +339,10 @@ export class LeadService {
     tiktokAdgroupName,
     tiktokCampaignName,
     tiktokCreatedTime,
+    tiktokParentAdId,
+    tiktokCreativeId,
+    tiktokVideoId,
+    tiktokVideoName,
     ctwaAdId,
     ctwaClid,
     ctwaSourceType,
@@ -430,6 +434,15 @@ export class LeadService {
       tiktok_adgroup_name: tiktokAdgroupName || null,
       tiktok_campaign_name: tiktokCampaignName || null,
       tiktok_created_time: tiktokCreatedTime ? new Date(tiktokCreatedTime) : null,
+      /*
+       * Smart+: el anuncio PADRE es el nivel en el que TikTok reporta el gasto,
+       * y la pieza es la combinación que la plataforma armó. Vacíos es el caso
+       * normal y significa "pieza desconocida" — nunca se infiere.
+       */
+      tiktok_parent_ad_id: tiktokParentAdId || null,
+      tiktok_creative_id: tiktokCreativeId || null,
+      tiktok_video_id: tiktokVideoId || null,
+      tiktok_video_name: tiktokVideoName || null,
       // El anuncio del que salió el clic que abrió esta conversación. Se
       // escribe en el lead y no solo en el `referral` del mensaje porque el
       // webhook responde 200 antes de procesar: un primer mensaje que no se
@@ -903,7 +916,7 @@ export class LeadService {
    * WhatsApp y después llenó el formulario de TikTok es el caso normal, no la
    * excepción.
    */
-  async attachTikTokLeadToExisting(lead, { leadId, pageId, adId, adgroupId, campaignId, adName, adgroupName, campaignName, createdTime, note, method = null }) {
+  async attachTikTokLeadToExisting(lead, { leadId, pageId, adId, adgroupId, campaignId, adName, adgroupName, campaignName, parentAdId, creativeId, videoId, videoName, createdTime, note, method = null }) {
     const patch = {};
 
     /*
@@ -932,6 +945,12 @@ export class LeadService {
       if (!lead.tiktok_adgroup_name && adgroupName) patch.tiktok_adgroup_name = adgroupName;
       if (!lead.tiktok_campaign_name && campaignName) patch.tiktok_campaign_name = campaignName;
       if (!lead.tiktok_created_time && createdTime) patch.tiktok_created_time = new Date(createdTime);
+      // La jerarquía de Smart+: el padre (donde TikTok reporta el gasto) y la
+      // pieza, que son niveles distintos y no se deducen uno del otro.
+      if (!lead.tiktok_parent_ad_id && parentAdId) patch.tiktok_parent_ad_id = parentAdId;
+      if (!lead.tiktok_creative_id && creativeId) patch.tiktok_creative_id = creativeId;
+      if (!lead.tiktok_video_id && videoId) patch.tiktok_video_id = videoId;
+      if (!lead.tiktok_video_name && videoName) patch.tiktok_video_name = videoName;
     }
 
     /*

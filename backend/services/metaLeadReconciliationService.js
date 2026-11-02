@@ -10,6 +10,12 @@ import {
   emptyBuckets,
   phoneKeyOf
 } from './reconciliationBuckets.js';
+import {
+  BRIDGE_SCHEMAS,
+  MINIMUM_ACCESS,
+  bridgeEnvelope,
+  pageCapNotice
+} from './bridgeContract.js';
 
 const GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION || 'v21.0';
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
@@ -182,7 +188,27 @@ export class MetaLeadReconciliationService {
         next = data.paging?.next || null;
       } while (next && ++pages < MAX_PAGES);
 
-      return { forms, source: 'meta', aviso: null };
+      /*
+       * Quedó un `paging.next` y se acabaron las páginas permitidas: los
+       * formularios que seguían no existen para esta comparación. Antes esto
+       * no se decía en ninguna parte, así que sus leads no figuraban ni como
+       * presentes ni como faltantes — y la conciliación devolvía un resultado
+       * con pinta de completo.
+       *
+       * La Graph API pagina por cursor y no dice cuántas páginas hay, así que
+       * el aviso se arma con `MAX_PAGES + 1` como "al menos una más": el
+       * número exacto no se puede saber, y lo que importa es que falta.
+       */
+      const recortes = next
+        ? [pageCapNotice({
+          que: 'Formularios de la Página en Meta',
+          paginasLeidas: pages,
+          paginasTotales: pages + 1,
+          tope: MAX_PAGES
+        })].filter(Boolean)
+        : [];
+
+      return { forms, source: 'meta', aviso: null, recortes };
     } catch (error) {
       const knownIds = await this.leadService.getKnownMetaFormIds();
       if (!knownIds.length) throw error;
@@ -191,7 +217,8 @@ export class MetaLeadReconciliationService {
       return {
         forms: knownIds.map((id) => ({ id, name: null, status: null })),
         source: 'crm',
-        aviso: `No se pudieron listar los formularios desde Meta (${error.message}). Se compararon los ${knownIds.length} que ya tienen al menos un lead en el CRM; un formulario que nunca entregó ninguno queda fuera de esta comparación. Agregá el permiso pages_manage_ads al token para cubrirlos todos.`
+        aviso: `No se pudieron listar los formularios desde Meta (${error.message}). Se compararon los ${knownIds.length} que ya tienen al menos un lead en el CRM; un formulario que nunca entregó ninguno queda fuera de esta comparación. Agregá el permiso pages_manage_ads al token para cubrirlos todos.`,
+        recortes: []
       };
     }
   }
@@ -294,7 +321,7 @@ export class MetaLeadReconciliationService {
       this.leadService.getKnownMetaLeadgenIds(),
       this.leadService.getMetaLeadgenIdsWithAd()
     ]);
-    const [{ forms, source, aviso }, suscripcion] = await Promise.all([
+    const [{ forms, source, aviso, recortes = [] }, suscripcion] = await Promise.all([
       this.listForms(),
       this.checkSubscription()
     ]);
@@ -313,6 +340,25 @@ export class MetaLeadReconciliationService {
        * trae mientras eso no se arregle.
        */
       suscripcion,
+      /*
+       * El sobre del puente: cuántos formularios hay, cuántos entraron en la
+       * comparación, con qué límites y si algo quedó fuera. La Graph API pagina
+       * por cursor y no dice el total, así que `total_filas` es lo que se pudo
+       * leer: cuando el tope de páginas cortó el listado, el aviso lo dice con
+       * todas las letras en vez de dejar un total que parece completo.
+       */
+      ...bridgeEnvelope({
+        esquema: BRIDGE_SCHEMAS.metaReconciliation,
+        totalFilas: forms.length,
+        filas: forms.length,
+        limites: {
+          formularios_por_pagina: PAGE_SIZE,
+          leads_por_pagina: PAGE_SIZE,
+          paginas_max: MAX_PAGES
+        },
+        avisos: recortes
+      }),
+      acceso_minimo: MINIMUM_ACCESS,
       forms: [],
       by_platform: {},
       /*

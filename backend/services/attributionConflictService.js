@@ -1,5 +1,6 @@
 import { db } from '../db/connection.js';
 import { CONFLICT_REASONS } from './attributionEvidence.js';
+import { BRIDGE_SCHEMAS, bridgeEnvelope } from './bridgeContract.js';
 
 /**
  * Los emparejamientos de atribución que necesitan que los resuelva una
@@ -99,13 +100,19 @@ export class AttributionConflictService {
       .offset(desde);
 
     return {
-      total: Number(total) || 0,
-      limit: tope,
-      offset: desde,
-      // Avisa de que la página no es todo, que es justo lo que un consumidor
-      // automático no puede adivinar mirando el arreglo (ver la regla del
-      // puente en el README).
-      truncated: desde + rows.length < (Number(total) || 0),
+      /*
+       * El mismo sobre que las dos conciliaciones (`bridgeEnvelope`): total,
+       * filas entregadas, offset, límites y el aviso de recorte. Compartirlo es
+       * lo que permite consumir los tres puentes con un solo lector, y lo que
+       * evita que el cuarto se invente su propia forma de decir "hay más".
+       */
+      ...bridgeEnvelope({
+        esquema: BRIDGE_SCHEMAS.attributionConflicts,
+        totalFilas: Number(total) || 0,
+        filas: rows.length,
+        offset: desde,
+        limites: { por_pagina_max: 500, por_pagina_default: 100 }
+      }),
       conflicts: rows.map((row) => ({
         ...row,
         candidate_lead_ids: parseJson(row.candidate_lead_ids, []),

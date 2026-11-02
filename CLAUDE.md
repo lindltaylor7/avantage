@@ -977,6 +977,61 @@ antes de tocar el arranque de producción.
   comparar por igualdad contaría como «ya estaba» a quien acaba de llegar; un lead de formulario
   que después escribe por WhatsApp queda del lado correcto, porque entre el formulario y el mensaje
   pasan minutos u horas.
+- **Un puente de datos se describe a sí mismo** (`backend/services/bridgeContract.js`,
+  `bridgeEnvelope()`, `pageCapNotice()`, `listCapNotice()`). Todos los puentes del CRM tenían el
+  mismo agujero: **recortaban en silencio**. `forms.slice(0, MAX_FORMS)` cortaba a 100 formularios
+  en la importación de TikTok; `listForms()` de Meta corta a `MAX_PAGES` páginas de la Graph API y
+  si quedaba un `paging.next` los formularios que seguían no existían para la comparación;
+  `#getPaged()` de TikTok se detenía en la página 20 aunque `total_page` dijera 35. El daño es peor
+  que un error: la comparación devuelve un resultado que **parece completo**. «Están todos» y
+  «están todos los que miré» se escriben igual en la pantalla, y de esa diferencia cuelga ir a
+  buscar leads perdidos o darlos por recuperados.
+  El sobre lleva `esquema` (nombre y **versión**, que se sube a mano cuando cambia el significado
+  de un campo y no cuando se agrega uno), `total_filas`, `filas`, `offset`, `limites` —publicados
+  siempre, incluso cuando nada se recortó: un límite que solo se descubre al chocarlo es un límite
+  indocumentado— y `recortado` + `avisos`. Los tres últimos juntos y no uno: un total sin
+  `recortado` obliga al consumidor a restar para enterarse, y el que no resta se lleva la mitad de
+  los datos creyendo que son todos. Un `total_filas` en `null` es «no se puede saber» (la Graph API
+  pagina por cursor) y **no** se lee como recorte. El aviso lo agrega `bridgeEnvelope` y no cada
+  llamador: puesto en el llamador, el siguiente puente se olvida de ponerlo. `apiPaged()` de TikTok
+  acepta `onTruncate` —un callback y no un campo en la instancia, para no dejar estado compartido
+  entre corridas—.
+  **El acceso mínimo está escrito** (`MINIMUM_ACCESS`, y viaja en la respuesta de las dos
+  conciliaciones): cada permiso dice para qué es, qué deja de funcionar sin él y cómo se consigue.
+  Va en un solo sitio porque el reflejo ante un 403 de una API de anuncios es pedir todos los
+  permisos y reautorizar la app, y eso amplía el alcance del token a ciegas — un token con más
+  permisos de los que usa es un token que, filtrado, hace más daño.
+- **Smart+ tiene dos niveles, y el que no se sabe se declara desconocido**
+  (`backend/services/smartPlusLevel.js`, columnas `tiktok_parent_ad_id`, `tiktok_creative_id`,
+  `tiktok_video_id`, `tiktok_video_name`, `tiktok_creative_valid_from` / `_to`). Una campaña Smart+
+  no tiene un anuncio y una pieza: tiene un anuncio **padre** y, debajo, piezas creativas que
+  TikTok combina y rota sola. El CRM guardaba un solo `tiktok_ad_id`, así que de un lead de Smart+
+  no se podía decir qué pieza lo trajo **ni se podía decir que no se sabía**: salía como un lead de
+  ese anuncio, igual que uno de una campaña simple.
+  El gasto se reporta al **padre** (`SPEND_LEVEL`), así que el costo por cita y por venta se
+  calculan ahí: con el gasto en el padre y las citas en la pieza, la división no da el costo de
+  nada. Y la pieza queda `desconocida` — **nunca se infiere por descarte**. Si una campaña tiene
+  tres videos y el lead trae solo el id del padre, atribuirlo al que más impresiones tuvo ese día
+  produce un número que parece cierto, que nadie puede auditar, y del que cuelga cortar una pieza
+  que quizá era la que vendía. En una campaña que **no** es Smart+ el anuncio es su propio padre,
+  para que la distinción no le quite la atribución a la mayoría de los leads.
+  **Anuncio, pieza y video son tres identificadores distintos** y van en columnas separadas: el
+  anuncio compra el presupuesto, la pieza es la combinación que armó TikTok y el video es el
+  archivo subido. Un mismo video vive en varias piezas y una pieza puede cambiar de anuncio, así
+  que mezclarlos hace que «el video que mejor convierte» y «el anuncio que mejor convierte»
+  devuelvan respuestas distintas sin que se sepa cuál es cuál; el nombre del **archivo** tampoco es
+  ninguno de los tres. La **vigencia** de la pieza se guarda para no dividir el gasto de un período
+  por leads cuya pieza ni existía entonces, que es la forma más silenciosa de que un costo por lead
+  salga absurdo; `withinValidity()` devuelve `null` —y no `false`— cuando no hay con qué comprobar.
+  La hoja «Ruta de leads» publica «Nivel de atribución», el id del padre, el de la pieza, el del
+  video, su nombre y la vigencia, y el agregado por anuncio cuenta `piezaDesconocida`.
+  Las columnas nacen vacías y **no hay backfill**: TikTok no expone el nivel hijo en esta cuenta
+  hoy, el dato histórico no está en ningún lado, y eso es la respuesta correcta y no una tarea mal
+  hecha. `backend/scripts/diagnosticarSmartPlus.js` (solo lee) contesta las tres preguntas que no
+  se pueden contestar leyendo el código: qué nivel devuelve la descarga de leads, cuál el reporte
+  de gasto, y si los ids de los dos lados son del mismo nivel — dos endpoints de la misma API
+  pueden devolver niveles distintos con el mismo nombre de campo, y ahí el cruce «cierra»
+  emparejando cosas que no son la misma.
 - Lo que Meta nos manda **vuelve a Meta**: `metaConversionsService.js` le devuelve, por la
   **Conversions API**, en qué etapa del funnel terminó cada lead que llegó de un anuncio
   (`/api/meta-capi` bajo `webhooks.view`, pantalla en `MetaConversionsPanel.vue` dentro de

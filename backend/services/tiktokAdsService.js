@@ -454,8 +454,17 @@ export class TikTokAdsService {
     return this.#get(path, params);
   }
 
-  async apiPaged(path, params = {}) {
-    return this.#getPaged(path, params);
+  /**
+   * @param {function} [onTruncate] se llama con `{ path, paginasLeidas,
+   *   paginasTotales, tope }` cuando el tope de páginas corta el recorrido.
+   *   Es un callback y no un campo en la instancia para no dejar estado
+   *   compartido entre corridas; y existe porque este paginador se detenía en
+   *   la página 20 aunque `total_page` dijera 35, **sin decírselo a nadie** —
+   *   una comparación recortada que devuelve un resultado con pinta de
+   *   completo.
+   */
+  async apiPaged(path, params = {}, { onTruncate = null } = {}) {
+    return this.#getPaged(path, params, { onTruncate });
   }
 
   /**
@@ -505,8 +514,11 @@ export class TikTokAdsService {
   }
 
   /** GET paginado (`page`/`page_info.total_page`), acumulando `data.list`. */
-  async #getPaged(path, params = {}) {
+  async #getPaged(path, params = {}, { onTruncate = null } = {}) {
     const out = [];
+    let totalPages = 1;
+    let leidas = 0;
+
     for (let page = 1; page <= MAX_PAGES; page++) {
       const data = await this.#get(path, {
         ...params,
@@ -514,9 +526,18 @@ export class TikTokAdsService {
         page_size: String(params.page_size ?? PAGE_SIZE)
       });
       out.push(...(data?.list || []));
-      const totalPages = Number(data?.page_info?.total_page || 1);
+      leidas = page;
+      totalPages = Number(data?.page_info?.total_page || 1);
       if (page >= totalPages) break;
     }
+
+    // El recorte se avisa, no se asume. Sin esto, un recorrido cortado en la
+    // página 20 de 35 devuelve una lista con pinta de completa.
+    if (totalPages > leidas) {
+      console.warn(`⚠️ [TikTok] ${path}: se leyeron ${leidas} de ${totalPages} páginas (tope ${MAX_PAGES}).`);
+      if (onTruncate) onTruncate({ path, paginasLeidas: leidas, paginasTotales: totalPages, tope: MAX_PAGES });
+    }
+
     return out;
   }
 

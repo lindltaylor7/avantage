@@ -4,6 +4,7 @@ import { db } from '../db/connection.js';
 import { campaignAdImageDir } from '../middleware/upload.js';
 import { PHONE_MATCH_KEY_SQL, phoneMatchKey } from './leadService.js';
 import { LEAD_ORIGIN_COLUMNS, bareSourceId, leadOrigin, onlyGreeted } from './leadOrigin.js';
+import { LEVELS, SPEND_LEVEL, levelLabel } from './smartPlusLevel.js';
 import { GENERIC_CONTACT_NAME } from './contactName.js';
 import { LOST_STATUSES, loadWinningStatuses } from './salesFunnelStage.js';
 
@@ -994,6 +995,25 @@ export class CampaignService {
          * lista de fichas que hay que revisar, y escondido no se revisa.
          */
         attributionConflict: !!origin.conflict,
+        /*
+         * La jerarquía de Smart+. En esas campañas TikTok reporta el gasto al
+         * anuncio PADRE y la pieza creativa puede no venir, así que el costo por
+         * cita y por venta se calculan al padre —los dos lados de la división
+         * hablan del mismo objeto— y la pieza se declara desconocida.
+         *
+         * Los tres ids son cosas distintas: el anuncio compra el presupuesto, la
+         * pieza es la combinación que armó TikTok y el video es el archivo
+         * subido. Van en columnas separadas porque un mismo video vive en varias
+         * piezas, y mezclarlos hace que "el video que mejor convierte" y "el
+         * anuncio que mejor convierte" den respuestas distintas.
+         */
+        attributionLevel: origin.creative ? origin.creative.level : null,
+        parentAdId: bareSourceId(origin.creative?.parentAdId || null),
+        creativeId: origin.creative?.creativeId || null,
+        videoId: origin.creative?.videoId || null,
+        videoName: origin.creative?.videoName || null,
+        creativeValidFrom: origin.creative?.vigencia?.desde || null,
+        creativeValidTo: origin.creative?.vigencia?.hasta || null,
         secondaryPlatforms: (origin.secondary || []).map((s) => s.platform).join(' + ') || null,
         // El id interno de la campaña del CRM, con el que el exportable
         // respeta el filtro de campañas de la pantalla.
@@ -1282,6 +1302,13 @@ export class CampaignService {
            * vendía.
            */
           sinFicha: 0,
+          /*
+           * Leads de este anuncio cuya PIEZA creativa no se conoce: en Smart+ el
+           * gasto se reporta al padre y la pieza puede no venir. Se cuenta para
+           * que la fila pueda decir "este costo es del anuncio padre, no de una
+           * pieza" en vez de dejar creer que mide una creatividad concreta.
+           */
+          piezaDesconocida: 0,
           quotedValue: 0
         };
         groups.set(key, group);
@@ -1300,6 +1327,7 @@ export class CampaignService {
       else if (c.crmStage === 'descartado') group.discarded += 1;
       else group.followUp += 1;
       if (c.paidRevenue === null) group.sinFicha += 1;
+      if (c.attributionLevel === LEVELS.padre) group.piezaDesconocida += 1;
       group.paidRevenue += c.paidRevenue || 0;
       group.billedRevenue += c.billedRevenue || 0;
       group.quotedValue += c.quotedValue || 0;

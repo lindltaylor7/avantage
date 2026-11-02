@@ -26,6 +26,8 @@
  * anuncios deja de cerrar.
  */
 
+import { SMART_PLUS_COLUMNS, creativeOf } from './smartPlusLevel.js';
+
 /** Los cinco valores de "Plataforma" que lee la hoja de marketing. */
 export const PLATFORMS = {
   meta: 'Meta',
@@ -139,7 +141,15 @@ function tiktokBlock(lead) {
       formId: text(lead.tiktok_page_id),
       headline: null,
       platformLeadId: leadId,
-      enteredAt: lead.tiktok_created_time || lead.created_at || null
+      enteredAt: lead.tiktok_created_time || lead.created_at || null,
+      /*
+       * La jerarquía de Smart+. En una campaña Smart+ el gasto se reporta al
+       * anuncio PADRE y la pieza creativa puede no venir: `creative.pieceKnown`
+       * dice si se sabe, y `attributionAdId` con qué id hay que atribuir — la
+       * pieza cuando se conoce, el padre cuando no. Nunca un id elegido entre
+       * candidatos (ver `smartPlusLevel.js`).
+       */
+      creative: creativeOf(lead)
     }
   };
 }
@@ -433,5 +443,7 @@ export const LEAD_ORIGIN_COLUMNS = [
   'tiktok_lead_id', 'tiktok_page_id', 'tiktok_ad_id', 'tiktok_adgroup_id', 'tiktok_campaign_id',
   'tiktok_created_time',
   'tiktok_ad_name', 'tiktok_adgroup_name', 'tiktok_campaign_name',
+  // La jerarquía de Smart+: el padre, la pieza, el video y su vigencia.
+  ...SMART_PLUS_COLUMNS,
   'ctwa_ad_id', 'ctwa_clid', 'ctwa_source_type', 'ctwa_headline', 'ctwa_created_time'
 ];

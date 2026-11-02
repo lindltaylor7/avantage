@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs';
+import { levelLabel } from './smartPlusLevel.js';
 
 /**
  * Exporta el rendimiento de campañas a un libro de Excel (.xlsx) con una hoja
@@ -318,6 +319,20 @@ function leadTrailColumns(currency) {
     // texto (ver `bareSourceId` y `TEXT_FMT`).
     { header: 'ID de origen', key: 'adSourceId', width: 20, fmt: TEXT_FMT },
     { header: 'Titular del anuncio', key: 'adHeadline', width: 38 },
+    /*
+     * La jerarquía de Smart+. Tres ids distintos y no uno: el ANUNCIO compra el
+     * presupuesto, la PIEZA es la combinación que armó TikTok y el VIDEO es el
+     * archivo subido — un mismo video vive en varias piezas. El nivel dice qué
+     * se puede afirmar: con "Anuncio padre (pieza desconocida)", el costo de esa
+     * fila es del padre y no de una creatividad concreta.
+     */
+    { header: 'Nivel de atribución', key: 'attributionLevel', width: 30 },
+    { header: 'ID del anuncio padre', key: 'parentAdId', width: 22, fmt: TEXT_FMT },
+    { header: 'ID de la pieza creativa', key: 'creativeId', width: 24, fmt: TEXT_FMT },
+    { header: 'ID del video', key: 'videoId', width: 22, fmt: TEXT_FMT },
+    { header: 'Video', key: 'videoName', width: 32 },
+    { header: 'Pieza vigente desde', key: 'creativeValidFrom', width: 20, fmt: DATE_FMT },
+    { header: 'Pieza vigente hasta', key: 'creativeValidTo', width: 20, fmt: DATE_FMT },
     { header: 'ID del lead en la plataforma', key: 'platformLeadId', width: 30, fmt: TEXT_FMT },
     // Con qué evidencia se supo todo lo anterior. Sin estas tres la hoja
     // afirma una plataforma y no deja comprobar cómo se llegó a ella.
@@ -682,6 +697,19 @@ export class CampaignExportService {
         attributionReconciledAt: toLocalDateTime(row.attributionReconciledAt),
         secondaryPlatforms: row.secondaryPlatforms || '-',
         schemaVersion: LEAD_TRAIL_SCHEMA_VERSION,
+
+        /*
+         * El nivel se nombra siempre, incluso "Desconocido": acá `-` no sirve
+         * —no es "no corresponde" sino "no lo sabemos"— y es justo lo que
+         * marketing va a ir a buscar para pedir el acceso que falta.
+         */
+        attributionLevel: levelLabel(row.attributionLevel),
+        parentAdId: asText(row.parentAdId) || faltante,
+        creativeId: asText(row.creativeId) || (row.paid ? 'desconocida' : '-'),
+        videoId: asText(row.videoId) || (row.paid ? 'desconocido' : '-'),
+        videoName: row.videoName || (row.paid ? 'desconocido' : '-'),
+        creativeValidFrom: toLocalDateTime(row.creativeValidFrom),
+        creativeValidTo: toLocalDateTime(row.creativeValidTo),
 
         /*
          * `null` es "no se puede saber" y `0` es "no entró nada". Un contacto
