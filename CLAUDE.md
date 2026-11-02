@@ -1025,6 +1025,44 @@ antes de tocar el arranque de producción.
   rechaza —acepta el evento y no atribuye nada—, el mismo fallo silencioso que el conjunto de
   datos cruzado. Aparte: v21.0 **expira el 21/01/2027**, así que la versión global hay que subirla
   igual, pero eso toca todas las integraciones y es un cambio con sus propias pruebas.
+- **Una cita agendada no es una cita asistida** (`scheduled_meetings.attendance` / `_at` / `_by`,
+  `ATTENDANCE_VALUES`, `setAttendance()`, `PATCH /api/meetings/:id/attendance`). La tabla sabía si
+  la reunión se había **cancelado** —el evento desapareció del Google Calendar del asesor— pero no
+  si alguien se presentó, así que todo lo que mide el embudo contaba como cita a la que nadie fue:
+  la tasa por anuncio, el reporte de setters, el costo por cita del exportable. Un anuncio que trae
+  gente que agenda y no aparece se leía exactamente igual que uno que trae gente que se presenta, y
+  es la diferencia entre un público bueno y uno que hay que dejar de comprar.
+  **Tres estados**, por la misma razón que `leads.qualified`: el vacío es «nadie lo registró» y no
+  «no vino» — un `false` por defecto mostraría como ausencias todas las reuniones viejas, que son
+  casi todas. Por eso el reporte de setters publica `attendanceUnknown` junto a `attendanceRate`:
+  una tasa de asistencia en cero puede ser un setter que agenda reuniones a las que nadie va o un
+  equipo que no está registrando el desenlace, y a una se le baja el presupuesto y a la otra se le
+  pide que complete el registro. La tasa se calcula sobre las **citas conseguidas** y no sobre los
+  leads: lo que mide es si las reuniones que ese setter agenda de verdad ocurren.
+  Lo marca una **persona** y nunca un automatismo: Google Calendar no sabe quién entró a la sala, y
+  deducirlo de que la reunión ya pasó convertiría esto en lo que `qualified` era antes de
+  arreglarse. En la agenda el control sale solo en la reunión que **ya pasó y no está cancelada**
+  (de una cancelada no se puede decir que alguien no asistió: cancelar es que la reunión no existe
+  más), volver a tocar la marca la borra, y la fila se escribe **en memoria** sin recargar el mes —
+  recargar volvería a pedir la disponibilidad del equipo, el pedido más caro de esa pantalla.
+  `attendance` es texto y no booleano porque esto crece: «reprogramada en el acto» y «asistió
+  tarde» son desenlaces que el equipo distingue al hablar.
+- **Los cinco desenlaces del funnel van separados** en el exportable de Campañas: «Citas
+  agendadas», «Citas asistidas», «Leads en cotización», «Ventas cerradas» y «Leads cobrados»
+  (`appointments`, `attended`, `quotation`, `won`, `collected` en `#breakdownByAd()`). Cerrada no
+  es cobrada: «cobrado» es lo **verificado** en Finanzas, que es el hecho más difícil de discutir
+  del funnel. La hoja «Ruta de leads» lleva además «Cita asistida» con los mismos tres estados.
+- **La calificación se audita con una muestra, no con una cifra**
+  (`backend/scripts/auditarCalificacion.js`, solo lee). Contesta tres cosas distintas: cobertura
+  (cuántos leads tienen la marca), sesgo (cómo se reparten los Sí y los No) y quién califica. Y
+  termina con diez leads calificados al azar con los datos en los que se apoya ese juicio, que es
+  lo único que de verdad valida el dato.
+  **Que casi todos sean «Sí» es una ALERTA y no una prueba de que el campo esté roto**: es lo que
+  se veía cuando la marca se derivaba de la etapa (403 de 403), y también lo que se ve cuando el
+  equipo califica solo lo que piensa trabajar y deja el resto vacío, que es un uso legítimo. El
+  script imprime el número y nombra las dos lecturas; declarar roto el dato desde la cifra es el
+  mismo error con el signo cambiado. No imprime teléfonos ni correos: de cada lead salen el id, el
+  origen y los datos académicos, que es lo que hace falta para juzgar la calificación.
 - **Cada quien ve sus leads.** Los dos tableros (y la Base de Datos) muestran solo los leads cuyo
   responsable es quien mira; `leads.manage_all` —"administrador del área comercial"— es el que ve el
   total y el **único** que puede asignar (`PATCH /api/leads/:id/assignee` lo exige, y el círculo de

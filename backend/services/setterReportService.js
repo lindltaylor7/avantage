@@ -115,7 +115,21 @@ export function emptyStats() {
     leads: 0,
     graduated: 0,
     withMeeting: 0,
+    /*
+     * Una cita agendada no es una cita asistida. Sin separarlas, el setter que
+     * llena la agenda de reuniones a las que nadie va mide igual que el que
+     * consigue reuniones que ocurren — y lo que se le paga y lo que se le pide
+     * cuelgan de este número.
+     *
+     * `attended` cuenta solo lo registrado como asistido: el null es "nadie lo
+     * registró" y no "no vino", así que esta cifra es un piso y no un total.
+     * Por eso viaja al lado `attendanceUnknown`, sin el cual una tasa baja no
+     * se puede distinguir de un registro que nadie llenó.
+     */
+    withAttendedMeeting: 0,
+    attendanceUnknown: 0,
     meetings: 0,
+    meetingsAttended: 0,
     meetingsCancelled: 0,
     meetingsManual: 0,
     won: 0,
@@ -173,10 +187,15 @@ export function summarize(entries) {
     const meeting = verdict.meeting;
     if (meeting) {
       stats.meetings += meeting.active;
+      stats.meetingsAttended += meeting.attended;
       stats.meetingsCancelled += meeting.cancelled;
       stats.meetingsManual += meeting.manual;
       if (meeting.active > 0) {
         stats.withMeeting += 1;
+        if (meeting.attended > 0) stats.withAttendedMeeting += 1;
+        // El lead con reunión en pie de la que nadie registró el desenlace: es
+        // lo que separa "no asistió" de "no lo anotamos".
+        else if (meeting.attendanceUnknown > 0) stats.attendanceUnknown += 1;
         const days = daysBetween(lead.created_at, meeting.firstBookedAt);
         if (days !== null) toMeeting.push(days);
       }
@@ -211,6 +230,13 @@ export function withRates(stats) {
     ...stats,
     graduationRate: ratio(stats.graduated, stats.leads),
     meetingRate: ratio(stats.withMeeting, stats.leads),
+    /*
+     * Asistencia sobre las citas conseguidas, no sobre los leads: lo que mide
+     * es si las reuniones que este setter agenda de verdad ocurren. Se lee
+     * junto con `attendanceUnknown`: con la mitad de las reuniones sin
+     * registrar, una tasa baja no es un problema del setter sino del registro.
+     */
+    attendanceRate: ratio(stats.withAttendedMeeting, stats.withMeeting),
     winRate: ratio(stats.won, stats.leads),
     lossRate: ratio(stats.lost, stats.leads),
     /*
@@ -293,7 +319,7 @@ export class SetterReportService {
             db('scheduled_meetings as m').join('leads', 'leads.id', 'm.lead_id'),
             visibility
           )
-        ).select('m.lead_id', 'm.created_at', 'm.cancelled_at', 'm.source'),
+        ).select('m.lead_id', 'm.created_at', 'm.cancelled_at', 'm.source', 'm.attendance'),
 
         // El proyecto es el día del cierre: nace cuando se gana el lead.
         enVentana(
@@ -338,11 +364,18 @@ export class SetterReportService {
     const meetingsByLead = new Map();
     for (const row of meetingRows) {
       const entry = meetingsByLead.get(row.lead_id)
-        || { active: 0, cancelled: 0, manual: 0, firstBookedAt: null };
+        || { active: 0, attended: 0, attendanceUnknown: 0, cancelled: 0, manual: 0, firstBookedAt: null };
       // Una reunión cancelada en Google no es una reunión conseguida: se cuenta
       // aparte para que se vea cuántas se cayeron (ver `calendarSyncService`).
       if (row.cancelled_at) entry.cancelled += 1;
-      else entry.active += 1;
+      else {
+        entry.active += 1;
+        // Tres estados y no dos: una reunión en pie puede estar registrada como
+        // asistida, como ausencia, o no estar registrada todavía — y esa
+        // tercera no se puede contar como ninguna de las dos primeras.
+        if (row.attendance === 'asistio') entry.attended += 1;
+        else if (!row.attendance) entry.attendanceUnknown += 1;
+      }
       // Solo las que siguen en pie: `manual` se muestra junto a las reuniones
       // conseguidas, y contar ahí una cancelada daría más "a mano" que
       // reuniones.

@@ -591,7 +591,10 @@ export class CampaignService {
        */
       db('scheduled_meetings')
         .where((q) => q.whereIn('wa_id', waIds).orWhereIn('lead_id', formLeadIds))
-        .select('wa_id', 'lead_id', 'start_time', 'created_at')
+        // `attendance` y `cancelled_at`: una cita AGENDADA no es una cita
+        // ASISTIDA, y un anuncio que trae gente que agenda y no aparece se
+        // leía igual que uno que trae gente que se presenta.
+        .select('wa_id', 'lead_id', 'start_time', 'created_at', 'attendance', 'cancelled_at')
     ]);
 
     // Qué status significan "venta ganada" HOY, según el tablero del equipo.
@@ -777,6 +780,13 @@ export class CampaignService {
         qualifiedAt: session && session.status === 'completed' ? session.updated_at : null,
         meetingAt: meeting?.start_time || null,
         meetingBookedAt: meeting?.created_at || null,
+        /*
+         * Los tres desenlaces de la cita, separados. `null` en `attendance` es
+         * "nadie lo registró" y no "no vino": un "no" por defecto mostraría
+         * como ausencias todas las reuniones viejas, que son casi todas.
+         */
+        meetingAttendance: meeting?.attendance || null,
+        meetingCancelled: !!meeting?.cancelled_at,
         quotedValue: quote ? Number(quote.amount) : null,
         quotedCurrency: quote?.currency || null,
         paidRevenue,
@@ -967,6 +977,9 @@ export class CampaignService {
         firstResponseMinutes: c.firstResponseMinutes,
         // Tres estados: `null` es "sin calificar", y se escribe vacío.
         qualified: c.setterQualified,
+        // Agendada y asistida son dos columnas y no una: de la segunda cuelga
+        // si el público del anuncio de verdad se presenta.
+        meetingAttendance: c.meetingAttendance,
         viability: c.viability,
         meetingAt: c.meetingAt,
         /*
@@ -1198,6 +1211,15 @@ export class CampaignService {
           responded: 0,
           qualified: 0,
           appointments: 0,
+          /*
+           * Los cinco desenlaces, separados: agendada, asistida, cotizada,
+           * ganada y cobrada. Estaban colapsados en tres, así que un anuncio
+           * que trae gente que agenda y no aparece se leía igual que uno que
+           * trae gente que se presenta — y es la diferencia entre un público
+           * bueno y uno que hay que dejar de comprar.
+           */
+          attended: 0,
+          collected: 0,
           quotation: 0,
           followUp: 0,
           discarded: 0,
@@ -1221,6 +1243,10 @@ export class CampaignService {
       if (c.responded) group.responded += 1;
       if (c.qualified) group.qualified += 1;
       if (c.hasAppointment) group.appointments += 1;
+      if (c.meetingAttendance === 'asistio') group.attended += 1;
+      // "Cobrado" es dinero verificado, que es el hecho más difícil de
+      // discutir del funnel. Un desconocido (contacto sin ficha) no cuenta.
+      if ((c.paidRevenue || 0) > 0) group.collected += 1;
       if (c.crmStage === 'ganado') group.won += 1;
       else if (c.crmStage === 'cotizacion') group.quotation += 1;
       else if (c.crmStage === 'descartado') group.discarded += 1;

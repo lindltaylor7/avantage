@@ -272,10 +272,19 @@ function adAttributionColumns(currency) {
     { header: 'Leads generados', key: 'leads', width: 16, fmt: INT_FMT },
     { header: `Costo por lead (${currency})`, key: 'costPerLead', width: 22, fmt: MONEY_FMT },
     // ── Bloque C: calidad y ventas según el CRM ──
+    // Los cinco desenlaces, separados. Agendada y asistida eran una sola
+    // columna, así que el anuncio que trae gente que agenda y no aparece se
+    // leía igual que el que trae gente que se presenta — y es la diferencia
+    // entre un público bueno y uno que hay que dejar de comprar.
+    { header: 'Citas agendadas', key: 'appointments', width: 16, fmt: INT_FMT },
+    { header: 'Citas asistidas', key: 'attended', width: 16, fmt: INT_FMT },
     { header: 'Leads en cotización', key: 'quotation', width: 19, fmt: INT_FMT },
     { header: 'Leads en seguimiento', key: 'followUp', width: 20, fmt: INT_FMT },
     { header: 'Leads descartados', key: 'discarded', width: 18, fmt: INT_FMT },
     { header: 'Ventas cerradas', key: 'won', width: 16, fmt: INT_FMT },
+    // Cerrada no es cobrada: "cobrado" es lo verificado en Finanzas, que es el
+    // hecho más difícil de discutir del funnel.
+    { header: 'Leads cobrados', key: 'collected', width: 16, fmt: INT_FMT },
     { header: `Ingreso cobrado (${currency})`, key: 'revenue', width: 23, fmt: MONEY_FMT },
     { header: `Ingreso registrado, incl. cuotas por cobrar (${currency})`, key: 'billedRevenue', width: 33, fmt: MONEY_FMT },
     { header: 'ROAS real (CRM)', key: 'roas', width: 16, fmt: DEC_FMT }
@@ -333,6 +342,10 @@ function leadTrailColumns(currency) {
     { header: 'Calificado', key: 'qualified', width: 12 },
     { header: 'Viabilidad', key: 'viability', width: 12, fmt: INT_FMT },
     { header: 'Cita agendada', key: 'meetingAt', width: 18, fmt: DATETIME_FMT },
+    // Tres estados: "Sí", "No" y vacío (nadie lo registró todavía), igual que
+    // "Calificado". Un "No" por defecto mostraría como ausencias todas las
+    // reuniones viejas, que son casi todas.
+    { header: 'Cita asistida', key: 'meetingAttendance', width: 14 },
     // ── Dónde está hoy ──
     { header: 'Columna del funnel', key: 'funnelColumn', width: 24 },
     { header: 'Etapa comercial', key: 'commercialStage', width: 22 },
@@ -631,6 +644,15 @@ export class CampaignExportService {
         qualified: row.qualified === null || row.qualified === undefined
           ? ''
           : (row.qualified ? 'Sí' : 'No'),
+        /*
+         * Vacío cuando nadie registró el desenlace: es la misma regla de tres
+         * estados que "Calificado", y por la misma razón — un "No" por defecto
+         * haría el mismo daño con el signo cambiado, mostrando como ausencias
+         * todas las reuniones de las que nadie dijo nada.
+         */
+        meetingAttendance: row.meetingAttendance === 'asistio' ? 'Sí'
+          : row.meetingAttendance === 'no_asistio' ? 'No'
+          : '',
         enteredAt: toLocalDateTime(row.enteredAt),
         firstMessageAt: toLocalDateTime(row.firstMessageAt),
         meetingAt: toLocalDateTime(row.meetingAt),

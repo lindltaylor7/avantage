@@ -28,12 +28,21 @@ const COLUMNAS_META = [
   'Resultados (iniciales)', 'Indicador de resultados (inicial)'
 ];
 
-/** Las 18 columnas de la hoja de atribución, en su orden exacto. */
+/**
+ * Las 21 columnas de la hoja de atribución, en su orden exacto.
+ *
+ * Desde el 01/11/2026 los cinco desenlaces del funnel van separados —agendada,
+ * asistida, cotizada, ganada y cobrada—. Antes agendada y asistida eran una
+ * sola columna, así que un anuncio que trae gente que agenda y no aparece se
+ * leía exactamente igual que uno que trae gente que se presenta; y 'cerrada'
+ * se confundía con 'cobrada', que es lo verificado en Finanzas.
+ */
 const COLUMNAS_ATRIBUCION = [
   'Campaña', 'ID del conjunto de anuncios', 'Conjunto de anuncios', 'ID del anuncio', 'Anuncio',
   'Inversión (PEN)', 'Impresiones', 'Clics en el enlace', 'CTR del enlace (%)', 'Leads generados',
-  'Costo por lead (PEN)', 'Leads en cotización', 'Leads en seguimiento', 'Leads descartados',
-  'Ventas cerradas', 'Ingreso cobrado (PEN)',
+  'Costo por lead (PEN)', 'Citas agendadas', 'Citas asistidas', 'Leads en cotización',
+  'Leads en seguimiento', 'Leads descartados', 'Ventas cerradas', 'Leads cobrados',
+  'Ingreso cobrado (PEN)',
   'Ingreso registrado, incl. cuotas por cobrar (PEN)', 'ROAS real (CRM)'
 ];
 

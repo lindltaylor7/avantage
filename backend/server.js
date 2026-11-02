@@ -976,6 +976,49 @@ app.delete('/api/meetings/:id', requireAuth, requirePermission('calendar.view'),
   }
 });
 
+/*
+ * Si el contacto ASISTIÓ a la reunión.
+ *
+ * Una cita agendada no es una cita asistida, y hasta ahora el panel solo sabía
+ * decir si la reunión se había cancelado. Con eso, un anuncio que trae gente
+ * que agenda y no aparece se leía igual que uno que trae gente que se presenta.
+ *
+ * Va aparte del `PUT` de la reunión por la misma razón que la píldora de estado
+ * del Libro Diario: reenviar la reunión entera para cambiar una palabra
+ * reescribe de paso campos que nadie tocó —la hora normalizada distinto, el
+ * enlace de Meet— y acá además dispararía la lógica de Google Calendar.
+ *
+ * Lo marca una persona: la registra quien estuvo en la reunión. Mismo criterio
+ * que para quitarla —su asesor, quien la cargó, o quien administra el área
+ * comercial— porque es un juicio sobre esa reunión y no un dato de consulta.
+ */
+app.patch('/api/meetings/:id/attendance', requireAuth, requirePermission('calendar.view'), async (req, res) => {
+  try {
+    const meeting = await scheduledMeetingService.getById(req.params.id);
+    if (!meeting) return res.status(404).json({ error: 'Reunión no encontrada.' });
+
+    const manageAll = req.user.permissions?.includes('leads.manage_all');
+    const propia = meeting.advisor_user_id === req.user.id || meeting.created_by === req.user.id;
+    if (!manageAll && !propia) {
+      return res.status(403).json({ error: 'Esa reunión es de otra persona.' });
+    }
+
+    const actualizada = await scheduledMeetingService.setAttendance(
+      req.params.id,
+      req.body?.attendance ?? null,
+      { actor: req.user }
+    );
+    res.json(actualizada);
+  } catch (error) {
+    if (error.code === 'INVALID_ATTENDANCE') {
+      return res.status(422).json({ error: error.message, code: error.code });
+    }
+    console.error('❌ Error al registrar la asistencia a la reunión:', error);
+    res.status(500).json({ error: 'Error al registrar la asistencia.', details: error.message });
+  }
+});
+
+
 /**
  * Notificaciones internas del panel (campana del navbar): reuniones que
  * Avan agendó, y casos de leads con reunión ya agendada que necesitan que
