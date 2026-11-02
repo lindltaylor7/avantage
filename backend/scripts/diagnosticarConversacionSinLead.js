@@ -3,6 +3,7 @@ import { db } from '../db/connection.js';
 import { PHONE_MATCH_KEY_SQL, phoneMatchKey } from '../services/leadService.js';
 import { leadOrigin } from '../services/leadOrigin.js';
 import { buildStageResolver, loadFunnelStageIndex } from '../services/funnelStageLabel.js';
+import { findOrphanConversations } from '../services/orphanConversationService.js';
 
 /**
  * Hay conversación en la bandeja y el lead no aparece en ningún tablero. ¿Por
@@ -145,44 +146,18 @@ async function explicarUno(waId, stageOf) {
   }
 }
 
-async function barrido(stageOf) {
-  const desde = new Date(Date.now() - DIAS * 24 * 60 * 60 * 1000);
-
+async function barrido() {
   /*
-   * Las conversaciones del período y las fichas que podrían corresponderles,
-   * cruzadas por el sufijo de 9 dígitos. Se piden las dos listas enteras y se
-   * cruzan en memoria en vez de hacer una consulta por conversación: son
-   * cientos de contactos y la pregunta es sobre todos a la vez.
+   * La detección vive en `orphanConversationService` y no acá: la usan este
+   * diagnóstico y la recuperación, y con una copia en cada uno el día que una
+   * cambie los dos scripts contestarían cosas distintas sobre los mismos
+   * contactos.
    */
-  const conversaciones = await db('whatsapp_messages')
-    .where('received_at', '>=', desde)
-    .groupBy('wa_id')
-    .select(
-      'wa_id',
-      db.raw('COUNT(*) as total'),
-      db.raw('MIN(received_at) as primero'),
-      db.raw('MAX(received_at) as ultimo')
-    )
-    .orderBy('primero', 'asc');
+  const { total, orphans } = await findOrphanConversations({ days: DIAS });
 
-  const leads = await db('leads').select('id', 'phone');
-  const porSufijo = new Set();
-  const exactos = new Set();
-  for (const lead of leads) {
-    exactos.add(String(lead.phone || ''));
-    const clave = phoneMatchKey(lead.phone);
-    if (clave) porSufijo.add(clave);
-  }
-
-  const huerfanas = conversaciones.filter((c) => {
-    if (exactos.has(String(c.wa_id))) return false;
-    const clave = phoneMatchKey(c.wa_id);
-    return clave ? !porSufijo.has(clave) : true;
-  });
-
-  linea(`   Conversaciones de los últimos ${DIAS} días: ${conversaciones.length}`);
-  linea(`   Sin ficha en el CRM: ${huerfanas.length}`);
-  if (!huerfanas.length) {
+  linea(`   Conversaciones de los últimos ${DIAS} días: ${total}`);
+  linea(`   Sin ficha en el CRM: ${orphans.length}`);
+  if (!orphans.length) {
     linea();
     linea('   Todas tienen su ficha. Si igual no aparecen en el tablero, el problema es de');
     linea('   visibilidad y no de alta: mirá la CAUSA 2 corriendo este script con el número.');
@@ -191,14 +166,14 @@ async function barrido(stageOf) {
 
   linea();
   linea('   Cada una es una persona que escribió y a la que nadie va a trabajar, porque no');
-  linea('   figura en ningún tablero. Se dan de alta a mano con su número y la conversación');
-  linea('   se les cuelga sola.');
+  linea('   figura en ningún tablero. Para abrirles la ficha con el historial y el anuncio');
+  linea('   que las trajo: `node backend/scripts/recuperarConversacionesSinLead.js --aplicar`.');
   linea();
-  for (const c of huerfanas) {
-    const sinClave = !phoneMatchKey(c.wa_id);
-    linea(`   ${sinClave ? '(no es teléfono)' : '               '} ${String(c.wa_id).padEnd(20)}`
-      + ` ${String(c.total).padStart(4)} msj`
-      + ` · del ${momento(c.primero)} al ${momento(c.ultimo)}`);
+  for (const o of orphans) {
+    linea(`   ${o.isPhone ? '               ' : '(no es teléfono)'} ${o.waId.padEnd(20)}`
+      + ` ${String(o.messages).padStart(4)} msj`
+      + ` · del ${momento(o.firstAt)} al ${momento(o.lastAt)}`
+      + `${o.referral ? ' · con anuncio' : ''}`);
   }
 }
 
@@ -234,7 +209,7 @@ async function main() {
     for (const waId of waIds) await explicarUno(waId, stageOf);
   } else {
     titulo(`Conversaciones sin ficha en el CRM · últimos ${DIAS} días`);
-    await barrido(stageOf);
+    await barrido();
   }
 
   titulo('La regla');
