@@ -658,7 +658,12 @@
     <!-- ================================================================= -->
     <!-- MODAL 4: Detalle del Lead y Acciones                              -->
     <!-- ================================================================= -->
-    <div v-if="selectedLead" class="modal-overlay" @click.self="selectedLead = null">
+    <!--
+      No se cierra al hacer clic afuera, igual que en el Setter Funnel: es la
+      misma ficha del mismo lead, con un formulario a medio corregir, notas sin
+      guardar y la conversación adentro. Se cierra con la ✕ del encabezado.
+    -->
+    <div v-if="selectedLead" class="modal-overlay">
       <div class="modal-content lead-detail-card" :class="{ 'has-chat': showBotChat }">
         <div class="modal-header">
           <div style="display: flex; align-items: center; gap: 0.6rem;">

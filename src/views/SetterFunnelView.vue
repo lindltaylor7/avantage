@@ -929,7 +929,14 @@
     <!-- ================================================================= -->
     <!-- MODAL 4: Ficha Completa del Lead / Setter Drawer                  -->
     <!-- ================================================================= -->
-    <div v-if="selectedLead" class="modal-overlay" @click.self="selectedLead = null">
+    <!--
+      La ficha NO se cierra al hacer clic afuera, a diferencia de los modales
+      de columnas: acá adentro hay un formulario con los datos del lead a medio
+      corregir, notas sin guardar y la conversación de WhatsApp. Un clic fuera
+      —el que se da para volver a mirar el tablero— tiraba todo eso sin
+      preguntar. Se cierra con la ✕ o con "Cerrar", que son deliberados.
+    -->
+    <div v-if="selectedLead" class="modal-overlay">
       <div class="modal-content lead-modal-card" :class="{ 'has-chat': showBotChat }">
         <div class="modal-header">
           <div class="lead-modal-title-group">
