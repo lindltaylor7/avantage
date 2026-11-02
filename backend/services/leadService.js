@@ -15,6 +15,7 @@ import { MetaConversionsService } from './metaConversionsService.js';
 import { TikTokConversionsService } from './tiktokConversionsService.js';
 import { ctwaAttribution, leadOrigin } from './leadOrigin.js';
 import { ATTRIBUTION_METHODS, confidenceFor, writesAttribution } from './attributionEvidence.js';
+import { activeMeetingForLead } from './scheduledMeetingService.js';
 
 /**
  * Dígitos con los que se compara un teléfono.
@@ -1471,38 +1472,31 @@ export class LeadService {
 
     /*
      * "Cita agendada" es la única etapa que afirma un HECHO con fecha y hora,
-     * y hasta ahora se podía afirmar arrastrando una tarjeta: el lead quedaba
-     * en esa columna sin ninguna reunión detrás, así que el Calendario no la
-     * mostraba, el bot no mandaba su recordatorio y en el reporte el embudo
-     * decía que había una cita que nadie podía ir a buscar.
+     * y se puede afirmar arrastrando una tarjeta: el lead queda en esa columna
+     * sin ninguna reunión detrás, así que el Calendario no la muestra, el bot
+     * no manda su recordatorio y en el reporte el embudo cuenta una cita que
+     * nadie puede ir a buscar.
      *
-     * Solo frena a una PERSONA: el bot llega a esta etapa después de reservar
-     * el bloque (`scheduledMeetingService`), así que para él la reunión existe
-     * siempre; frenarlo sería frenar el único camino que ya cumple la regla.
-     * Y solo al ENTRAR: un lead que ya estaba en la etapa puede moverse a
-     * cualquier otra sin que esto opine.
+     * Entre el 01 y el 02/11/2026 eso se frenó con un 409, y frenaba de más:
+     * la reunión se carga con "Agendar reunión", que exige `calendar.view`, y
+     * el setter puede no tenerlo — con lo que el pase le quedaba cerrado sin
+     * nada que pudiera hacer al respecto. Ahora **avisa y deja pasar**: el
+     * movimiento se hace siempre y lo que queda es el rastro. Sin él, "cita
+     * sin reunión" y "cita con reunión" se escriben igual en la columna, que
+     * es lo que hacía imposible separarlas después.
      *
-     * El intento queda en la bitácora como bloqueado, igual que el del lead
-     * graduado: lo que se vino a arreglar es justamente lo que no dejaba
-     * rastro.
+     * Solo se le pregunta a una PERSONA: el bot llega a esta etapa después de
+     * reservar el bloque (`scheduledMeetingService`), así que para él la
+     * reunión existe siempre. Y solo al ENTRAR: un lead que ya estaba en la
+     * etapa se mueve a cualquier otra sin que esto opine.
      */
+    let appointmentWithoutMeeting = false;
     if (actorType === 'user' && status === APPOINTMENT_STATUS && current.status !== APPOINTMENT_STATUS) {
-      const meeting = await db('scheduled_meetings')
-        .where({ lead_id: id })
-        .whereNull('cancelled_at')
-        .first();
-
-      if (!meeting) {
-        await this.stageChanges.record(current.id, {
-          fromStatus: current.status,
-          toStatus: status,
-          actor,
-          blocked: true,
-          reason: 'Sin reunión agendada: la etapa de cita necesita su fecha y hora.'
-        });
-        const error = new Error('Para pasar el lead a "Cita Agendada" hay que agendar la reunión con su fecha y hora (botón "Agendar reunión" en la ficha).');
-        error.code = 'APPOINTMENT_REQUIRED';
-        throw error;
+      appointmentWithoutMeeting = !(await activeMeetingForLead(id));
+      if (appointmentWithoutMeeting) {
+        reason = reason
+          ? `${reason} (sin reunión cargada en el panel)`
+          : 'Cita agendada sin reunión cargada en el panel: no aparece en el Calendario del closer.';
       }
     }
 
@@ -1592,7 +1586,15 @@ export class LeadService {
       }
     }
 
-    return this.getLeadById(id);
+    const updated = await this.getLeadById(id);
+    /*
+     * La pantalla avisa con esto cuando el pase se hizo sin reunión. Viaja
+     * derivado en cada respuesta y no se guarda en ninguna columna: en cuanto
+     * alguien cargue la reunión deja de ser cierto, igual que `is_locked` de
+     * un hito o `delivery_blocked` de un entregable.
+     */
+    if (updated && appointmentWithoutMeeting) updated.appointment_without_meeting = true;
+    return updated;
   }
 
   /**

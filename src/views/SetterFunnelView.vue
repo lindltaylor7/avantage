@@ -1259,6 +1259,22 @@ function onMeetingCreated(data) {
   setTimeout(() => { meetingNotice.value = ''; }, 8000);
 }
 
+/**
+ * El lead entró a "Cita Agendada" sin reunión cargada en el panel.
+ *
+ * Avisa y no frena: el movimiento ya se hizo (el servidor lo deja pasar desde
+ * el 02/11/2026 y deja el motivo en la bitácora). Va como aviso de la barra y
+ * no como `alert` porque arrastrar tarjetas es trabajo en serie — un diálogo
+ * por tarjeta se aprende a cerrar sin leerlo, y entonces deja de avisar nada.
+ */
+function noticeIfAppointmentWithoutMeeting(lead) {
+  if (!lead?.appointment_without_meeting) return;
+  meetingNotice.value = '⚠ Cita agendada sin reunión en el panel: no aparecerá en el '
+    + 'Calendario del closer ni contará en el reporte por anuncio. Cargala con "Agendar '
+    + 'reunión" en la ficha del lead.';
+  setTimeout(() => { meetingNotice.value = ''; }, 12000);
+}
+
 // Conversación de WhatsApp del lead dentro de su ficha. El panel entero vive
 // en `LeadConversation.vue` (hilo, adjuntos, sondeo y cuadro de respuesta);
 // acá solo queda si está desplegado o no.
@@ -1911,11 +1927,11 @@ async function onDrop(targetColKey) {
     const data = await res.json().catch(() => ({}));
     /*
      * El mensaje del servidor y no uno propio: hay movimientos que se rechazan
-     * por una razón concreta y accionable —la etapa de cita necesita su
-     * reunión agendada (409)— y "no se pudo guardar el cambio de etapa" deja a
-     * quien arrastró la tarjeta sin saber qué hacer.
+     * por una razón concreta y accionable, y "no se pudo guardar el cambio de
+     * etapa" deja a quien arrastró la tarjeta sin saber qué hacer.
      */
     if (!res.ok) throw new Error(data.error || 'Error al actualizar estado');
+    noticeIfAppointmentWithoutMeeting(data.lead);
     if (data.project) {
       projectToast.value = {
         id: data.project.id,
@@ -1944,6 +1960,7 @@ async function updateLeadStatusFromSelect(leadId, newStatus) {
     const data = await res.json().catch(() => ({}));
     // Ídem que al arrastrar: el desplegable es el mismo camino.
     if (!res.ok) throw new Error(data.error || 'Error al actualizar');
+    noticeIfAppointmentWithoutMeeting(data.lead);
     if (data.project) {
       projectToast.value = {
         id: data.project.id,
@@ -1966,27 +1983,48 @@ const handoffToast = ref(null);
  * deja el lead en `cita_agendada`, que es el único estado que gradúa al Funnel
  * de Ventas.
  *
- * Desde el 01/11/2026 ese pase exige que la reunión esté agendada en el panel
- * (el servidor responde 409 y el mensaje dice dónde agendarla). Antes no creaba
- * ninguna fila en `scheduled_meetings` a propósito —se temía que el bot le
- * escribiera al contacto por una cita que seguía una persona—, pero el precio
- * era un lead en la columna de cita sin fecha ni hora: el closer no la veía en
- * su Calendario, el reporte contaba una cita que nadie podía ir a buscar y no
- * había forma de medir cuántas citas trajo cada anuncio. La reunión se carga
- * desde la misma ficha ("Agendar reunión"), queda con `source: 'manual'` y sin
- * `wa_id`, así que el bot no tiene a quién escribirle.
+ * El pase **avisa pero nunca frena**. Entre el 01 y el 02/11/2026 exigió que la
+ * reunión estuviera cargada (409), y eso frenaba de más: cargarla es "Agendar
+ * reunión", que pide `calendar.view`, y el setter puede no tenerlo — con lo que
+ * el pase le quedaba cerrado sin nada que pudiera hacer. Lo que sí hace falta
+ * es que la diferencia se note, porque un lead en la columna de cita sin fecha
+ * ni hora no aparece en el Calendario del closer, no recibe recordatorio y en
+ * el reporte cuenta como una cita que nadie puede ir a buscar. Así que el aviso
+ * sale antes (acá) y el motivo queda escrito en la bitácora (`updateLeadStatus`).
+ *
+ * La reunión se carga desde la misma ficha ("Agendar reunión"), queda con
+ * `source: 'manual'` y sin `wa_id`, así que el bot no tiene a quién escribirle
+ * — que era el temor por el que este pase no creaba ninguna fila.
  */
 async function handOffToCloser(lead) {
   if (!lead || handingOff.value) return;
   const name = getLeadFullName(lead);
-  const ok = window.confirm(
-    `¿Pasar a "${name}" al Funnel de Ventas?
 
-`
-    + 'Úsalo cuando ya coordinaste la reunión por tu cuenta y la cargaste en el panel '
-    + '("Agendar reunión" en esta misma ficha): sin su fecha y hora el pase se rechaza, '
-    + 'porque el closer no vería la cita en su Calendario. El lead sale del Setter Funnel '
-    + 'y el closer lo ve en la columna "Nuevo".'
+  /*
+   * Si la consulta falla no se da por hecho que falta la reunión: un aviso que
+   * nombra un problema que no existe enseña a ignorar el aviso. Ante la duda
+   * se pregunta lo de siempre.
+   */
+  let meeting = null;
+  let meetingUnknown = false;
+  try {
+    const res = await apiFetch(`/api/leads/${lead.id}/meeting`);
+    if (!res.ok) throw new Error('consulta rechazada');
+    ({ meeting } = await res.json());
+  } catch (err) {
+    meetingUnknown = true;
+    console.warn('No se pudo comprobar si el lead tiene reunión agendada:', err);
+  }
+
+  const ok = window.confirm(
+    `¿Pasar a "${name}" al Funnel de Ventas?\n\n`
+    + (meeting || meetingUnknown
+      ? ''
+      : '⚠ Este lead no tiene reunión cargada en el panel. El closer no la verá en su '
+        + 'Calendario y no contará como cita en el reporte por anuncio. '
+        + 'Podés cargarla con "Agendar reunión" en esta misma ficha.\n\n')
+    + 'Úsalo cuando ya coordinaste la reunión por tu cuenta. El lead sale del Setter '
+    + 'Funnel y el closer lo ve en la columna "Nuevo".'
   );
   if (!ok) return;
 
@@ -2012,7 +2050,12 @@ async function handOffToCloser(lead) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          body: 'Pasado manualmente al Funnel de Closer desde el Setter Funnel: la reunión se coordinó fuera del bot.'
+          // Si no hay reunión en el panel, la nota lo dice: el closer abre la
+          // ficha y necesita saber que la hora de esa cita no está en ningún
+          // lado más que en lo que el setter coordinó por su cuenta.
+          body: 'Pasado manualmente al Funnel de Closer desde el Setter Funnel: '
+            + 'la reunión se coordinó fuera del bot.'
+            + (meeting || meetingUnknown ? '' : ' No tiene reunión cargada en el panel.')
         })
       });
     } catch (noteError) {

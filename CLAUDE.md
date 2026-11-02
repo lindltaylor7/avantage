@@ -906,15 +906,26 @@ antes de tocar el arranque de producción.
   decisión de cortarle el presupuesto a un anuncio, y dos personas calificando con criterios
   distintos la vuelven tan inútil como cuando decía "Sí" siempre. Va aparte del `PUT /api/leads/:id`
   del formulario por lo mismo que la píldora de estado del Libro Diario. No toca el funnel.
-- **La etapa de cita exige su reunión.** `updateLeadStatus()` rechaza (409, `APPOINTMENT_REQUIRED`)
-  que una PERSONA mueva un lead a `cita_agendada` sin una reunión no cancelada en
-  `scheduled_meetings`: se podía afirmar arrastrando una tarjeta, y el lead quedaba en esa columna
-  sin fecha ni hora — el closer no la veía en su Calendario, el bot no mandaba el recordatorio y el
-  embudo contaba una cita que nadie podía ir a buscar. El **bot está exento** porque llega ahí
-  después de reservar el bloque: frenarlo sería frenar el único camino que ya cumplía la regla. Solo
-  al ENTRAR a la etapa, y el intento rechazado queda en `lead_stage_changes` como bloqueado. Por eso
-  el pase manual al closer del Setter Funnel ("ya coordiné la reunión por mi cuenta") ahora pide
-  cargarla primero con "Agendar reunión", en vez de graduar el lead sin ella.
+- **La etapa de cita avisa si le falta su reunión, pero no frena.** Un lead en `cita_agendada` sin
+  una reunión no cancelada en `scheduled_meetings` es una cita sin fecha ni hora: el closer no la ve
+  en su Calendario, el bot no manda el recordatorio y el embudo cuenta una cita que nadie puede ir a
+  buscar. Entre el 01 y el 02/11/2026 eso se frenó con un 409 y **frenaba de más**: la reunión se
+  carga con "Agendar reunión", que exige `calendar.view`, y el setter puede no tenerlo — con lo que
+  el pase le quedaba cerrado sin nada que pudiera hacer al respecto. Ahora el movimiento se hace
+  siempre y lo que queda es el **rastro**, que es lo que de verdad hacía falta: sin él, "cita con
+  reunión" y "cita sin reunión" se escriben igual en la columna y no hay forma de separarlas después.
+  Son tres piezas y una sola pregunta: `activeMeetingForLead()` (en `scheduledMeetingService.js`) la
+  contesta para todos; `updateLeadStatus()` escribe el motivo en `lead_stage_changes` y devuelve
+  `appointment_without_meeting` **derivado en cada lectura**, nunca guardado —en cuanto alguien
+  cargue la reunión deja de ser cierto, igual que `is_locked` de un hito—; y las pantallas avisan con
+  eso. Al **bot no se le pregunta**: llega ahí después de reservar el bloque, así que para él la
+  reunión existe siempre. Y solo al ENTRAR a la etapa: un lead que ya estaba ahí se mueve a donde sea
+  sin que esto opine. El pase manual al closer del Setter Funnel ("ya coordiné la reunión por mi
+  cuenta") pregunta antes por `GET /api/leads/:id/meeting` y lo advierte en el propio diálogo —si esa
+  consulta falla **no** se avisa, porque un aviso que nombra un problema inexistente enseña a
+  ignorarlo—; arrastrar una tarjeta o usar el desplegable lo dice después, en el aviso de la barra y
+  no en un `alert`: mover tarjetas es trabajo en serie, y un diálogo por tarjeta se aprende a cerrar
+  sin leerlo.
 - **"A este lead ya se le contestó" es una columna** (`leads.first_response_at` / `_by`) y no una
   consulta sobre la tabla de mensajes. Se escribe sola desde los dos caminos por los que de verdad
   se contesta (`leadFirstResponse.js`): cualquier saliente de WhatsApp —lo mande Avan, una persona

@@ -58,7 +58,7 @@ import { AdvisorAvailabilityService } from './services/advisorAvailabilityServic
 import { InstagramService } from './services/instagramService.js';
 import { InstagramWebhookService } from './services/instagramWebhookService.js';
 import { GoogleCalendarService } from './services/googleCalendarService.js';
-import { ScheduledMeetingService } from './services/scheduledMeetingService.js';
+import { ScheduledMeetingService, activeMeetingForLead } from './services/scheduledMeetingService.js';
 import { CalendarSyncService } from './services/calendarSyncService.js';
 import { NotificationService } from './services/notificationService.js';
 import { ProjectSettingsService } from './services/projectSettingsService.js';
@@ -2471,6 +2471,36 @@ app.get('/api/leads/:id/stage-history', requireAuth, requireAnyPermission('leads
 });
 
 /**
+ * ¿Este lead tiene una reunión viva en el panel?
+ *
+ * La usa el pase manual al closer para avisar —antes de hacerlo— que esa cita
+ * no va a aparecer en el Calendario de nadie. Contesta con la MISMA función
+ * que escribe el motivo en la bitácora (`activeMeetingForLead`), porque lo que
+ * se ve y lo que queda escrito no pueden decir cosas distintas.
+ *
+ * Cuelga del lead, como las notas y el historial, para reusar
+ * `requireLeadVisible`: cada quien ve sus leads, también sus reuniones. Va con
+ * el permiso del funnel y no con `calendar.view` a propósito — el setter que
+ * no puede abrir el Calendario igual necesita que le avisen.
+ *
+ * Solo el dato que el aviso necesita: cuándo es y quién la atiende. La agenda
+ * completa es del módulo de Calendario.
+ */
+app.get('/api/leads/:id/meeting', requireAuth, requireAnyPermission('leads.view', 'setter.view'), requireLeadVisible, async (req, res) => {
+  try {
+    const meeting = await activeMeetingForLead(req.params.id);
+    res.json({
+      meeting: meeting
+        ? { id: meeting.id, startTime: meeting.start_time, endTime: meeting.end_time, source: meeting.source }
+        : null
+    });
+  } catch (error) {
+    console.error('❌ Error al consultar la reunión del lead:', error);
+    res.status(500).json({ error: 'Error al consultar la reunión del lead.', details: error.message });
+  }
+});
+
+/**
  * Reporte de Leads: la misma bitácora de etapas, pero de todos los leads a la
  * vez y filtrable — quién movió a cada uno, hacia qué etapa y cuándo.
  *
@@ -2702,16 +2732,14 @@ app.patch('/api/leads/:id/status', requireAuth, requireAnyPermission('leads.view
       console.log(`🚀 [Proyectos] Proyecto #${project.id} creado a partir del lead #${lead.id} (estado: Creado)`);
     }
 
+    /*
+     * `appointment_without_meeting` viaja en el lead: el movimiento se hizo,
+     * y lo que la pantalla tiene que decir es que esa cita no está en el
+     * Calendario de nadie. Es un aviso y no un error — el pase a la etapa de
+     * cita dejó de frenarse el 02/11/2026 (ver `updateLeadStatus`).
+     */
     res.json({ lead, project });
   } catch (error) {
-    /*
-     * La etapa de cita exige su reunión (ver `updateLeadStatus`). Es un 409 y
-     * no un 500: no falló nada, falta un dato, y el mensaje dice cuál y dónde
-     * ponerlo.
-     */
-    if (error.code === 'APPOINTMENT_REQUIRED') {
-      return res.status(409).json({ error: error.message, code: error.code });
-    }
     console.error('❌ Error al actualizar el lead:', error);
     res.status(500).json({ error: 'Error al actualizar el lead.', details: error.message });
   }

@@ -12,6 +12,31 @@ import { firstRealName } from './contactName.js';
 export const ATTENDANCE_VALUES = new Set(['asistio', 'no_asistio']);
 
 /**
+ * ¿Este lead tiene una reunión viva en el panel?
+ *
+ * Una sola función para la única pregunta, porque la hacen dos sitios que
+ * tienen que contestar lo mismo: el aviso que ve el setter antes de pasar el
+ * lead al closer y el motivo que queda escrito en la bitácora cuando el pase
+ * se hace igual. Con una consulta en cada uno, el día que una empiece a mirar
+ * las canceladas el panel diría que hay cita y la bitácora que no — la misma
+ * razón por la que `delivery_blocked` de Entregables sale de la función que
+ * aplica la regla y no de una copia en la pantalla.
+ *
+ * Una reunión cancelada no cuenta: cancelar es que la reunión ya no existe.
+ *
+ * Devuelve la fila o `null`, nunca un booleano: quien avisa necesita además
+ * decir para cuándo es.
+ */
+export function activeMeetingForLead(leadId) {
+  if (!leadId) return Promise.resolve(null);
+  return db('scheduled_meetings')
+    .where({ lead_id: leadId })
+    .whereNull('cancelled_at')
+    .orderBy('start_time', 'asc')
+    .first();
+}
+
+/**
  * Registro propio de las reuniones que Avan agenda automáticamente (además
  * del evento real que ya vive en Google Calendar), para poder listarlas
  * dentro del panel de Avantage sin depender de una consulta en vivo a la API

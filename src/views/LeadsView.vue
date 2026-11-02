@@ -1971,6 +1971,22 @@ function onMeetingCreated(data) {
   setTimeout(() => { meetingNotice.value = ''; }, 8000);
 }
 
+/**
+ * El lead entró a "Cita Agendada" sin reunión cargada en el panel.
+ *
+ * Mismo aviso y mismas razones que en el Setter Funnel: el movimiento ya se
+ * hizo —el servidor lo deja pasar y deja el motivo en la bitácora— y lo que
+ * queda es que la diferencia se note. Una cita sin reunión no sale en el
+ * Calendario del closer ni cuenta en el reporte por anuncio.
+ */
+function noticeIfAppointmentWithoutMeeting(lead) {
+  if (!lead?.appointment_without_meeting) return;
+  meetingNotice.value = '⚠ Cita agendada sin reunión en el panel: no aparecerá en el '
+    + 'Calendario del closer ni contará en el reporte por anuncio. Cargala con "Agendar '
+    + 'reunión" en la ficha del lead.';
+  setTimeout(() => { meetingNotice.value = ''; }, 12000);
+}
+
 async function fetchAll() {
   isLoading.value = true;
   loadError.value = '';
@@ -2168,6 +2184,7 @@ async function moveLeadToStatus(lead, newStatus) {
     if (!response.ok) throw new Error(data.error || 'Error al actualizar el estado.');
 
     lead.status = data.lead.status;
+    noticeIfAppointmentWithoutMeeting(data.lead);
     if (data.project) {
       lead.project_id = data.project.id;
       lead.project_status = data.project.status;
