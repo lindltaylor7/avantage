@@ -15,9 +15,27 @@
  *
  * `label` va en negrita en el documento y `description` a continuación, que es
  * exactamente cómo se imprime: "Reporte TURNITIN: Certificado oficial de…".
+ *
+ * Casi todos los entregables arrancan MARCADOS —es el paquete que se vende, y
+ * quitar uno es la excepción—, pero los que llevan `optIn: true` arrancan
+ * desmarcados: son servicios que solo se cotizan si el caso los pide, y
+ * ofrecerlos por defecto los metería en cotizaciones que nadie revisó.
  */
 
-/** Entregables que se venden igual en cualquier paquete. */
+/**
+ * Entregables que se venden igual en cualquier paquete.
+ *
+ * La gestión del lugar de estudio va primera y desmarcada: no todas las
+ * tesis la necesitan (depende de si el cliente ya tiene dónde aplicar los
+ * instrumentos), así que se incluye solo cuando se acuerda.
+ */
+const GESTION_LUGAR = {
+  key: 'gestion_lugar',
+  label: 'Gestión del lugar de estudio y aplicación de instrumentos',
+  description: 'Coordinación del acceso a la institución y aplicación de los instrumentos de recolección de datos.',
+  optIn: true
+};
+
 const PROPUESTAS = {
   key: 'propuestas',
   label: '03 Propuestas de tema',
@@ -65,6 +83,7 @@ export const QUOTE_PACKAGES = [
     icon: '🎓',
     hint: 'Plan de tesis e informe final completo',
     deliverables: [
+      GESTION_LUGAR,
       PROPUESTAS,
       {
         key: 'plan',
@@ -97,6 +116,7 @@ export const QUOTE_PACKAGES = [
     icon: '📝',
     hint: 'Artículo de divulgación con rigor metodológico',
     deliverables: [
+      GESTION_LUGAR,
       PROPUESTAS,
       {
         key: 'articulo',
@@ -126,6 +146,15 @@ export const DEFAULT_QUOTE_PACKAGE = QUOTE_PACKAGES[0].key;
 /** Paquete por clave; cae en el primero si llega una clave desconocida. */
 export function findQuotePackage(key) {
   return QUOTE_PACKAGES.find((pkg) => pkg.key === key) || QUOTE_PACKAGES[0];
+}
+
+/**
+ * Claves con las que abre el formulario: todo menos los entregables `optIn`,
+ * que se marcan a mano. Vive acá y no en la vista porque de la misma regla
+ * dependen el arranque, el "limpiar formulario" y el cambio de paquete.
+ */
+export function defaultDeliverableKeys(pkg) {
+  return pkg.deliverables.filter((item) => !item.optIn).map((item) => item.key);
 }
 
 /** Una línea "Etiqueta: descripción" por entregable, como la lee el documento. */

@@ -1256,7 +1256,7 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted } from 'vue';
 import { apiFetch } from '../apiClient.js';
-import { QUOTE_PACKAGES, DEFAULT_QUOTE_PACKAGE, findQuotePackage, deliverableLine } from '../data/quoteDeliverables.js';
+import { QUOTE_PACKAGES, DEFAULT_QUOTE_PACKAGE, findQuotePackage, defaultDeliverableKeys, deliverableLine } from '../data/quoteDeliverables.js';
 import { careerGroupsWith, DEFAULT_CAREER } from '../data/careers.js';
 import { hasPermission } from '../auth.js';
 import { cameFromForm } from '../leadOrigin.js';
@@ -1435,9 +1435,10 @@ const quoteServiceSubtitle = ref(INITIAL_QUOTE_DEFAULTS.serviceSubtitle);
 const quoteAmount = ref('');
 const quoteRegularAmount = ref('');
 const quoteCurrency = ref('PEN');
-// Entregables marcados (claves del catálogo): arrancan todos incluidos, que es
-// el paquete que se vende; quitar uno es la excepción.
-const quoteDeliverables = ref(findQuotePackage(DEFAULT_QUOTE_PACKAGE).deliverables.map((item) => item.key));
+// Entregables marcados (claves del catálogo): arrancan incluidos todos los del
+// paquete que se vende —quitar uno es la excepción— menos los `optIn`, que se
+// cotizan solo si el caso los pide.
+const quoteDeliverables = ref(defaultDeliverableKeys(findQuotePackage(DEFAULT_QUOTE_PACKAGE)));
 const quoteScope = ref('');
 const quoteCode = ref('');
 const quoteEstimatedTime = ref(INITIAL_QUOTE_DEFAULTS.estimatedTime);
@@ -2463,7 +2464,7 @@ function resetQuoteForm() {
   quoteAmount.value = '';
   quoteRegularAmount.value = '';
   quoteCurrency.value = 'PEN';
-  quoteDeliverables.value = activeDeliverables.value.map((item) => item.key);
+  quoteDeliverables.value = defaultDeliverableKeys(findQuotePackage(DEFAULT_QUOTE_PACKAGE));
   quoteScope.value = '';
   quoteCode.value = '';
   quoteEstimatedTime.value = defaults.estimatedTime;
@@ -2494,7 +2495,7 @@ function toggleAllDeliverables(selectAll) {
  * Cambia el tipo de trabajo cotizado. Los textos por defecto siguen al paquete
  * nuevo, pero solo si nadie los editó a mano (si el asesor escribió su propio
  * título, se respeta). Las marcas de los entregables compartidos se conservan,
- * y el entregable propio del paquete nuevo entra marcado.
+ * y el entregable propio del paquete nuevo entra marcado salvo que sea `optIn`.
  */
 function selectQuotePackage(key) {
   if (key === quotePackage.value) return;
@@ -2515,7 +2516,9 @@ function selectQuotePackage(key) {
 
   const sharedKeys = new Set(prev.deliverables.map((item) => item.key));
   quoteDeliverables.value = next.deliverables
-    .filter((item) => !sharedKeys.has(item.key) || quoteDeliverables.value.includes(item.key))
+    .filter((item) =>
+      sharedKeys.has(item.key) ? quoteDeliverables.value.includes(item.key) : !item.optIn
+    )
     .map((item) => item.key);
 
   quotePackage.value = key;
