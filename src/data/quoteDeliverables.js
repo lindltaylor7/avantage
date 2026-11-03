@@ -42,38 +42,52 @@ const PROPUESTAS = {
   description: 'Acorde a las líneas de investigación de tu universidad.'
 };
 
-const CIERRE_COMUN = [
-  {
-    key: 'observaciones',
-    label: 'Levantamiento de Observaciones',
-    description: 'Corrección ilimitada de observaciones formuladas por el asesor y jurados.'
-  },
-  {
-    key: 'turnitin',
-    label: 'Reporte TURNITIN',
-    description: 'Certificado oficial de verificación de antiplagio y bajo % de similitud.'
-  },
-  {
-    key: 'diapositivas',
-    label: 'Diapositivas Profesionales',
-    description: 'Diseño de plantilla de alta calidad para la exposición final.'
-  },
-  {
-    key: 'balotario',
-    label: 'Balotario de Preguntas',
-    description: 'Cuestionario de posibles preguntas del jurado.'
-  },
-  {
-    key: 'asesoria',
-    label: 'Asesoría Extraordinaria',
-    description: 'Orientación personalizada continua en cada etapa del desarrollo.'
-  },
-  {
-    key: 'simulacion',
-    label: 'Simulación de Sustentación',
-    description: 'Ensayo previo en vivo con simulación de jurado evaluador.'
-  }
-];
+/*
+ * Los entregables del cierre se nombran de a uno y recién después se arman en
+ * listas: cada paquete los imprime en SU orden —el del documento que el equipo
+ * ya venía usando— y, con la lista literal copiada en cada uno, corregir un
+ * texto obligaría a acordarse de los demás.
+ */
+const OBSERVACIONES = {
+  key: 'observaciones',
+  label: 'Levantamiento de Observaciones',
+  description: 'Corrección ilimitada de observaciones formuladas por el asesor y jurados.'
+};
+
+const TURNITIN = {
+  key: 'turnitin',
+  label: 'Reporte TURNITIN',
+  description: 'Certificado oficial de verificación de antiplagio y bajo % de similitud.'
+};
+
+const DIAPOSITIVAS = {
+  key: 'diapositivas',
+  label: 'Diapositivas Profesionales',
+  description: 'Diseño de plantilla de alta calidad para la exposición final.'
+};
+
+const BALOTARIO = {
+  key: 'balotario',
+  label: 'Balotario de Preguntas',
+  description: 'Cuestionario de posibles preguntas del jurado.'
+};
+
+const ASESORIA = {
+  key: 'asesoria',
+  label: 'Asesoría Extraordinaria',
+  description: 'Orientación personalizada continua en cada etapa del desarrollo.'
+};
+
+const SIMULACION = {
+  key: 'simulacion',
+  label: 'Simulación de Sustentación',
+  description: 'Ensayo previo en vivo con simulación de jurado evaluador.'
+};
+
+const CIERRE_COMUN = [OBSERVACIONES, TURNITIN, DIAPOSITIVAS, BALOTARIO, ASESORIA, SIMULACION];
+
+/** El TSP imprime la asesoría antes de las diapositivas; el resto es igual. */
+const CIERRE_TSP = [OBSERVACIONES, TURNITIN, ASESORIA, DIAPOSITIVAS, BALOTARIO, SIMULACION];
 
 /** Paquetes cotizables, en el orden en que se ofrecen en el formulario. */
 export const QUOTE_PACKAGES = [
@@ -134,6 +148,39 @@ export const QUOTE_PACKAGES = [
       commercialTerms: [
         'Los entregables y avances se programarán según el cronograma acordado en el contrato de servicio.',
         'Esta cotización formaliza el alcance del artículo científico terminado con las herramientas mencionadas, sin costos adicionales.',
+        'Validez de la propuesta económica sujeta a confirmación antes de la fecha de vigencia indicada.'
+      ].join('\n')
+    }
+  },
+  {
+    key: 'tsp',
+    label: 'Trabajo de Suficiencia Profesional',
+    icon: '🧰',
+    hint: 'Plan del TSP y TSP final completo',
+    deliverables: [
+      GESTION_LUGAR,
+      PROPUESTAS,
+      {
+        key: 'plan_tsp',
+        label: 'Plan del TSP',
+        description: 'Elaboración integral del anteproyecto con rigor metodológico.'
+      },
+      {
+        key: 'tsp_final',
+        label: 'TSP Final',
+        description: 'Desarrollo completo de capítulos, análisis de datos y resultados.'
+      },
+      ...CIERRE_TSP
+    ],
+    defaults: {
+      conceptTitle: 'DESARROLLO DE TRABAJO DE SUFICIENCIA PROFESIONAL - SERVICIO INTEGRAL',
+      serviceSubtitle: 'Acompañamiento, tutoría y correcciones continuas hasta la aprobación formal.',
+      estimatedTime: '1 mes',
+      statusLabel: 'Aprobada para gestión',
+      warrantyText: 'El servicio asegura acompañamiento constante y revisiones adaptadas a las exigencias y rúbricas de la universidad hasta la aprobación formal del trabajo de suficiencia profesional.',
+      commercialTerms: [
+        'Los entregables y avances se programarán según el cronograma acordado en el contrato de servicio.',
+        'Esta cotización formaliza el alcance del trabajo de suficiencia profesional terminado con las herramientas mencionadas, sin costos adicionales.',
         'Validez de la propuesta económica sujeta a confirmación antes de la fecha de vigencia indicada.'
       ].join('\n')
     }
