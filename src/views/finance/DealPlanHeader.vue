@@ -228,7 +228,7 @@
         <label class="deal-field">
           <span>Banco</span>
           <select v-model="draft.banco" class="form-select" required>
-            <option v-for="b in BANCOS" :key="b" :value="b">{{ b }}</option>
+            <option v-for="b in bancos" :key="b" :value="b">{{ b }}</option>
           </select>
         </label>
         <label class="deal-field">
@@ -256,7 +256,7 @@ import { computed, reactive, ref } from "vue";
 import { apiFetch } from "../../apiClient.js";
 import { formatAmount } from "./format.js";
 import { unexpectedAmount } from "./dealCancellation.js";
-import { BANCOS, CUOTAS, EMITIR_OPCIONES, calcItf } from "./incomeOptions.js";
+import { BANCOS, bancos, CUOTAS, EMITIR_OPCIONES, calcItf } from "./incomeOptions.js";
 import LeadContactModal from "./LeadContactModal.vue";
 
 const props = defineProps({

@@ -25,7 +25,7 @@
       </select>
       <select v-model="bancoFilter" class="ledger-filter" aria-label="Filtrar por banco">
         <option value="">Todo banco</option>
-        <option v-for="b in BANCOS" :key="b" :value="b">{{ b }}</option>
+        <option v-for="b in bancos" :key="b" :value="b">{{ b }}</option>
       </select>
       <LedgerDateRange v-model:desde="desde" v-model:hasta="hasta" noun="Fecha del asiento" />
       <button type="button" class="btn-primary ledger-add-btn" @click="isFormOpen ? closeForm() : openCreate()">
@@ -74,9 +74,14 @@
             </p>
           </div>
           <div class="form-group">
-            <label class="form-label">Banco</label>
-            <select v-model="form.banco" class="form-select" required>
-              <option v-for="b in BANCOS" :key="b" :value="b">{{ b }}</option>
+            <div class="ledger-label-row">
+              <label class="form-label" for="journal-banco">Banco</label>
+              <FinanceOptionAdder kind="banco" @added="(b) => (form.banco = b)" />
+            </div>
+            <select id="journal-banco" v-model="form.banco" class="form-select" required>
+              <option v-for="b in bancos" :key="b" :value="b">{{ b }}</option>
+              <!-- Una cuenta que ya no está en la lista sigue mostrándose en el asiento que la usa. -->
+              <option v-if="form.banco && !bancos.includes(form.banco)" :value="form.banco">{{ form.banco }}</option>
             </select>
           </div>
           <div class="form-group">
@@ -87,15 +92,13 @@
             </select>
           </div>
           <div class="form-group">
-            <label class="form-label">Área de la empresa</label>
-            <input v-model="form.area" type="text" class="form-input" list="journal-areas" placeholder="Ej: Ventas, Operaciones..." />
+            <div class="ledger-label-row">
+              <label class="form-label" for="journal-area">Área de la empresa</label>
+              <FinanceOptionAdder kind="area" @added="(a) => (form.area = a)" />
+            </div>
+            <input id="journal-area" v-model="form.area" type="text" class="form-input" list="journal-areas" placeholder="Ej: Ventas, Operaciones..." />
             <datalist id="journal-areas">
-              <option value="Ventas" />
-              <option value="Marketing" />
-              <option value="Operaciones" />
-              <option value="Administración" />
-              <option value="Recursos Humanos" />
-              <option value="Finanzas" />
+              <option v-for="a in areas" :key="a" :value="a" />
             </datalist>
           </div>
           <div class="form-group">
@@ -311,7 +314,8 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { apiFetch } from '../../apiClient.js';
 import { loadReceiptUrl } from './receiptImage.js';
-import { BANCOS, calcItf } from './incomeOptions.js';
+import { areas, bancos, calcItf, loadFinanceOptions } from './incomeOptions.js';
+import FinanceOptionAdder from './FinanceOptionAdder.vue';
 import { currencySymbol, dayOnly, formatAmount, formatDate } from './format.js';
 import { useLedgerTable } from './useLedgerTable.js';
 import LedgerDateRange from './LedgerDateRange.vue';
@@ -654,6 +658,9 @@ async function removeRow(id) {
   }
 }
 
-onMounted(fetchRows);
+onMounted(() => {
+  fetchRows();
+  loadFinanceOptions();
+});
 onBeforeUnmount(releaseUrls);
 </script>

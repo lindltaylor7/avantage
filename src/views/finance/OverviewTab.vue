@@ -476,7 +476,7 @@
             <h3 class="ov-section-title">Cuentas Bancarias & Caja</h3>
             <p class="ov-section-sub">Saldo acumulado por entidad, sin recorte de fechas</p>
           </div>
-          <span class="wallet-badge">{{ BANCOS.length }} Cuentas activas</span>
+          <span class="wallet-badge">{{ data.banks.length }} Cuentas activas</span>
         </div>
 
         <div class="bank-cards-stack">
@@ -713,7 +713,7 @@
             @click="toggleBankFilter(b.banco)"
           >
             <div class="gauge-row-left">
-              <span class="gauge-color-dot" :style="{ background: BANK_COLORS[b.banco] }"></span>
+              <span class="gauge-color-dot" :style="{ background: BANK_COLORS[b.banco] || BANK_COLOR_FALLBACK }"></span>
               <span class="gauge-bank-label">{{ b.banco }}</span>
             </div>
             <div class="gauge-row-values">
@@ -769,8 +769,17 @@ const BANK_COLORS = {
   Efectivo: "#F59E0B"
 };
 
+/** Color de una cuenta que agregó el equipo (no tiene uno propio). */
+const BANK_COLOR_FALLBACK = "#64748B";
+
+/*
+ * Las cuentas salen de la respuesta del servidor (`data.banks`) y no de la
+ * lista fija: el equipo puede agregar cuentas desde el Libro Diario, y una
+ * cuenta sin tarjeta tendría su dinero en el total y en ningún otro lado.
+ */
+
 /** Degradado del arco de cada banco en el semidonut (oscuro → claro). */
-const GAUGE_GRADIENTS = BANCOS.map((banco) => ({
+const GAUGE_GRADIENTS = computed(() => data.value.banks.map((banco) => ({
   banco,
   id: `gauge-${bankSlug(banco)}`,
   ...({
@@ -779,22 +788,23 @@ const GAUGE_GRADIENTS = BANCOS.map((banco) => ({
     Interbank: { from: "#059669", to: "#10B981" },
     Efectivo: { from: "#D97706", to: "#F59E0B" }
   }[banco] || { from: "#64748B", to: "#94A3B8" })
-}));
+})));
 
 /**
  * Las cuentas bancarias de la billetera. El efectivo tiene su propia tarjeta
  * (es caja física, no una cuenta), así que no entra en esta lista.
  */
-const ACCOUNT_CARDS = BANCOS
+const CARD_THEMES = ["BCP", "BCP Finanzas", "Interbank"];
+const ACCOUNT_CARDS = computed(() => data.value.banks
   .filter((banco) => banco !== "Efectivo")
   .map((banco) => ({
     banco,
-    className: `card-${bankSlug(banco)}`,
+    className: CARD_THEMES.includes(banco) ? `card-${bankSlug(banco)}` : "card-generic",
     tipo: {
       Interbank: "Cta. Empresa Soles",
       "BCP Finanzas": "Cta. Finanzas Soles"
     }[banco] || "Cta. Corriente Soles"
-  }));
+  })));
 
 const months = ref(6);
 /*
@@ -1070,7 +1080,7 @@ function getBankPct(bankRow) {
 const gaugeArcs = computed(() => {
   // Un arco por banco con saldo, en el orden de BANCOS. El último se queda con
   // el resto del porcentaje para que los redondeos no dejen un hueco al final.
-  const conSaldo = BANCOS
+  const conSaldo = data.value.banks
     .map((banco) => ({ banco, pct: getBankPct(getBankStats(banco)) }))
     .filter((b) => b.pct > 0);
   if (conSaldo.length > 0) {
@@ -1776,6 +1786,11 @@ onBeforeUnmount(() => {
 
 .card-interbank {
   background: linear-gradient(135deg, #064E3B 0%, #047857 50%, #065F46 100%);
+}
+
+/* Cuenta agregada por el equipo: sin marca propia. */
+.card-generic {
+  background: linear-gradient(135deg, #1F2937 0%, #475569 55%, #334155 100%);
 }
 
 .card-cash {

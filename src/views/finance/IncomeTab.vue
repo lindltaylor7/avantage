@@ -31,7 +31,7 @@
       </select>
       <select v-model="bancoFilter" class="ledger-filter" aria-label="Filtrar por banco">
         <option value="">Todo banco</option>
-        <option v-for="b in BANCOS" :key="b" :value="b">{{ b }}</option>
+        <option v-for="b in bancos" :key="b" :value="b">{{ b }}</option>
       </select>
       <!--
         El rango corre sobre la fecha en que entró el dinero (`fecha`) y no
@@ -166,7 +166,7 @@
           <div class="form-group">
             <label class="form-label">Banco</label>
             <select v-model="form.banco" class="form-select" required>
-              <option v-for="b in BANCOS" :key="b" :value="b">{{ b }}</option>
+              <option v-for="b in bancos" :key="b" :value="b">{{ b }}</option>
             </select>
           </div>
           <div class="form-group">
@@ -583,7 +583,7 @@ import { loadReceiptUrl } from "./receiptImage.js";
 import { openIncomeReceipt } from "./receiptDocument.js";
 import { dayOnly, formatAmount, formatDate } from "./format.js";
 import { agreedAmount, unexpectedAmount } from "./dealCancellation.js";
-import { BANCOS, CUOTAS, EMITIR_OPCIONES, calcItf } from "./incomeOptions.js";
+import { bancos, CUOTAS, EMITIR_OPCIONES, calcItf } from "./incomeOptions.js";
 import { useLedgerTable } from "./useLedgerTable.js";
 import LedgerDateRange from "./LedgerDateRange.vue";
 import { rangeLabel } from "./dateRange.js";

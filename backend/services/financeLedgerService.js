@@ -31,6 +31,30 @@ export const EMITIR_OPCIONES = ['factura', 'boleta', 'nrus', 'rxh', 'c. interno'
  * el módulo (ingresos, libro diario, gastos fijos, salarios y el resumen).
  */
 export const BANCOS = ['BCP', 'BCP Finanzas', 'Interbank', 'Efectivo'];
+
+/**
+ * Áreas de la empresa que el Libro Diario propone de fábrica. El equipo suma
+ * las suyas desde la pestaña (`finance_options`, ver `financeOptionService`).
+ */
+export const DEFAULT_AREAS = ['Ventas', 'Marketing', 'Operaciones', 'Administración', 'Recursos Humanos', 'Finanzas'];
+
+/**
+ * Las cuentas vigentes: las de fábrica más las que el equipo agregó, en ese
+ * orden. Es la lista con la que se valida un ingreso o un asiento y con la que
+ * el Resumen arma una tarjeta por cuenta: si la validación aceptara un banco
+ * que el Resumen no conoce, su dinero contaría en el total y no en ninguna
+ * tarjeta ni en la gráfica mensual.
+ */
+export async function loadBanks() {
+  try {
+    const rows = await db('finance_options').where({ kind: 'banco' }).orderBy('id', 'asc').select('label');
+    return [...BANCOS, ...rows.map((r) => r.label).filter((l) => !BANCOS.includes(l))];
+  } catch (error) {
+    // Sin la tabla (migración pendiente) siguen valiendo las de fábrica.
+    if (error?.code === 'ER_NO_SUCH_TABLE') return [...BANCOS];
+    throw error;
+  }
+}
 export const MONEDAS = ['soles', 'dolares'];
 /**
  * Ciclo de vida de un ingreso. "verificado" es el único estado que suma en las
@@ -159,10 +183,10 @@ export async function attachReceipts(rows, table, foreignKey) {
  * `undefined` ahí se ve como una tarjeta rota y no como "no hay nada en este
  * período".
  */
-function emptyOverview({ from = '', to = '' } = {}) {
+function emptyOverview({ from = '', to = '', banks = BANCOS } = {}) {
   return {
     months: [],
-    banks: BANCOS,
+    banks,
     rango: { desde: from || '', hasta: to || '', recortado: true },
     ingresos: [],
     egresos: [],
@@ -173,7 +197,7 @@ function emptyOverview({ from = '', to = '' } = {}) {
       egresosPorOrigen: { libro: 0, salarios: 0, comisiones: 0, itf: 0 },
       pendientes: { salarios: 0, comisiones: 0, total: 0 },
       totalTransactions: 0,
-      byBank: BANCOS.map((banco) => ({ banco, ingresos: 0, egresos: 0 }))
+      byBank: banks.map((banco) => ({ banco, ingresos: 0, egresos: 0 }))
     },
     recentTransactions: []
   };
@@ -338,11 +362,11 @@ export class FinanceLedgerService {
    * siempre de la fecha; el ITF se propone con la fórmula y se puede corregir,
    * ver `resolveItf`).
    */
-  #normalizeIncome({ fecha, dueDate, leadId, cuota, emitir, monto, itf, banco, estado, tributario }) {
+  #normalizeIncome({ fecha, dueDate, leadId, cuota, emitir, monto, itf, banco, estado, tributario }, banks = BANCOS) {
     if (!fecha) throw new Error('La fecha es obligatoria.');
     if (!CUOTAS.includes(cuota)) throw new Error('La cuota debe ser 1era, 2da o 3era.');
     if (!EMITIR_OPCIONES.includes(emitir)) throw new Error('El campo "emitir" no es válido.');
-    if (!BANCOS.includes(banco)) throw new Error(`El banco debe ser uno de: ${BANCOS.join(', ')}.`);
+    if (!banks.includes(banco)) throw new Error(`El banco debe ser uno de: ${banks.join(', ')}.`);
     const numericMonto = Number(monto);
     if (!Number.isFinite(numericMonto) || numericMonto <= 0) {
       throw new Error('El monto debe ser un número mayor a 0.');
@@ -534,7 +558,7 @@ export class FinanceLedgerService {
   }
 
   async createIncome({ createdBy, isInitialPayment, ...fields }) {
-    const values = this.#normalizeIncome(fields);
+    const values = this.#normalizeIncome(fields, await loadBanks());
     await this.#assertWithinLeadTotal(values.lead_id, values.monto);
     const [id] = await db('finance_income').insert({
       ...values,
@@ -554,7 +578,7 @@ export class FinanceLedgerService {
   async updateIncome(id, fields) {
     const existing = await db('finance_income').where({ id }).first();
     if (!existing) return null;
-    const values = this.#normalizeIncome(fields);
+    const values = this.#normalizeIncome(fields, await loadBanks());
     await this.#assertWithinLeadTotal(values.lead_id, values.monto, id);
     if (values.lead_id && values.lead_id !== existing.lead_id) {
       values.code = await this.#codeForIncome(values.lead_id, values.fecha);
@@ -613,6 +637,7 @@ export class FinanceLedgerService {
     if (!leadId) throw new Error('El cronograma necesita un lead asociado.');
     const lead = await db('leads').where({ id: leadId }).first();
     if (!lead) throw new Error('Lead no encontrado.');
+    const banks = await loadBanks();
 
     const entries = (Array.isArray(installments) ? installments : []).map((item, index) => {
       const monto = Number(item.monto);
@@ -625,7 +650,7 @@ export class FinanceLedgerService {
         monto: Math.round(monto * 100) / 100,
         dueDate: dayOnly(item.dueDate),
         emitir: EMITIR_OPCIONES.includes(item.emitir) ? item.emitir : null,
-        banco: BANCOS.includes(item.banco) ? item.banco : null
+        banco: banks.includes(item.banco) ? item.banco : null
       };
     });
 
@@ -864,10 +889,10 @@ export class FinanceLedgerService {
   }
 
   /** Valida y normaliza los campos editables de un asiento (alta y edición). */
-  #normalizeJournal({ fecha, detalle, monto, itf, moneda, banco, estado, area, asientoPorDestino }) {
+  #normalizeJournal({ fecha, detalle, monto, itf, moneda, banco, estado, area, asientoPorDestino }, banks = BANCOS) {
     if (!fecha) throw new Error('La fecha es obligatoria.');
     if (!detalle || !detalle.trim()) throw new Error('El detalle es obligatorio.');
-    if (!BANCOS.includes(banco)) throw new Error(`El banco debe ser uno de: ${BANCOS.join(', ')}.`);
+    if (!banks.includes(banco)) throw new Error(`El banco debe ser uno de: ${banks.join(', ')}.`);
     const numericMonto = Number(monto);
     if (!Number.isFinite(numericMonto)) throw new Error('El monto debe ser un número.');
 
@@ -887,7 +912,7 @@ export class FinanceLedgerService {
   async createJournal({ receipts, createdBy, ...fields }) {
     const files = receipts || [];
     try {
-      const values = this.#normalizeJournal(fields);
+      const values = this.#normalizeJournal(fields, await loadBanks());
       const [id] = await db('finance_journal').insert({
         ...values,
         code: await nextCode('finance_journal', values.fecha),
@@ -915,7 +940,7 @@ export class FinanceLedgerService {
       return null;
     }
     try {
-      await db('finance_journal').where({ id }).update(this.#normalizeJournal(fields));
+      await db('finance_journal').where({ id }).update(this.#normalizeJournal(fields, await loadBanks()));
       const rows = receiptRowsFromFiles(files, 'journal_id', id);
       if (rows.length > 0) await db('finance_journal_receipts').insert(rows);
       return this.getJournalById(id);
@@ -1190,7 +1215,8 @@ export class FinanceLedgerService {
     const ventana = monthKeys.length > 0
       ? sqlWindow({ from: porRango?.desde, to: porRango?.hasta, periods: monthKeys })
       : null;
-    if (!ventana) return emptyOverview({ from, to });
+    const BANKS = await loadBanks();
+    if (!ventana) return emptyOverview({ from, to, banks: BANKS });
 
     const earliest = ventana.from;
     // Fin de la ventana: el día SIGUIENTE al último del rango (o el primero del
@@ -1296,7 +1322,7 @@ export class FinanceLedgerService {
      * tarjetas por cuenta, que reparten solo lo que sí cayó en una conocida.
      */
     const SIN_CUENTA = 'Sin cuenta';
-    const seriesKeys = [...BANCOS, SIN_CUENTA];
+    const seriesKeys = [...BANKS, SIN_CUENTA];
     const emptyGrid = () => Object.fromEntries(
       seriesKeys.map((b) => [b, Object.fromEntries(monthKeys.map((m) => [m, 0]))])
     );
@@ -1385,7 +1411,7 @@ export class FinanceLedgerService {
      * que no tiene banco asignado es dinero igual y entra en los totales, pero
      * no hay tarjeta a la que sumarlo.
      */
-    const saldos = Object.fromEntries(BANCOS.map((b) => [b, { ingresos: 0, egresos: 0 }]));
+    const saldos = Object.fromEntries(BANKS.map((b) => [b, { ingresos: 0, egresos: 0 }]));
     const acumularSaldo = (banco, ingreso, egreso) => {
       if (!saldos[banco]) return;
       saldos[banco].ingresos += ingreso;
@@ -1638,7 +1664,7 @@ export class FinanceLedgerService {
 
     return {
       months: monthKeys,
-      banks: BANCOS,
+      banks: BANKS,
       /*
        * El rango que de verdad se aplicó, para que la pantalla pueda rotular
        * cada cifra ("del período" o "histórico") en vez de que haya que
@@ -1677,7 +1703,7 @@ export class FinanceLedgerService {
           total: redondear(pendienteSalarios + pendienteComisiones)
         },
         totalTransactions,
-        byBank: BANCOS.map((banco) => ({
+        byBank: BANKS.map((banco) => ({
           banco,
           ingresos: redondear(saldos[banco].ingresos),
           egresos: redondear(saldos[banco].egresos)

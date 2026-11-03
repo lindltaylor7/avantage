@@ -357,6 +357,15 @@ antes de tocar el arranque de producción.
   **solo** el cursor y el realce: el color, el borde y la tipografía los sigue poniendo `.pill-*`,
   que es lo que la mantiene indistinguible de una píldora de solo lectura. La misma pareja la usa
   la pestaña de Salarios.
+- Las **áreas de la empresa** del Libro Diario y las **cuentas** (bancos) de Finanzas se amplían
+  desde el «＋ Agregar» del formulario del Libro Diario (`FinanceOptionAdder.vue`,
+  `financeOptionService.js`, `/api/finance/options`). Las de fábrica siguen en el código
+  (`BANCOS`, `DEFAULT_AREAS`) y no se pueden quitar; `finance_options` guarda solo las agregadas.
+  Una cuenta nueva vale en **todo** el módulo —la validación de ingresos y asientos y el Resumen
+  usan `loadBanks()`, y las pestañas leen el ref `bancos` de `incomeOptions.js`—: si la
+  validación la aceptara y el Resumen no la conociera, su dinero contaría en el total y en ninguna
+  tarjeta. Una cuenta con movimientos no se puede quitar (409); un área sí, porque es texto en cada
+  asiento.
 - La pestaña **Salarios** de Finanzas (`finance_salaries`, `financeSalaryService.js`) es un
   registro de pagos al personal **sin llaves hacia la contabilidad**: no se relaciona con
   `finance_income` ni con `finance_journal`. Guarda la persona como texto libre (se paga a

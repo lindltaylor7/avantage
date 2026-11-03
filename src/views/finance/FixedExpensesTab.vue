@@ -36,7 +36,7 @@
             <label class="form-label">Banco</label>
             <select v-model="form.banco" class="form-select">
               <option value="">— Sin especificar —</option>
-              <option v-for="b in BANCOS" :key="b" :value="b">{{ b }}</option>
+              <option v-for="b in bancos" :key="b" :value="b">{{ b }}</option>
             </select>
           </div>
           <div class="form-group ledger-form-wide">
@@ -177,7 +177,7 @@
               <label class="form-label">Banco</label>
               <select v-model="editForm.banco" class="form-select">
                 <option value="">— Sin especificar —</option>
-                <option v-for="b in BANCOS" :key="b" :value="b">{{ b }}</option>
+                <option v-for="b in bancos" :key="b" :value="b">{{ b }}</option>
               </select>
             </div>
             <div class="form-group fx-edit-wide">
@@ -212,7 +212,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { apiFetch } from '../../apiClient.js';
-import { BANCOS } from './incomeOptions.js';
+import { bancos } from './incomeOptions.js';
 import LedgerDateRange from './LedgerDateRange.vue';
 import './ledger.css';
 

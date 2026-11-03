@@ -67,6 +67,7 @@ import { PaymentNoticeService } from './services/paymentNoticeService.js';
 import { DeliverableSettingsService } from './services/deliverableSettingsService.js';
 import { FinanceService } from './services/financeService.js';
 import { FinanceLedgerService } from './services/financeLedgerService.js';
+import { FinanceOptionService } from './services/financeOptionService.js';
 import { FinanceSalaryService } from './services/financeSalaryService.js';
 import { CommissionService } from './services/commissionService.js';
 import { CollectionService } from './services/collectionService.js';
@@ -257,6 +258,7 @@ const scheduledMeetingService = new ScheduledMeetingService({ googleCalendarServ
 const calendarSyncService = new CalendarSyncService({ googleCalendarService, userService });
 const financeService = new FinanceService();
 const financeLedgerService = new FinanceLedgerService();
+const financeOptionService = new FinanceOptionService();
 // El Reporte General lee la caja del mismo resumen que Finanzas: así las dos
 // pantallas no pueden decir cifras distintas.
 const generalReportService = new GeneralReportService({ financeLedgerService });
@@ -1635,6 +1637,38 @@ app.post('/api/finance/journal', requireAuth, requirePermission('finance.view'),
   } catch (error) {
     console.error('❌ Error al registrar el asiento del libro diario:', error);
     res.status(400).json({ error: error.message || 'Error al registrar el asiento.' });
+  }
+});
+
+// --- Opciones que agrega el equipo: áreas de la empresa y cuentas (bancos) ---
+// Leerlas también es del closer: el modal de cierre (WinDealModal) elige la
+// cuenta del primer pago, y una cuenta nueva tiene que aparecer ahí también.
+app.get('/api/finance/options', requireAuth, requireAnyPermission('finance.view', 'leads.view'), async (req, res) => {
+  try {
+    res.json(await financeOptionService.list());
+  } catch (error) {
+    console.error('❌ Error al obtener las opciones de Finanzas:', error);
+    res.status(500).json({ error: 'Error al obtener las opciones.' });
+  }
+});
+
+app.post('/api/finance/options', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    const option = await financeOptionService.add(req.body?.kind, req.body?.label, req.user.id);
+    res.status(201).json({ option, ...(await financeOptionService.list()) });
+  } catch (error) {
+    if (!error.status) console.error('❌ Error al agregar la opción de Finanzas:', error);
+    res.status(error.status || 500).json({ error: error.message || 'Error al agregar la opción.' });
+  }
+});
+
+app.delete('/api/finance/options/:id', requireAuth, requirePermission('finance.view'), async (req, res) => {
+  try {
+    await financeOptionService.remove(req.params.id);
+    res.json(await financeOptionService.list());
+  } catch (error) {
+    if (!error.status) console.error('❌ Error al quitar la opción de Finanzas:', error);
+    res.status(error.status || 500).json({ error: error.message || 'Error al quitar la opción.' });
   }
 });
 
