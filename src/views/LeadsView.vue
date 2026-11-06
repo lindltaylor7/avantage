@@ -153,6 +153,11 @@
       <p>{{ loadError }}</p>
     </div>
 
+    <!-- Se entró por un enlace a una ficha que no está en este tablero. -->
+    <div v-if="deepLinkNotice" class="info-box">
+      <p>🔗 {{ deepLinkNotice }}</p>
+    </div>
+
     <!-- Toast de Proyecto Creado -->
     <transition name="toast-slide">
       <div v-if="projectToast" class="project-created-banner">
@@ -1255,7 +1260,9 @@
 
 <script setup>
 import { ref, reactive, computed, watch, onMounted } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { apiFetch } from '../apiClient.js';
+import { consumeLeadParam } from '../leadDeepLink.js';
 import { QUOTE_PACKAGES, DEFAULT_QUOTE_PACKAGE, findQuotePackage, defaultDeliverableKeys, deliverableLine } from '../data/quoteDeliverables.js';
 import { careerGroupsWith, DEFAULT_CAREER } from '../data/careers.js';
 import { hasPermission } from '../auth.js';
@@ -1317,6 +1324,33 @@ const leads = ref([]);
 // 'all' = se ven todos (administrador comercial); 'mine' = solo los propios.
 const leadScope = ref('all');
 const selectedLead = ref(null);
+
+/*
+ * Enlace directo a una ficha (`?lead=666`): es por donde entra el Reporte de
+ * Leads, que muestra los dos tableros a la vez y hasta ahora obligaba a
+ * anotarse el nombre, venir acá y buscarlo a mano. El parámetro se consume una
+ * sola vez y se borra de la URL (ver `leadDeepLink.js`).
+ */
+const route = useRoute();
+const router = useRouter();
+const deepLinkNotice = ref('');
+
+function openLeadFromLink() {
+  const id = consumeLeadParam(route, router);
+  if (!id) return;
+
+  const lead = leads.value.find((item) => Number(item.id) === id);
+  if (lead) {
+    selectedLead.value = lead;
+    return;
+  }
+  // Pudo cambiar de tablero entre que el reporte se cargó y alguien hizo
+  // clic, o ser de otra persona: decirlo es la diferencia entre una pantalla
+  // que se explica y un enlace que no hace nada.
+  deepLinkNotice.value = `No se encontró el lead #${id} en este tablero: puede haber cambiado de etapa, o no estar entre los que ves.`;
+  setTimeout(() => { deepLinkNotice.value = ''; }, 12000);
+}
+
 const isLoading = ref(false);
 const loadError = ref('');
 const draggedLead = ref(null);
@@ -2664,7 +2698,7 @@ function getLevelClass(level) {
 }
 
 onMounted(() => {
-  fetchAll();
+  fetchAll().then(openLeadFromLink);
 });
 </script>
 

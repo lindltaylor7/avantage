@@ -186,6 +186,20 @@
                     <button type="button" class="btn-action-ghost report-btn" @click="openChat(lead)">
                       💬 Conversación
                     </button>
+                    <!--
+                      Al tablero donde está la ficha, con ella abierta. El
+                      reporte mira los dos funnels a la vez, así que el destino
+                      lo decide la etapa del lead y no la pantalla. Sale solo
+                      si esa persona puede entrar a ese tablero: sin el
+                      permiso, el guard del router la mandaría al Dashboard
+                      sin decirle por qué.
+                    -->
+                    <router-link
+                      v-if="canOpenFunnel(lead)"
+                      :to="leadFunnelLink(lead)"
+                      class="btn-action-ghost report-btn report-open-link"
+                      :title="`Abrir su ficha en ${boardName(lead)}`"
+                    >↗ Ver en el funnel</router-link>
                   </div>
                 </td>
               </tr>
@@ -277,6 +291,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { apiFetch } from '../apiClient.js';
 import { hasPermission } from '../auth.js';
 import { formatLeadDate } from '../leadCardDate.js';
+import { BOARD_LABEL, leadBoard, leadBoardPermission, leadFunnelLink } from '../leadDeepLink.js';
 import LeadConversation from '../components/LeadConversation.vue';
 
 /*
@@ -436,7 +451,16 @@ function stageText(stage) {
 }
 
 function boardName(lead) {
-  return lead.stage?.board === 'ventas' ? 'Funnel de Ventas' : 'Setter Funnel';
+  return BOARD_LABEL[leadBoard(lead)];
+}
+
+/**
+ * El enlace al tablero solo sale si esa persona puede entrar: `leads.report`
+ * no implica ver el funnel, y un enlace que siempre rebota al Dashboard se
+ * lee como que el panel está roto.
+ */
+function canOpenFunnel(lead) {
+  return hasPermission(leadBoardPermission(lead));
 }
 
 function boardPill(lead) {
@@ -662,6 +686,14 @@ onMounted(load);
 }
 
 .report-btn { padding: 0.3rem 0.65rem; font-size: 0.78rem; }
+
+/* El enlace se ve y se alinea como los dos botones de al lado: en la misma
+   columna, la diferencia entre un <a> y un <button> no es información. */
+.report-open-link {
+  display: inline-block;
+  text-align: center;
+  text-decoration: none;
+}
 
 /* Las dos acciones de la fila, una debajo de la otra: en línea ensanchan la
    columna y le quitan sitio al nombre del lead, que es lo que se busca. */

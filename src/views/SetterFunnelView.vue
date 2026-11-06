@@ -241,6 +241,11 @@
       <p>{{ loadError }}</p>
     </div>
 
+    <!-- Se entró por un enlace a una ficha que no está en este tablero. -->
+    <div v-if="deepLinkNotice" class="info-box">
+      <p>🔗 {{ deepLinkNotice }}</p>
+    </div>
+
     <!--
       Las etapas ahora se guardan en el servidor y son de todo el equipo, así
       que un cambio que no llegó tiene que decirse: antes se escribía en el
@@ -1188,7 +1193,9 @@
 
 <script setup>
 import { ref, reactive, computed, watch, onMounted } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { apiFetch } from '../apiClient.js';
+import { consumeLeadParam } from '../leadDeepLink.js';
 import LeadNotes from '../components/LeadNotes.vue';
 import LeadConversation from '../components/LeadConversation.vue';
 import LeadAssignee from '../components/LeadAssignee.vue';
@@ -1244,6 +1251,33 @@ const leads = ref([]);
 // 'all' = se ven todos (administrador comercial); 'mine' = solo los propios.
 const leadScope = ref('all');
 const selectedLead = ref(null);
+
+/*
+ * Enlace directo a una ficha (`?lead=666`): es por donde entra el Reporte de
+ * Leads, que muestra los dos tableros a la vez y hasta ahora obligaba a
+ * anotarse el nombre, venir acá y buscarlo a mano. El parámetro se consume una
+ * sola vez y se borra de la URL (ver `leadDeepLink.js`).
+ */
+const route = useRoute();
+const router = useRouter();
+const deepLinkNotice = ref('');
+
+function openLeadFromLink() {
+  const id = consumeLeadParam(route, router);
+  if (!id) return;
+
+  const lead = leads.value.find((item) => Number(item.id) === id);
+  if (lead) {
+    selectedLead.value = lead;
+    return;
+  }
+  // Pudo cambiar de tablero entre que el reporte se cargó y alguien hizo
+  // clic, o ser de otra persona: decirlo es la diferencia entre una pantalla
+  // que se explica y un enlace que no hace nada.
+  deepLinkNotice.value = `No se encontró el lead #${id} en este tablero: puede haber cambiado de etapa, o no estar entre los que ves.`;
+  setTimeout(() => { deepLinkNotice.value = ''; }, 12000);
+}
+
 // Copia editable de los datos del lead abierto (null = la ficha se está leyendo,
 // no editando).
 const leadEdit = ref(null);
@@ -2484,7 +2518,7 @@ watch(selectedLead, () => {
 onMounted(() => {
   loadSetterColumns();
   fetchSalesColumns();
-  fetchAll();
+  fetchAll().then(openLeadFromLink);
   // Para el filtro por responsable. Si falla, el desplegable se arma igual con
   // los responsables que traen los leads.
   if (canFilterByAssignee.value) loadCommercialTeam().catch(() => {});

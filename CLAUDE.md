@@ -597,6 +597,19 @@ antes de tocar el arranque de producción.
   de los tableros, porque supervisar no es trabajar el lead. No es una puerta de atrás —
   `requireLeadVisible` sigue decidiendo cuál se puede abrir—, y quien solo supervisa lo ve en modo
   lectura (`readonly`, sin cuadro de respuesta) en vez de recibir un 403 al apretar enviar.
+  Y cada fila enlaza a **la ficha en su tablero** (`src/leadDeepLink.js`): el reporte mira los dos
+  funnels a la vez, así que el destino lo decide `lead.stage.board` —el mismo dato con el que la
+  fila escribe "Funnel de Ventas" o "Setter Funnel"—, y el enlace sale solo si esa persona tiene
+  el permiso de ese tablero (`leads.view` / `setter.view`): sin él, el guard del router la mandaría
+  al Dashboard sin decirle por qué. Las dos puntas del enlace viven en el MISMO módulo —armarlo
+  acá y consumirlo allá— porque repartidas en dos pantallas, el día que cambie el nombre del
+  parámetro el enlace sigue existiendo y simplemente deja de abrir nada, que es un fallo que nadie
+  reporta. El `?lead=666` de los dos tableros es una **orden de una vez** y no el estado de la
+  pantalla: se consume al cargar (`consumeLeadParam()`, después de `fetchAll()`) y se borra de la
+  URL, porque dejándolo, cerrar la ficha y recargar la volvería a abrir y cualquier enlace que
+  alguien copie después arrastraría un lead que ya no estaba mirando. Si ese lead no está en el
+  tablero —cambió de etapa entre la carga del reporte y el clic, o no es de quien mira— el tablero
+  lo dice en vez de no hacer nada.
 - `leadService.findByPhone()` cruza primero la cadena exacta y después los últimos 9 dígitos
   (`phoneMatchKey`): el `wa_id` del bot (`51987654321`) y lo que escribe la persona en el formulario
   de Meta (`+51 987 654 321`) son el mismo contacto, y compararlos tal cual hacía que el bot le
