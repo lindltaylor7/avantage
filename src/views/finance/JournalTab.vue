@@ -280,9 +280,7 @@
               <div class="form-group">
                 <label class="form-label" for="journal-monto">Monto</label>
                 <div class="journal-amount" :class="form.tipo === 'egreso' ? 'is-out' : 'is-in'">
-                  <span class="journal-amount-sign" aria-hidden="true">
-                    {{ form.tipo === 'egreso' ? '−' : '+' }}{{ currencySymbol(form.moneda) }}
-                  </span>
+                  <span class="journal-amount-sign" aria-hidden="true">{{ signoPrefijo }}</span>
                   <input
                     id="journal-monto"
                     ref="montoInput"
@@ -592,12 +590,15 @@ const montoFirmado = computed(() => {
   return form.tipo === 'egreso' ? -abs : abs;
 });
 
+/** El signo y la moneda, pegados al campo del monto ("+S/", "−US$"). */
+const signoPrefijo = computed(
+  () => `${form.tipo === 'egreso' ? '−' : '+'}${currencySymbol(form.moneda)}`
+);
+
 /** Cómo va a quedar escrito, para confirmarlo antes de guardar. */
-const signedPreview = computed(() => {
-  const abs = Math.abs(Number(form.montoAbs) || 0);
-  const signo = form.tipo === 'egreso' ? '−' : '+';
-  return `${signo}${currencySymbol(form.moneda)} ${formatAmount(abs)}`;
-});
+const signedPreview = computed(
+  () => `${signoPrefijo.value} ${formatAmount(Math.abs(Number(form.montoAbs) || 0))}`
+);
 
 const itfEditado = computed(() => {
   if (form.itf === '' || form.itf === null) return false;

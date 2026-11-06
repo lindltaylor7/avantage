@@ -300,29 +300,76 @@
 :root[data-theme="dark"] .journal-type-btn.is-in.is-active { color: #6EE7B7; }
 :root[data-theme="dark"] .journal-type-btn.is-out.is-active { color: #FCA5A5; }
 
-/* Monto: el signo que va a quedar guardado, dentro del propio campo. */
+/* Monto: el signo que va a quedar guardado, en su propio recuadro pegado al
+   campo. Montado encima del input (en absoluto) se superponía con el
+   marcador "0.00": el relleno que lo apartaba lo pisaba la densidad del
+   panel (`.admin-layout .form-input`, que gana por especificidad), así que
+   el signo y la cifra terminaban uno sobre el otro. Como grupo no hay
+   relleno que calcular: el ancho del signo lo pone su propio texto. */
 .journal-amount {
-  position: relative;
   display: flex;
-  align-items: center;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+}
+
+/* El realce del foco pasa del campo al grupo entero, que es lo que se ve
+   como un solo control. */
+.journal-amount:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(111, 129, 37, 0.18);
+  background: var(--bg-card-solid);
 }
 
 .journal-amount-sign {
-  position: absolute;
-  left: 0.7rem;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 0 0.6rem;
+  border-right: 1px solid var(--border-color);
+  background: var(--surface-2);
   font-family: var(--font-mono);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 700;
-  pointer-events: none;
+  line-height: 1;
+  white-space: nowrap;
+  user-select: none;
 }
 
 .journal-amount.is-in .journal-amount-sign { color: #10B981; }
 .journal-amount.is-out .journal-amount-sign { color: #EF4444; }
 
-.journal-amount-input {
-  padding-left: 3.2rem;
+/* Doble selector a propósito: el segundo le gana a `.admin-layout
+   .form-input` (0,2,0), que es quien pone el relleno y el borde del panel. */
+.journal-amount .journal-amount-input,
+.admin-layout .journal-amount .journal-amount-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+  /* La mono tiene una caja de línea más baja que la del cuerpo, así que sin
+     esto el grupo quedaba ~6 px más corto que los campos de al lado (1,6 es
+     la proporción que da `line-height: normal` con la tipografía del panel). */
+  line-height: 1.6;
+}
+
+/* Las flechitas del campo numérico no sirven para un importe y le comen el
+   ancho justo donde se escribe la cifra. */
+.journal-amount-input {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.journal-amount-input::-webkit-outer-spin-button,
+.journal-amount-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 .journal-in { color: #10B981; }
