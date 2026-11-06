@@ -212,6 +212,189 @@
 .ledger-form-grid .form-group { margin-bottom: 0; }
 .ledger-form-wide { grid-column: 1 / -1; }
 
+/* --------------------------------------------- Modal del asiento del diario
+
+   El formulario del Libro Diario se abre en un modal (el porqué está en el
+   template de `JournalTab.vue`). Acá va solo lo suyo: el velo, la tarjeta y
+   el encabezado ya los pone `src/style.css`.
+*/
+
+.journal-modal { max-width: 780px; }
+
+.journal-modal-sub {
+  margin: 0.2rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.journal-modal-sub strong {
+  font-family: var(--font-mono);
+  color: var(--text-sub);
+}
+
+.journal-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.15rem;
+}
+
+.journal-fieldset {
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+/* Un rótulo por bloque en vez de once campos corridos: la fecha y el monto no
+   se leen igual que el área o el detalle, y agrupados se encuentran de un
+   vistazo. */
+.journal-legend {
+  padding: 0;
+  margin-bottom: 0.55rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+/* Tipo de movimiento: el signo del monto se elige acá. */
+.journal-type {
+  display: inline-flex;
+  gap: 0.2rem;
+  padding: 0.2rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+
+.journal-type-btn {
+  padding: 0.42rem 0.95rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.journal-type-btn:hover:not(.is-active) { color: var(--text-main); }
+
+/* El activo va con tinte y no con el color pleno: blanco sobre estos dos
+   verdes y rojos queda por debajo del contraste mínimo. */
+.journal-type-btn.is-in.is-active {
+  color: #047857;
+  background: rgba(16, 185, 129, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.45);
+}
+
+.journal-type-btn.is-out.is-active {
+  color: #B91C1C;
+  background: rgba(239, 68, 68, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.45);
+}
+
+:root[data-theme="dark"] .journal-type-btn.is-in.is-active { color: #6EE7B7; }
+:root[data-theme="dark"] .journal-type-btn.is-out.is-active { color: #FCA5A5; }
+
+/* Monto: el signo que va a quedar guardado, dentro del propio campo. */
+.journal-amount {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.journal-amount-sign {
+  position: absolute;
+  left: 0.7rem;
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.journal-amount.is-in .journal-amount-sign { color: #10B981; }
+.journal-amount.is-out .journal-amount-sign { color: #EF4444; }
+
+.journal-amount-input {
+  padding-left: 3.2rem;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.journal-in { color: #10B981; }
+.journal-out { color: #EF4444; }
+
+/* Comprobantes elegidos y todavía sin subir. */
+.journal-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.journal-files li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  max-width: 100%;
+  padding: 0.2rem 0.3rem 0.2rem 0.6rem;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-size: 0.75rem;
+  color: var(--text-sub);
+}
+
+.journal-file-name {
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.journal-file-remove {
+  padding: 0.12rem 0.28rem;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.journal-file-remove:hover {
+  color: var(--accent-rose);
+  background: var(--bg-card-hover);
+}
+
+/* El pie es fijo: guardar no puede quedar al final de un formulario largo. */
+.journal-modal-footer {
+  padding: 0.85rem 1.15rem;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-card-solid);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+.journal-modal-error {
+  margin: 0 0 0.6rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--accent-rose);
+}
+
+.journal-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+
 .ledger-tab .ledger-submit-btn {
   width: auto;
   padding: 0.6rem 1.4rem;
@@ -615,6 +798,13 @@
   .ledger-add-btn { margin-left: 0; width: 100%; }
   .ledger-summary-item { border-left: none; padding: 0.35rem 0.9rem; }
   .ledger-pagination { justify-content: center; }
+
+  /* El modal del asiento ocupa la pantalla y sus botones se apilan: el
+     principal queda abajo, bajo el pulgar. */
+  .journal-type { width: 100%; }
+  .journal-type-btn { flex: 1; }
+  .journal-modal-actions { flex-direction: column-reverse; }
+  .journal-modal-actions > button { width: 100%; justify-content: center; }
 }
 
 @media (prefers-reduced-motion: reduce) {

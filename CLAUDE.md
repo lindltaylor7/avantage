@@ -366,6 +366,27 @@ antes de tocar el arranque de producción.
   validación la aceptara y el Resumen no la conociera, su dinero contaría en el total y en ninguna
   tarjeta. Una cuenta con movimientos no se puede quitar (409); un área sí, porque es texto en cada
   asiento.
+  Las tres rutas **sobreviven a que la migración no haya corrido** en ese entorno
+  (`missingTable()`): el `GET` devuelve las listas de fábrica —la pantalla de Finanzas no se cae
+  por una tabla que falta— y el alta y el borrado contestan 503 diciendo que falta `npm run
+  migrate`, en vez de devolverle a la pantalla el SQL crudo («Table 'x.finance_options' doesn't
+  exist»), que es lo que le llegó al equipo el 06/11/2026 y no le dice a nadie qué hacer.
+- El **asiento del Libro Diario se carga en un modal** (`JournalTab.vue`): desplegado bajo la
+  barra empujaba la tabla media pantalla hacia abajo —así que al guardar nadie veía la fila recién
+  creada— y el botón de guardar quedaba al final de once campos, fuera de la vista; ahora vive en
+  un pie fijo. Los campos van agrupados (movimiento · cuenta y estado · clasificación · detalle y
+  respaldo) y **no se cierra al hacer clic afuera**, por la misma razón que la ficha del lead:
+  adentro hay un asiento a medio escribir con sus comprobantes ya elegidos. Se cierra con la ✕,
+  con «Cancelar» o con Esc —menos dentro del «＋ Agregar», donde Esc cierra solo ese panelito— y
+  pregunta si hay algo escrito, comparando contra la foto que se toma del formulario **en el tick
+  siguiente** al abrirlo: tomada antes, el `watch` que hace seguir el ITF al monto la deja
+  desactualizada y un formulario recién abierto ya se considera tocado.
+  **El signo del monto se elige y no se teclea**: la pantalla pide un importe en positivo y un
+  «↑ Ingreso / ↓ Egreso» que decide el signo con el que se guarda en `finance_journal.monto`
+  (que sigue siendo firmado, no cambió nada del esquema ni de la API). Un egreso anotado sin el
+  menos entraba al libro como ingreso y desbalanceaba el neto sin que nada fallara a la vista.
+  Debajo del campo se lee cómo va a quedar escrito, y al editar una fila el signo guardado es el
+  que elige el selector.
 - La pestaña **Salarios** de Finanzas (`finance_salaries`, `financeSalaryService.js`) es un
   registro de pagos al personal **sin llaves hacia la contabilidad**: no se relaciona con
   `finance_income` ni con `finance_journal`. Guarda la persona como texto libre (se paga a

@@ -28,6 +28,21 @@ export function optionKey(label) {
     .toLowerCase();
 }
 
+/**
+ * Sin la tabla —la migración todavía no corrió en ese entorno— el módulo
+ * sigue andando con las listas de fábrica, igual que `loadBanks()`: lo único
+ * que no se puede es agregar ni quitar. Ahí el fallo se dice con palabras, en
+ * vez de devolverle a la pantalla el SQL crudo ("Table 'x.finance_options'
+ * doesn't exist"), que es lo que le llegó al equipo y no le dice a nadie qué
+ * hacer al respecto.
+ */
+function missingTable(error) {
+  return error?.code === 'ER_NO_SUCH_TABLE';
+}
+
+const MIGRATION_PENDING = 'La lista de áreas y cuentas todavía no está creada en esta base de datos: '
+  + 'falta aplicar la migración pendiente (npm run migrate) en el servidor.';
+
 export class OptionError extends Error {
   constructor(message, status = 400) {
     super(message);
@@ -47,9 +62,16 @@ const BANK_USAGE = [
 export class FinanceOptionService {
   /** Las listas completas (fábrica + agregadas) y las agregadas con su id, para poder quitarlas. */
   async list() {
-    const custom = await db('finance_options')
-      .select('id', 'kind', 'label')
-      .orderBy('id', 'asc');
+    let custom = [];
+    try {
+      custom = await db('finance_options')
+        .select('id', 'kind', 'label')
+        .orderBy('id', 'asc');
+    } catch (error) {
+      // La pantalla de Finanzas no se cae por una migración pendiente: se ve
+      // con las listas de fábrica y lo que falla es recién agregar o quitar.
+      if (!missingTable(error)) throw error;
+    }
     const extra = (kind) => custom.filter((r) => r.kind === kind).map((r) => r.label);
     return {
       areas: [...DEFAULT_AREAS, ...extra('area')],
@@ -66,17 +88,37 @@ export class FinanceOptionService {
       throw new OptionError(`El nombre admite hasta ${MAX_LENGTH[kind]} caracteres.`);
     }
 
-    const existing = await db('finance_options').where({ kind }).select('label');
+    let existing;
+    try {
+      existing = await db('finance_options').where({ kind }).select('label');
+    } catch (error) {
+      if (missingTable(error)) throw new OptionError(MIGRATION_PENDING, 503);
+      throw error;
+    }
     const taken = [...DEFAULTS[kind], ...existing.map((r) => r.label)]
       .find((l) => optionKey(l) === optionKey(clean));
     if (taken) throw new OptionError(`"${taken}" ya está en la lista.`, 409);
 
-    const [id] = await db('finance_options').insert({ kind, label: clean, created_by: createdBy });
-    return { id, kind, label: clean };
+    try {
+      const [id] = await db('finance_options').insert({ kind, label: clean, created_by: createdBy });
+      return { id, kind, label: clean };
+    } catch (error) {
+      // El índice único es el que manda: dos personas agregando el mismo
+      // nombre a la vez pasan las dos la comprobación de arriba.
+      if (error?.code === 'ER_DUP_ENTRY') throw new OptionError(`"${clean}" ya está en la lista.`, 409);
+      if (missingTable(error)) throw new OptionError(MIGRATION_PENDING, 503);
+      throw error;
+    }
   }
 
   async remove(id) {
-    const row = await db('finance_options').where({ id }).first();
+    let row;
+    try {
+      row = await db('finance_options').where({ id }).first();
+    } catch (error) {
+      if (missingTable(error)) throw new OptionError(MIGRATION_PENDING, 503);
+      throw error;
+    }
     if (!row) throw new OptionError('La opción no existe.', 404);
 
     if (row.kind === 'banco') {
