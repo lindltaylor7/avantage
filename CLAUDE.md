@@ -573,6 +573,30 @@ antes de tocar el arranque de producción.
   movimientos de esa página en UNA consulta, `listForLeads()`): filtrar en el navegador sobre lo
   cargado es "busca entre los primeros 25", y el movimiento que se viene a investigar es el que no
   está a mano.
+  El reporte filtra además por **origen** —plataforma (Meta · TikTok · Orgánico · Referido · Otro)
+  o canal (Formulario · WhatsApp · Mensaje directo), en un solo desplegable con las dos listas— y
+  lo escribe en cada fila: un filtro cuyo resultado no se puede comprobar al lado no sirve para
+  investigar nada. La respuesta sale de `leadOrigin()` y **no de un `where`**: de dónde salió un
+  lead se contesta en un solo sitio, y escrita como SQL sería una segunda versión de esas reglas
+  —el sello manda, el bloque más antiguo gana, el texto de `source` es el último recurso— que el
+  día que se separen haría que el reporte dijera una plataforma y el exportable de Campañas otra.
+  Por eso `#originIds()` resuelve el origen en JavaScript sobre el MISMO conjunto que los demás
+  filtros ya eligieron y entra en la consulta como una lista de ids: así el total, la página y el
+  resumen siguen mirando lo mismo. Es una pasada extra sobre los leads visibles y solo la paga
+  quien usa el filtro. Los códigos del desplegable son las claves (`platform:meta`,
+  `channel:whatsapp`) y no las etiquetas, porque viajan en la URL y un acento mal codificado
+  dejaría el filtro sin coincidencias sin que nada falle a la vista; lo que no es uno de ellos
+  vuelve como "sin filtro", igual que en `parseActor()`.
+  Desde cada fila se abre también la **conversación de WhatsApp** del lead (`LeadConversation.vue`,
+  el mismo componente de los dos tableros, en un modal): la bitácora dice que el bot lo congeló,
+  pero no qué le escribieron, y hasta ahora eso obligaba a salir a buscarlo en otra pantalla. El
+  botón sale siempre, incluso para un lead que no entró por WhatsApp —saber que nunca hubo
+  conversación también es una respuesta, y averiguarlo antes costaría una consulta por fila—.
+  **Leer** el hilo y sus adjuntos admite `leads.report` (se agregó al `requireAnyPermission` de los
+  dos GET), y **escribir** no: responder y devolverle el chat a Avan siguen pidiendo los permisos
+  de los tableros, porque supervisar no es trabajar el lead. No es una puerta de atrás —
+  `requireLeadVisible` sigue decidiendo cuál se puede abrir—, y quien solo supervisa lo ve en modo
+  lectura (`readonly`, sin cuadro de respuesta) en vez de recibir un 403 al apretar enviar.
 - `leadService.findByPhone()` cruza primero la cadena exacta y después los últimos 9 dígitos
   (`phoneMatchKey`): el `wa_id` del bot (`51987654321`) y lo que escribe la persona en el formulario
   de Meta (`+51 987 654 321`) son el mismo contacto, y compararlos tal cual hacía que el bot le

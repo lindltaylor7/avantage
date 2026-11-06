@@ -2616,12 +2616,21 @@ app.get('/api/setter-report', requireAuth, requirePermission('reports.setters'),
  * (`resolveWaIdForPhone`), porque la ficha y el webhook escriben el número
  * distinto. Mandar un mensaje a un identificador mal formado no da error
  * visible, simplemente no llega.
+ *
+ * LEER el hilo (y sus adjuntos) admite además `leads.report`: desde el Reporte
+ * de Leads se mira la conversación para entender un movimiento raro, y ahí la
+ * bitácora sola no alcanza —dice que el bot lo congeló, no qué le escribieron—.
+ * No es una puerta de atrás: `requireLeadVisible` sigue siendo el que decide,
+ * así que solo se abre la conversación de un lead que esa persona ya ve en el
+ * reporte. ESCRIBIR (responder y devolverle el chat a Avan) se queda con los
+ * permisos de los tableros: supervisar no es trabajar el lead, y quien solo
+ * supervisa no tiene por qué meterse en una conversación en curso.
  */
 async function leadWaId(lead) {
   return whatsappMessageService.resolveWaIdForPhone(lead.phone);
 }
 
-app.get('/api/leads/:id/whatsapp', requireAuth, requireAnyPermission('leads.view', 'setter.view'), requireLeadVisible, async (req, res) => {
+app.get('/api/leads/:id/whatsapp', requireAuth, requireAnyPermission('leads.view', 'setter.view', 'leads.report'), requireLeadVisible, async (req, res) => {
   try {
     const waId = await leadWaId(req.lead);
     if (!waId) return res.json({ waId: null, messages: [], windowOpen: false, botPaused: false });
@@ -2710,7 +2719,7 @@ app.patch('/api/leads/:id/whatsapp/bot', requireAuth, requireAnyPermission('lead
  * pasando un id cualquiera, que es la misma puerta de atrás que
  * `requireLeadVisible` cierra en el resto del módulo.
  */
-app.get('/api/leads/:id/whatsapp/media/:messageId', requireAuth, requireAnyPermission('leads.view', 'setter.view'), requireLeadVisible, async (req, res) => {
+app.get('/api/leads/:id/whatsapp/media/:messageId', requireAuth, requireAnyPermission('leads.view', 'setter.view', 'leads.report'), requireLeadVisible, async (req, res) => {
   try {
     const waId = await leadWaId(req.lead);
     const message = await whatsappMessageService.getById(req.params.messageId);
