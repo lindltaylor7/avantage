@@ -300,6 +300,43 @@ antes de tocar el arranque de producción.
   día abierto: el nombre de una entrega no entra en una celda de 50 px, y apretarlo para que entre
   deja texto cortado que no dice nada. La vista elegida se recuerda en `localStorage`
   (`entregables.view`), entre `try` porque en una ventana privada el acceso lanza.
+- El **calendario de Entregables se vuelca a una cuenta de Google**
+  (`deliverableCalendarService.js`, `/api/deliverable-calendar*`, botón en la pestaña Calendario de
+  `DeliverablesView.vue`, tabla `deliverable_calendar_connection` + tres columnas en
+  `deliverables`). Es **de ida**: del panel a Google. No lee eventos, no importa nada y no toca lo
+  que no creó él, así que apretarlo no puede estropear el calendario de nadie — por eso puede ser
+  un botón y no un proceso supervisado, la misma razón por la que la sincronización del Calendario
+  de reuniones va de Google al panel y también en un solo sentido.
+  La cuenta es **una sola, de la empresa**, y no la de cada quien: el calendario de las entregas es
+  uno —el que el equipo mira para saber qué toca esta semana— y con una conexión por usuario
+  cambiaría según quién sincronizó último y nadie sabría en cuál mirar. Es el mismo patrón y las
+  mismas razones que `deliverable_settings.notice_email`. Por eso vive en tabla propia y no en
+  `google_calendar_connections`, que es la de cada asesor (`user_id` único, con su Meet y su
+  disponibilidad colgando). El callback de OAuth es **uno solo** para las dos conexiones y cuál es
+  cuál lo dice el `target` **firmado dentro del `state`** (`signGoogleOAuthState(userId, target)`):
+  de él depende en qué tabla se guarda el token, así que no puede venir de algo que se pueda
+  escribir a mano en la URL.
+  Van **todas las entregas con fecha pactada**, las entregadas incluidas y marcadas con ✅: el
+  calendario es el plan, y ver cumplido el día que se prometió es justo lo que se revisa — la misma
+  regla por la que el calendario del panel ubica una entrega en su `due_date` aunque ya esté
+  entregada. Son eventos de **día completo** (una entrega tiene día y no hora; ponerle una de las
+  9:00 inventa una precisión que nadie acordó) y `end.date` es el día siguiente, porque en Google
+  el fin de un evento de día completo es exclusivo y con el mismo día no se dibuja. Sin
+  recordatorios ni invitados: son decenas de entregas y el calendario se mira, no notifica. Y
+  **sin importes**, como todo el módulo: la cuota se nombra por su código.
+  `deliverables.google_event_id` es lo que hace que sincronizar dos veces **actualice** en vez de
+  duplicar, y `google_signature` —una foto de título, cliente, fecha y estado— lo que evita gastar
+  una llamada por entrega que no cambió; de ahí que el botón apretado dos veces seguidas conteste
+  "no hubo nada que cambiar" en vez de no decir nada. Un evento borrado a mano en Google **no es un
+  error**: se vuelve a crear, que es lo que el panel afirma. Lo que sí se hace en el momento es
+  quitar el evento de una entrega que se **borra** (`deliverableService.remove()`): el id vive en la
+  fila, así que borrada la fila no hay forma de saber cuál era y en Google quedaría una entrega
+  fantasma que ninguna sincronización va a limpiar — el barrido solo mira las filas que existen.
+  Desconectar la cuenta **no borra los eventos** (lo que ya está en el calendario de la empresa es
+  información que alguien puede seguir mirando; un botón que vacía un calendario ajeno es un botón
+  que nadie aprieta), pero sí olvida los ids: sin cuenta no hay nada que actualizar. Cambiar de
+  cuenta los olvida por lo mismo — los eventos viejos viven en el calendario anterior y sus ids no
+  sirven en la nueva.
 - El **gráfico de Flujo de Fondos** del Resumen (`OverviewTab.vue`, geometría en
   `src/views/finance/chartGeometry.js`) tiene tres reglas que vinieron de arreglarlo y no conviene
   deshacer: (1) la curva es **monótona** (Fritsch–Carlson) y no una spline Catmull-Rom — aquella se

@@ -383,6 +383,63 @@
         >📍 Volver a hoy</button>
       </header>
 
+      <!-- GOOGLE CALENDAR
+           Las mismas entregas, en el calendario de la cuenta de la empresa:
+           quien entrega las mira desde su celular, con los recordatorios de
+           Google. Va ACÁ y no en la pestaña "Por cliente" porque es lo mismo
+           que esta vista muestra, visto desde otro lado.
+
+           Es de ida (del panel a Google) y no toca nada que no haya creado el
+           panel, así que apretarlo no puede estropear el calendario de nadie. -->
+      <section v-if="gcal.configured" class="dv-gcal" :class="{ 'is-linked': gcal.connected }">
+        <div class="dv-gcal-text">
+          <template v-if="gcal.connected">
+            <strong class="dv-gcal-title">📅 Conectado con {{ gcal.email }}</strong>
+            <span class="dv-gcal-note">
+              Cada entrega con fecha pactada es un evento de todo el día en ese calendario; las
+              entregadas van con ✅.
+              <template v-if="gcal.lastSyncedAt"> Última vez: {{ formatDateTime(gcal.lastSyncedAt) }}.</template>
+              <template v-else> Todavía no se mandó nada.</template>
+            </span>
+          </template>
+          <template v-else>
+            <strong class="dv-gcal-title">📅 Llevá estas entregas a Google Calendar</strong>
+            <span class="dv-gcal-note">
+              Conectá la cuenta de Google de la empresa y las fechas de entrega aparecen en su
+              calendario, con los recordatorios y el celular de cada uno. Es una sola cuenta para
+              todo el equipo.
+            </span>
+          </template>
+        </div>
+
+        <div class="dv-gcal-actions">
+          <button
+            v-if="gcal.connected"
+            type="button"
+            class="dv-btn dv-btn-primary"
+            :disabled="gcalBusy"
+            @click="syncCalendar"
+          >{{ gcalBusy ? 'Sincronizando…' : '🔄 Sincronizar con Google' }}</button>
+          <button
+            v-else
+            type="button"
+            class="dv-btn dv-btn-primary"
+            :disabled="gcalBusy"
+            @click="connectCalendar"
+          >🔗 Conectar cuenta de Google</button>
+          <button
+            v-if="gcal.connected"
+            type="button"
+            class="dv-btn dv-btn-ghost"
+            :disabled="gcalBusy"
+            @click="disconnectCalendar"
+          >Desconectar</button>
+        </div>
+      </section>
+
+      <p v-if="gcalError" class="dv-gcal-msg is-error">⚠️ {{ gcalError }}</p>
+      <p v-else-if="gcalFlash" class="dv-gcal-msg is-ok">✔️ {{ gcalFlash }}</p>
+
       <!-- Los colores del calendario son los mismos de las tarjetas y de los
            recuadros de arriba. La leyenda está porque un color sin nombre
            obliga a adivinar, y esta pantalla no se adivina. -->
@@ -1427,12 +1484,148 @@ function longDate(iso) {
 
 const capitalize = (text) => (text ? text.charAt(0).toUpperCase() + text.slice(1) : '');
 
+/* ------------------------------------------------- GOOGLE CALENDAR (de ida)
+ *
+ * Las mismas entregas, volcadas al calendario de la cuenta de Google de la
+ * empresa: una sola cuenta para todo el equipo, como el correo de avisos. Es
+ * de ida y no toca nada que no haya creado el panel, así que el botón no puede
+ * estropear el calendario de nadie.
+ */
+
+const gcal = ref({ configured: false, connected: false, email: null, lastSyncedAt: null });
+const gcalBusy = ref(false);
+const gcalError = ref('');
+const gcalFlash = ref('');
+
+async function fetchCalendarStatus() {
+  try {
+    const response = await apiFetch('/api/deliverable-calendar');
+    const data = await response.json();
+    if (response.ok) gcal.value = data;
+  } catch (error) {
+    // Que no se pueda leer el estado no puede romper la pantalla: sin esto, la
+    // banda no aparece y el calendario se sigue usando igual.
+    console.warn('No se pudo leer el estado del calendario de Google:', error);
+  }
+}
+
+async function connectCalendar() {
+  gcalBusy.value = true;
+  gcalError.value = '';
+  try {
+    const response = await apiFetch('/api/deliverable-calendar/auth-url');
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No se pudo iniciar la conexión con Google.');
+    // Navegación completa del navegador: Google vuelve al callback y de ahí a
+    // esta pantalla con ?google=connected.
+    window.location.href = data.url;
+  } catch (error) {
+    gcalError.value = error.message;
+    gcalBusy.value = false;
+  }
+}
+
+async function syncCalendar() {
+  gcalBusy.value = true;
+  gcalError.value = '';
+  gcalFlash.value = '';
+  try {
+    const response = await apiFetch('/api/deliverable-calendar/sync', { method: 'POST' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No se pudo sincronizar con Google.');
+
+    gcalFlash.value = syncSummary(data);
+    await fetchCalendarStatus();
+  } catch (error) {
+    gcalError.value = error.message;
+  } finally {
+    gcalBusy.value = false;
+  }
+}
+
+/**
+ * Qué hizo la sincronización, dicho en palabras. "Nada que cambiar" también se
+ * dice: un botón que no contesta obliga a abrir Google para ver si pasó algo.
+ */
+function syncSummary(report) {
+  const partes = [];
+  if (report.creados) partes.push(plural(report.creados, 'entrega agregada', 'entregas agregadas'));
+  if (report.actualizados) partes.push(plural(report.actualizados, 'actualizada', 'actualizadas'));
+  if (report.quitados) partes.push(plural(report.quitados, 'quitada', 'quitadas'));
+
+  const base = partes.length
+    ? `Listo: ${partes.join(', ')}.`
+    : 'Ya estaba todo al día en Google: no hubo nada que cambiar.';
+
+  if (report.errores?.length) {
+    const nombres = report.errores.slice(0, 3).map((e) => e.title).join(', ');
+    return `${base} ${plural(report.errores.length, 'entrega no se pudo mandar', 'entregas no se pudieron mandar')} (${nombres}).`;
+  }
+  return base;
+}
+
+async function disconnectCalendar() {
+  if (!confirm('¿Desconectar la cuenta de Google? Los eventos que ya están en el calendario se quedan ahí; lo que deje de actualizarse es el panel.')) return;
+  gcalBusy.value = true;
+  gcalError.value = '';
+  gcalFlash.value = '';
+  try {
+    const response = await apiFetch('/api/deliverable-calendar', { method: 'DELETE' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'No se pudo desconectar la cuenta.');
+    gcal.value = data;
+    gcalFlash.value = 'Cuenta desconectada.';
+  } catch (error) {
+    gcalError.value = error.message;
+  } finally {
+    gcalBusy.value = false;
+  }
+}
+
+/** Fecha y hora cortitas, para el "última vez" de la banda. */
+function formatDateTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('es-PE', {
+    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima'
+  });
+}
+
+/**
+ * El rebote de Google vuelve a esta pantalla con `?google=…`. Se lee una vez y
+ * se borra de la URL: dejándolo, recargar volvería a mostrar el mismo aviso y
+ * cualquier enlace que alguien copie arrastraría un resultado viejo. Misma
+ * regla que el `?lead=` de los dos tableros.
+ */
+function consumeGoogleParam() {
+  const params = new URLSearchParams(window.location.search);
+  const resultado = params.get('google');
+  if (!resultado) return;
+
+  if (resultado === 'connected') {
+    gcalFlash.value = 'Cuenta de Google conectada. Ahora apretá "Sincronizar con Google".';
+    // Se vuelve a la pestaña desde la que se conectó, que es donde está el
+    // botón de sincronizar y el aviso que acaba de escribirse.
+    view.value = 'calendario';
+  } else if (resultado === 'denied') {
+    gcalError.value = 'No se autorizó el acceso a Google, así que la cuenta quedó sin conectar.';
+  } else {
+    gcalError.value = 'No se pudo completar la conexión con Google. Probá de nuevo.';
+  }
+
+  params.delete('google');
+  const query = params.toString();
+  window.history.replaceState({}, '', window.location.pathname + (query ? `?${query}` : ''));
+}
+
 onMounted(() => {
   restoreView();
   fetchOverview();
   // La configuración se lee aunque el panel esté plegado: el encabezado muestra
   // la dirección guardada, y ahí es donde se comprueba de un vistazo.
   fetchSettings();
+  fetchCalendarStatus();
+  consumeGoogleParam();
 });
 </script>
 
@@ -2181,6 +2374,62 @@ textarea.dv-input { min-height: 80px; resize: vertical; }
   border-color: var(--primary);
   color: #FFFFFF;
 }
+
+/* --- Google Calendar ------------------------------------------------------ */
+
+.dv-gcal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.9rem;
+  padding: 0.9rem 1rem;
+  margin-bottom: 0.9rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg, 14px);
+  background: var(--bg-card-solid);
+}
+
+/* Conectado se ve distinto de "falta conectar": es la diferencia entre una
+   invitación y un estado, y se mira de reojo. */
+.dv-gcal.is-linked {
+  border-color: rgba(46, 125, 70, 0.4);
+  background: rgba(46, 125, 70, 0.06);
+}
+
+.dv-gcal-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 15rem;
+  flex: 1 1 22rem;
+}
+
+.dv-gcal-title {
+  font-size: 1rem;
+  color: var(--text-main);
+}
+
+.dv-gcal-note {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.dv-gcal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.dv-gcal-msg {
+  margin: -0.4rem 0 0.9rem;
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.dv-gcal-msg.is-error { color: var(--accent-rose); }
+.dv-gcal-msg.is-ok { color: var(--accent-emerald); }
 
 /* --- Calendario ---------------------------------------------------------- */
 

@@ -59,6 +59,7 @@ import { AdvisorAvailabilityService } from './services/advisorAvailabilityServic
 import { InstagramService } from './services/instagramService.js';
 import { InstagramWebhookService } from './services/instagramWebhookService.js';
 import { GoogleCalendarService } from './services/googleCalendarService.js';
+import { DeliverableCalendarService } from './services/deliverableCalendarService.js';
 import { ScheduledMeetingService, activeMeetingForLead } from './services/scheduledMeetingService.js';
 import { CalendarSyncService } from './services/calendarSyncService.js';
 import { NotificationService } from './services/notificationService.js';
@@ -213,7 +214,18 @@ const projectUpdateService = new ProjectUpdateService();
 // Entregables: no tiene tablas propias, cruza las cuotas de Finanzas con los
 // avances subidos. Usa projectService para no recalcular el avance de tareas ni
 // la puerta del pago inicial por su cuenta.
-const deliverableService = new DeliverableService({ projectService, taskService });
+/*
+ * `calendarSync` se resuelve con una función y no con la instancia porque
+ * `deliverableCalendarService` necesita a `googleCalendarService`, que se
+ * construye más abajo. Es la misma dependencia cruzada que ya tienen otros
+ * servicios, resuelta por constructor y no con una asignación suelta después:
+ * así se ve en el constructor de quién depende cada uno.
+ */
+const deliverableService = new DeliverableService({
+  projectService,
+  taskService,
+  calendarSync: () => deliverableCalendarService
+});
 const metaWebhookService = new MetaWebhookService();
 const metaLeadReconciliationService = new MetaLeadReconciliationService(leadService);
 // Los leads de formulario instantáneo de TikTok. Recibe el servicio de
@@ -279,6 +291,13 @@ const signedContractService = new SignedContractService();
 // pantalla y a cargo de otra persona. El destinatario sale de la configuración
 // del módulo (un solo correo, editable desde su propia pantalla).
 const deliverableSettingsService = new DeliverableSettingsService();
+/*
+ * El calendario de Entregables en una cuenta de Google. Recibe
+ * `googleCalendarService` solo por su cliente OAuth: las credenciales de la
+ * app son las mismas que las del Calendario de reuniones y salen de un solo
+ * sitio (ver el constructor del servicio).
+ */
+const deliverableCalendarService = new DeliverableCalendarService({ googleCalendarService });
 const paymentNoticeService = new PaymentNoticeService({
   emailService,
   notificationService,
@@ -859,14 +878,43 @@ app.get('/api/google/callback', async (req, res) => {
   const frontendBase = process.env.APP_BASE_URL || '';
   try {
     const { code, state, error: oauthError } = req.query;
+    /*
+     * El destino del rebote se lee del `state` incluso cuando la cosa salió
+     * mal: mandar a "Disponibilidad" a quien estaba conectando el calendario de
+     * Entregables lo deja parado en una pantalla que no es la suya y sin saber
+     * qué pasó.
+     */
+    const destinoError = (() => {
+      try {
+        return verifyGoogleOAuthState(state).target === 'deliverables'
+          ? '/admin/entregables'
+          : '/admin/availability';
+      } catch {
+        return '/admin/availability';
+      }
+    })();
+
     if (oauthError) {
-      return res.redirect(`${frontendBase}/admin/availability?google=denied`);
+      return res.redirect(`${frontendBase}${destinoError}?google=denied`);
     }
     if (!code || !state) {
-      return res.redirect(`${frontendBase}/admin/availability?google=error`);
+      return res.redirect(`${frontendBase}${destinoError}?google=error`);
     }
 
-    const userId = verifyGoogleOAuthState(state);
+    const { userId, target } = verifyGoogleOAuthState(state);
+
+    /*
+     * El callback es uno solo y las conexiones son dos: la de cada asesor con
+     * su propio calendario y la cuenta ÚNICA de la empresa para el calendario
+     * de Entregables. Cuál es cuál lo dice el `target` firmado dentro del
+     * `state`, no un parámetro de la URL: de él depende en qué tabla se guarda
+     * el token.
+     */
+    if (target === 'deliverables') {
+      await deliverableCalendarService.saveFromCode(code, { connectedBy: userId });
+      return res.redirect(`${frontendBase}/admin/entregables?google=connected`);
+    }
+
     await googleCalendarService.saveConnectionFromCode(userId, code);
 
     res.redirect(`${frontendBase}/admin/availability?google=connected`);
@@ -5943,6 +5991,65 @@ app.post('/api/deliverable-settings/test', requireAuth, requirePermission('deliv
     if (error.code === 'NO_RECIPIENT') return res.status(400).json({ error: error.message });
     console.error('❌ Error al enviar el correo de prueba:', error);
     res.status(502).json({ error: error.message || 'No se pudo enviar el correo de prueba.' });
+  }
+});
+
+/*
+ * El calendario de Entregables volcado a una cuenta de Google.
+ *
+ * Va bajo `deliverables.view`, el permiso del módulo, por lo mismo que el
+ * correo de avisos: es configuración de esta pantalla y la maneja quien maneja
+ * las entregas. Conectar la cuenta es un paso de navegador completo (Google
+ * redirige), así que la identidad viaja firmada en el `state` igual que en la
+ * conexión de cada asesor.
+ */
+
+app.get('/api/deliverable-calendar', requireAuth, requirePermission('deliverables.view'), async (req, res) => {
+  try {
+    res.json(await deliverableCalendarService.status());
+  } catch (error) {
+    console.error('❌ Error al obtener el estado del calendario de entregables:', error);
+    res.status(500).json({ error: 'Error al obtener el estado del calendario.', details: error.message });
+  }
+});
+
+app.get('/api/deliverable-calendar/auth-url', requireAuth, requirePermission('deliverables.view'), (req, res) => {
+  try {
+    if (!deliverableCalendarService.isConfigured()) {
+      return res.status(400).json({ error: 'Google Calendar no está configurado en el servidor todavía.' });
+    }
+    const state = signGoogleOAuthState(req.user.id, 'deliverables');
+    res.json({ url: deliverableCalendarService.getAuthUrl(state) });
+  } catch (error) {
+    console.error('❌ Error al generar la URL de conexión con Google:', error);
+    res.status(500).json({ error: 'Error al generar la URL de conexión con Google.', details: error.message });
+  }
+});
+
+app.delete('/api/deliverable-calendar', requireAuth, requirePermission('deliverables.view'), async (req, res) => {
+  try {
+    const status = await deliverableCalendarService.disconnect();
+    console.log(`📅 [Entregables] Cuenta de Google desconectada por ${req.user.email}`);
+    res.json(status);
+  } catch (error) {
+    console.error('❌ Error al desconectar la cuenta de Google:', error);
+    res.status(500).json({ error: 'Error al desconectar la cuenta de Google.', details: error.message });
+  }
+});
+
+app.post('/api/deliverable-calendar/sync', requireAuth, requirePermission('deliverables.view'), async (req, res) => {
+  try {
+    const report = await deliverableCalendarService.sync();
+    console.log(`📅 [Entregables] Sincronización con Google: ${report.creados} creados, `
+      + `${report.actualizados} actualizados, ${report.quitados} quitados, ${report.sin_cambios} sin cambios `
+      + `(${req.user.email})`);
+    res.json(report);
+  } catch (error) {
+    if (error.code === 'NOT_CONNECTED' || error.code === 'GOOGLE_RECONNECT_REQUIRED') {
+      return res.status(400).json({ error: error.message, code: error.code });
+    }
+    console.error('❌ Error al sincronizar el calendario de entregables:', error);
+    res.status(502).json({ error: error.message || 'No se pudo sincronizar con Google.' });
   }
 });
 
