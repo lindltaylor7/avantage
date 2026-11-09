@@ -371,7 +371,10 @@ Al terminar el resumen distingue dos cosas que **no son lo mismo**:
 ### Qué pasa con cada lead importado
 
 - Entra al **Setter Funnel** en *Conversación abierta* —llenó un formulario pero todavía no habló
-  con nadie— y pasa por el **reparto automático** como cualquier lead que entra solo.
+  con nadie— y pasa por el **reparto automático** (Panel → Reparto de leads) como cualquier lead que
+  entra solo. Desde el 09/11/2026 eso vale **siempre** y no solo con el bot de WhatsApp apagado: a
+  un lead de formulario el bot no lo atiende nunca, y sin responsable no lo ve nadie salvo quien
+  reparte.
 - Se guarda su atribución (`tiktok_lead_id`, `tiktok_page_id`, `tiktok_ad_id`, `tiktok_adgroup_id`,
   `tiktok_campaign_id`, `tiktok_created_time`) y con eso aparece en la **trazabilidad de su
   campaña**, que es lo que estaba vacío.
