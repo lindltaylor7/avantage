@@ -6037,6 +6037,27 @@ app.delete('/api/deliverable-calendar', requireAuth, requirePermission('delivera
   }
 });
 
+/**
+ * Los eventos que el equipo ya tiene en ese calendario, para pintarlos encima
+ * del mes del panel. Es el sentido de VUELTA: no escribe nada ni guarda nada.
+ *
+ * Un fallo no responde error: vuelve con la lista vacía y el motivo adentro.
+ * El calendario de entregas es lo que esta pantalla tiene que mostrar sí o sí
+ * —los eventos de Google son una ayuda encima—, y un 502 acá dejaría la vista
+ * sin lo principal por culpa de lo accesorio.
+ */
+app.get('/api/deliverable-calendar/events', requireAuth, requirePermission('deliverables.view'), async (req, res) => {
+  try {
+    res.json(await deliverableCalendarService.listExternalEvents({
+      from: String(req.query.from || '').slice(0, 10) || null,
+      to: String(req.query.to || '').slice(0, 10) || null
+    }));
+  } catch (error) {
+    console.error('❌ Error al leer los eventos de Google:', error);
+    res.json({ events: [], error: error.message });
+  }
+});
+
 app.post('/api/deliverable-calendar/sync', requireAuth, requirePermission('deliverables.view'), async (req, res) => {
   try {
     const report = await deliverableCalendarService.sync();

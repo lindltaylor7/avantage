@@ -1,11 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  OWNER_TAG,
+  daysCoveredBy,
   eventBodyFor,
   eventDescriptionFor,
   eventTitleFor,
+  isOwnEvent,
+  limaTime,
   nextDay,
   planFor,
+  previousDay,
   signatureFor
 } from '../deliverableCalendarService.js';
 
@@ -124,4 +129,80 @@ test('la firma cambia con el contenido y no con cosas que no se mandan', () => {
   const base = entrega();
   assert.equal(signatureFor(base), signatureFor({ ...base, id: 99, google_event_id: 'x' }));
   assert.notEqual(signatureFor(base), signatureFor({ ...base, due_date: '2026-12-01' }));
+});
+
+
+/* ──────────── De vuelta: los eventos de Google en el panel ──────────────── */
+
+/**
+ * El otro sentido. Lo que se prueba es dónde cae cada evento en la cuadrícula
+ * y cuáles NO hay que mostrar: los que escribió el propio panel, que ya están
+ * en el mes como entregas.
+ */
+
+test('un evento de día completo ocupa un solo día, no dos', () => {
+  // En Google el `end.date` es EXCLUSIVO: sin restarle un día, cada evento de
+  // un día se dibujaría también en el siguiente.
+  const dias = daysCoveredBy({ start: { date: '2026-11-09' }, end: { date: '2026-11-10' } });
+  assert.deepEqual(dias, ['2026-11-09']);
+});
+
+test('un evento de varios días cae en todos', () => {
+  const dias = daysCoveredBy({ start: { date: '2026-11-09' }, end: { date: '2026-11-12' } });
+  assert.deepEqual(dias, ['2026-11-09', '2026-11-10', '2026-11-11']);
+});
+
+test('un evento con hora se ubica por su día en Lima', () => {
+  // 2026-11-10T02:30Z son las 21:30 del 9 en Lima: con el huso del servidor
+  // caería en el día equivocado.
+  const dias = daysCoveredBy({
+    start: { dateTime: '2026-11-10T02:30:00Z' },
+    end: { dateTime: '2026-11-10T03:30:00Z' }
+  });
+  assert.deepEqual(dias, ['2026-11-09']);
+});
+
+test('un evento más largo que el mes a la vista se recorta al rango', () => {
+  const dias = daysCoveredBy(
+    { start: { date: '2026-10-01' }, end: { date: '2027-01-01' } },
+    { from: '2026-11-01', to: '2026-11-03' }
+  );
+  assert.deepEqual(dias, ['2026-11-01', '2026-11-02', '2026-11-03']);
+});
+
+test('un evento sin fecha no cae en ningún día', () => {
+  assert.deepEqual(daysCoveredBy({}), []);
+  assert.deepEqual(daysCoveredBy({ start: {} }), []);
+});
+
+test('la hora se lee en Lima y en 24 horas', () => {
+  assert.equal(limaTime('2026-11-09T14:30:00Z'), '09:30');
+  assert.equal(limaTime(null), null);
+});
+
+test('el día anterior no se corre con el huso', () => {
+  assert.equal(previousDay('2026-12-01'), '2026-11-30');
+  assert.equal(previousDay('2027-01-01'), '2026-12-31');
+});
+
+test('lo que escribió el panel no se muestra otra vez como evento', () => {
+  // Si no, cada entrega se vería dos veces el mismo día: una como entrega y
+  // otra como evento de Google.
+  const propio = { id: 'abc', extendedProperties: { private: { [OWNER_TAG]: 'entregable' } } };
+  assert.equal(isOwnEvent(propio), true);
+});
+
+test('un evento del panel sin la marca se reconoce por su id guardado', () => {
+  // La marca no está en los eventos creados antes de que existiera; los ids
+  // guardados cubren ese hueco (y la marca cubre el de la entrega borrada).
+  assert.equal(isOwnEvent({ id: 'abc' }, new Set(['abc'])), true);
+  assert.equal(isOwnEvent({ id: 'otro' }, new Set(['abc'])), false);
+});
+
+test('un evento del equipo nunca se confunde con uno del panel', () => {
+  assert.equal(isOwnEvent({ id: 'zzz', summary: 'PRE-AVISO: Entrega' }, new Set()), false);
+});
+
+test('lo que el panel escribe va marcado como suyo', () => {
+  assert.equal(eventBodyFor(entrega()).extendedProperties.private[OWNER_TAG], 'entregable');
 });

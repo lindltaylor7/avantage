@@ -300,13 +300,28 @@ antes de tocar el arranque de producción.
   día abierto: el nombre de una entrega no entra en una celda de 50 px, y apretarlo para que entre
   deja texto cortado que no dice nada. La vista elegida se recuerda en `localStorage`
   (`entregables.view`), entre `try` porque en una ventana privada el acceso lanza.
-- El **calendario de Entregables se vuelca a una cuenta de Google**
+- El **calendario de Entregables se cruza con una cuenta de Google**
   (`deliverableCalendarService.js`, `/api/deliverable-calendar*`, botón en la pestaña Calendario de
   `DeliverablesView.vue`, tabla `deliverable_calendar_connection` + tres columnas en
-  `deliverables`). Es **de ida**: del panel a Google. No lee eventos, no importa nada y no toca lo
-  que no creó él, así que apretarlo no puede estropear el calendario de nadie — por eso puede ser
-  un botón y no un proceso supervisado, la misma razón por la que la sincronización del Calendario
-  de reuniones va de Google al panel y también en un solo sentido.
+  `deliverables`). Son **dos sentidos y hacen cosas distintas**: **de ida** (el botón) las entregas
+  del panel se escriben como eventos, y **de vuelta** (solo al abrir el mes) los eventos que el
+  equipo ya tiene en ese calendario —los «Fecha Tentativa», los «PRE-AVISO», las reuniones— se
+  **muestran** en la cuadrícula del panel. La vuelta **no importa ni guarda nada**: son de Google,
+  y una copia en la base se desactualizaría sola y haría creer que el panel es dueño de eventos que
+  no son suyos. La ida solo toca los eventos que creó él, así que apretar el botón no puede
+  estropear el calendario de nadie — por eso puede ser un botón y no un proceso supervisado.
+  Los eventos traídos **no son entregables**: van en `cell.events` y no en `cell.items`, en gris y
+  sin estado, no cuentan en los recuadros de arriba ni en el resumen del mes, y no se pueden marcar
+  como entregados. Mezclarlos haría que los totales dijeran una cosa y la lista otra. Para no verlos
+  dos veces, lo que escribe el panel va marcado con `extendedProperties.private.avantage_entregables`
+  y se filtra al leer: la marca viaja con el evento, así que lo reconoce aunque de este lado ya no
+  quede rastro (una entrega borrada se lleva su id), y la lista de ids guardados cubre al revés los
+  eventos creados antes de que la marca existiera. Un fallo de lectura **no rompe la pantalla**:
+  vuelve con la lista vacía y el motivo adentro, porque las entregas son lo que esta vista tiene
+  que mostrar sí o sí y los eventos de Google son una capa encima. Los días que ocupa cada evento
+  los calcula `daysCoveredBy()`: el `end.date` de Google es **exclusivo** (sin restarle un día,
+  cada evento de un día se dibuja en dos) y los que tienen hora se ubican por su día **en Lima**,
+  que no es el del servidor.
   La cuenta es **una sola, de la empresa**, y no la de cada quien: el calendario de las entregas es
   uno —el que el equipo mira para saber qué toca esta semana— y con una conexión por usuario
   cambiaría según quién sincronizó último y nadie sabría en cuál mirar. Es el mismo patrón y las
