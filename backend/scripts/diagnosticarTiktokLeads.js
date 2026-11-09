@@ -1,4 +1,6 @@
 import 'dotenv/config';
+import fs from 'node:fs';
+import path from 'node:path';
 import { db } from '../db/connection.js';
 import { TikTokAdsService } from '../services/tiktokAdsService.js';
 import { TikTokLeadsService } from '../services/tiktokLeadsService.js';
@@ -45,7 +47,47 @@ linea('🔎 Diagnóstico de leads de formulario instantáneo de TikTok\n');
 const status = await ads.status();
 if (!status.configured) {
   linea(`❌ La integración de TikTok no está configurada: ${status.reason}${status.error ? ` — ${status.error}` : ''}`);
-  linea('   Sin esto no hay nada que diagnosticar. Ver README > "Conectar TikTok Ads".');
+
+  /*
+   * "No hay token" y "este proceso no ve el token" se escriben igual acá y son
+   * cosas distintas, con arreglos distintos.
+   *
+   * El panel de la aplicación lee `process.env`, que en un hosting lo llena el
+   * panel de variables de entorno (Hostinger, Passenger) al arrancar el
+   * proceso. Este script, en cambio, se corre a mano en una shell y toma las
+   * variables del archivo `.env` del directorio desde el que se lo invocó. Con
+   * el token cargado SOLO en el panel del hosting, el panel funciona y este
+   * script dice "no_token" — y manda a reconectar una integración que estaba
+   * bien (09/11/2026).
+   *
+   * Por eso se informa dónde se buscó y qué se encontró, en vez de mandar al
+   * README a secas.
+   */
+  if (status.reason === 'no_token') {
+    const envPath = path.resolve(process.cwd(), '.env');
+    const hayArchivo = fs.existsSync(envPath);
+    const enArchivo = hayArchivo
+      && /^\s*TIKTOK_ACCESS_TOKEN\s*=\s*\S/m.test(fs.readFileSync(envPath, 'utf8'));
+
+    linea('');
+    linea('   Dónde se buscó el token:');
+    linea(`     · archivo .env  → ${envPath}`);
+    linea(`       ${hayArchivo ? (enArchivo ? 'tiene TIKTOK_ACCESS_TOKEN con valor' : 'existe, pero sin TIKTOK_ACCESS_TOKEN') : 'no existe'}`);
+    linea(`     · entorno del proceso (process.env) → ${process.env.TIKTOK_ACCESS_TOKEN ? 'definido' : 'no definido'}`);
+    linea('');
+    linea('   Si la aplicación SÍ está conectada a TikTok (Panel → Campañas muestra');
+    linea('   "🟢 Conectado a TikTok Ads"), entonces el token está cargado en el panel de');
+    linea('   variables del hosting y no en este archivo: el que no lo ve es este script,');
+    linea('   no la aplicación. Corrélo con la variable a mano para diagnosticar igual:');
+    linea('');
+    linea('     TIKTOK_ACCESS_TOKEN=xxx node backend/scripts/diagnosticarTiktokLeads.js');
+    linea('');
+    linea('   Si la aplicación tampoco está conectada, ahí sí falta configurarla:');
+    linea('   ver README > "Conectar TikTok Ads".');
+  } else {
+    linea('   Sin esto no hay nada que diagnosticar. Ver README > "Conectar TikTok Ads".');
+  }
+
   await db.destroy();
   process.exit(0);
 }
