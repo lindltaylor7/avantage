@@ -1,5 +1,5 @@
 import { db } from '../db/connection.js';
-import { applyLeadVisibility } from './leadService.js';
+import { DNI_MATCH_KEY_SQL, PHONE_DIGITS_SQL, applyLeadVisibility } from './leadService.js';
 import { CHANNELS, LEAD_ORIGIN_COLUMNS, PLATFORMS, leadOrigin } from './leadOrigin.js';
 import { LeadStageChangeService } from './leadStageChangeService.js';
 import {
@@ -231,6 +231,54 @@ export function buildTimeline(lead, changes = [], labelStatus = () => null, boar
   return [alta, ...movimientos];
 }
 
+/**
+ * El filtro de texto del reporte.
+ *
+ * **Una consulta de puros dígitos no se compara contra el texto del teléfono**:
+ * se compara contra sus dígitos (`PHONE_DIGITS_SQL`, la misma limpieza del
+ * cruce por teléfono del resto del sistema) y contra el documento sin
+ * separadores. El mismo número está escrito de maneras distintas según la
+ * puerta por la que entró —el bot guarda "51982768859", el formulario de Meta
+ * guarda "+51 982 768 859", el alta manual lo que haya tecleado la persona—,
+ * así que un `LIKE '%982768859%'` sobre la columna cruda **no encuentra al lead
+ * de Meta**: los espacios caen justo en medio de lo que se buscó. Los dos
+ * tableros ya buscaban por dígitos (`src/leadSearch.js`), así que el mismo
+ * número aparecía ahí y no acá — y de las dos respuestas la del reporte es la
+ * que manda a revisar el webhook por un lead que estaba todo el tiempo.
+ *
+ * Con dígitos se miran solo id, teléfono y documento, que es la regla que ya
+ * tienen los tableros: en un número, un dígito de diferencia es otra persona,
+ * y nada bueno sale de que "982768859" encuentre un tema de tesis que
+ * casualmente contiene esa cifra.
+ */
+export function applySearch(query, search) {
+  const texto = String(search || '').trim();
+  if (!texto) return query;
+
+  const digits = texto.replace(/\D/g, '');
+  const soloNumeros = digits.length > 0 && digits === texto.replace(/\s/g, '');
+
+  if (soloNumeros) {
+    return query.where(function () {
+      this.whereRaw(`${PHONE_DIGITS_SQL} LIKE ?`, [`%${digits}%`])
+        .orWhereRaw(`${DNI_MATCH_KEY_SQL} LIKE ?`, [`%${digits}%`])
+        // El id es cómo se nombra un lead entre pantallas ("el #412").
+        .orWhere('leads.id', Number(digits));
+    });
+  }
+
+  const like = `%${texto}%`;
+  return query.where(function () {
+    this.where('leads.full_name', 'like', like)
+      .orWhere('leads.phone', 'like', like)
+      .orWhere('leads.email', 'like', like)
+      .orWhere('leads.dni', 'like', like)
+      .orWhere('leads.university', 'like', like)
+      .orWhere('leads.topic', 'like', like)
+      .orWhere('leads.assigned_to', 'like', like);
+  });
+}
+
 export class LeadReportService {
   constructor({ leadService, stageChangeService } = {}) {
     this.leads = leadService;
@@ -262,20 +310,7 @@ export class LeadReportService {
      */
     if (originIds) query.whereIn('leads.id', originIds);
 
-    if (filters.search) {
-      const like = `%${filters.search}%`;
-      query.where(function () {
-        this.where('leads.full_name', 'like', like)
-          .orWhere('leads.phone', 'like', like)
-          .orWhere('leads.email', 'like', like)
-          .orWhere('leads.dni', 'like', like)
-          .orWhere('leads.university', 'like', like)
-          .orWhere('leads.topic', 'like', like)
-          .orWhere('leads.assigned_to', 'like', like);
-        // El id es cómo se nombra un lead entre pantallas ("el #412").
-        if (/^\d+$/.test(filters.search)) this.orWhere('leads.id', Number(filters.search));
-      });
-    }
+    if (filters.search) applySearch(query, filters.search);
 
     if (filters.status) query.where('leads.status', filters.status);
 

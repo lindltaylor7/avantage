@@ -130,7 +130,6 @@ export function applyLeadVisibility(query, { viewerId = null, setterFunnelStatus
   });
 }
 
-/** Los mismos dígitos, calculados en SQL sobre la columna `phone`. */
 /**
  * La etapa que afirma que hay una reunión. Es la clave fija —la que pone el
  * bot al reservar y la que traen de fábrica los dos tableros—: una columna que
@@ -139,7 +138,23 @@ export function applyLeadVisibility(query, { viewerId = null, setterFunnelStatus
  */
 export const APPOINTMENT_STATUS = 'cita_agendada';
 
-export const PHONE_MATCH_KEY_SQL = "RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(leads.phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', ''), '.', ''), 9)";
+/**
+ * La columna `phone` sin separadores, calculada en SQL: los mismos caracteres
+ * que quita `phoneMatchKey()` acá arriba.
+ *
+ * Está aparte de `PHONE_MATCH_KEY_SQL` porque hay dos preguntas distintas sobre
+ * el mismo teléfono y solo una se contesta con los últimos 9 dígitos. "¿Es la
+ * misma persona?" sí (de ahí el duplicado y el cruce del bot). "¿Este número
+ * contiene lo que escribí en el buscador?" no: quien busca escribe un pedazo
+ * —los últimos cuatro dígitos, o el número con el prefijo— y recortar a nueve
+ * antes de comparar deja fuera justo la mitad de los casos. Las dos salen de la
+ * misma limpieza para que no pueda pasar que una encuentre un teléfono que la
+ * otra no reconoce.
+ */
+export const PHONE_DIGITS_SQL =
+  "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(leads.phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', ''), '.', '')";
+
+export const PHONE_MATCH_KEY_SQL = `RIGHT(${PHONE_DIGITS_SQL}, 9)`;
 
 /**
  * Caracteres con los que se compara un documento de identidad.
