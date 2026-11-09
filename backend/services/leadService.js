@@ -371,7 +371,8 @@ export class LeadService {
     ctwaSourceType,
     ctwaHeadline,
     ctwaCreatedTime,
-    autoRoute = true
+    autoRoute = true,
+    botWillAttend = false
   }) {
     /*
      * El reparto automático (`/admin/reparto`) va primero y le gana al texto:
@@ -389,13 +390,20 @@ export class LeadService {
      * olvida y nadie se entera, porque un lead sin repartir no falla: solo
      * queda sin dueño.
      *
+     * `botWillAttend` separa los dos casos que antes se trataban igual: el lead
+     * que nace de una conversación de WhatsApp lo atiende Avan mientras el bot
+     * esté encendido, y por eso ahí el reparto espera; el de un formulario
+     * (TikTok, Meta) o el del evaluador **no lo atiende nadie**, así que se
+     * reparte siempre — con el bot encendido quedaban sin responsable, y un
+     * lead sin responsable no lo ve nadie salvo quien reparte. Ver `routesNow()`.
+     *
      * Un fallo del reparto NO puede tumbar el alta: un lead sin responsable se
      * arregla asignándolo a mano, y un lead que no se guardó se perdió.
      */
     let assignedUser = null;
     if (autoRoute) {
       try {
-        assignedUser = await this.routing.pickAssignee();
+        assignedUser = await this.routing.pickAssignee({ botWillAttend });
       } catch (error) {
         console.error('❌ Error al repartir el lead automáticamente (queda sin responsable):', error.message);
       }
@@ -549,8 +557,10 @@ export class LeadService {
       ctwaSourceType: data.ctwaSourceType,
       ctwaHeadline: data.ctwaHeadline,
       ctwaCreatedTime: data.ctwaCreatedTime,
-      // Por acá entran los leads de Meta, que SÍ se reparten; el alta manual
-      // entra por `registerManualLead()`, que lo pone en `false`.
+      // Por acá entran los leads de formulario (Meta y TikTok) y los del
+      // evaluador: todos se reparten, y SIEMPRE, porque el bot no los atiende
+      // (`botWillAttend` queda en false). El alta manual entra por
+      // `registerManualLead()`, que pone `autoRoute` en `false`.
       autoRoute: data.autoRoute !== false
     });
   }
@@ -1265,6 +1275,11 @@ export class LeadService {
       topic: `Consulta por WhatsApp de ${fullName || phone}`,
       source: source || 'WhatsApp Directo',
       status: 'conversacion_abierta',
+      // El ÚNICO camino de alta que el bot atiende: de acá en adelante hay una
+      // conversación, y mientras Avan esté encendido la lleva él. Por eso este
+      // lead se reparte solo con el bot apagado, a diferencia de los de
+      // formulario (ver `routesNow()`).
+      botWillAttend: true,
       ...atribucion
     });
   }

@@ -1408,14 +1408,28 @@ antes de tocar el arranque de producción.
   momento, porque "ningún camino llega hasta acá" dura hasta el próximo camino que alguien agregue.
   Los barridos **no marcan** lo que no mandaron, así que al encender el bot el recordatorio sale.
 - El **reparto automático de leads** (`/admin/reparto`, `LeadRoutingView.vue`, permiso
-  `leads.routing`, `leadRoutingService.js`) decide quién recibe los leads que entran solos (bot,
-  formularios de Meta, evaluador) y en qué proporción. **Corre exactamente cuando el bot está
-  apagado** (`leadRoutingService.isActive()`): mientras Avan atiende, él califica y agenda, y
-  repartir a la vez pondría a una persona a trabajar en paralelo la misma conversación. No hay un
-  interruptor propio del reparto y `lead_routing_pools.enabled` dejó de decidir nada (queda para el
-  día que haya más de un grupo): con dos interruptores, la combinación "bot apagado + reparto
-  apagado" deja los leads sin responsable Y sin bot — ni los ve nadie ni los contesta nadie, que es
-  el peor estado posible. Cada persona tiene un **peso** (`lead_routing_members.weight`): de cada vuelta
+  `leads.routing`, `leadRoutingService.js`) decide quién recibe los leads que entran solos
+  (formularios de TikTok y de Meta, evaluador, bot) y en qué proporción. **Lo que decide si un lead
+  se reparte no es el interruptor del bot sino quién lo atiende** (`routesNow()` en
+  `leadRouting.js`, con su espejo en `src/leadRouting.js`): el de **formulario** y el del
+  **evaluador** se reparten SIEMPRE y el que nace de una **conversación de WhatsApp** solo con el
+  bot apagado. Hasta el 09/11/2026 la regla era una sola para todos —se repartía con el bot
+  apagado— y el argumento valía solo para la mitad: a un lead de formulario **el bot no lo atiende
+  nunca** (Avan contesta mensajes, no escribe primero), así que con el bot encendido nacía sin
+  responsable, y un lead sin responsable **no lo ve nadie** salvo quien reparte. O sea que la mayoría
+  de lo que entra por anuncios quedaba en tierra de nadie justo mientras el bot estaba encendido,
+  que es casi siempre. Que un lead de formulario tenga dueño no vuelve a pisar al bot si esa persona
+  después escribe: en cuanto alguien le responde a mano, el bot se pausa solo para ese contacto
+  (`whatsapp_bot_sessions.bot_enabled`) — tener responsable no es que alguien esté escribiendo, es
+  que alguien lo ve en su tablero. Quién atiende lo dice el camino de alta: `botWillAttend` viaja
+  solo desde `findOrCreateFromWhatsApp()` y viene en **false** por lo mismo que `autoRoute` viene en
+  `true` — el camino que tiene que acordarse de algo tiene que ser el excepcional, o el próximo que
+  se agregue deja sus leads sin dueño sin que nada falle. `isActive()` sigue existiendo pero ya no
+  significa "el reparto está corriendo" sino "también se reparten las conversaciones de WhatsApp",
+  que es lo que muestra la banda de la pantalla. No hay un interruptor propio del reparto y
+  `lead_routing_pools.enabled` dejó de decidir nada (queda para el día que haya más de un grupo):
+  con dos interruptores, la combinación "bot apagado + reparto apagado" deja los leads sin
+  responsable Y sin bot — ni los ve nadie ni los contesta nadie, que es el peor estado posible. Cada persona tiene un **peso** (`lead_routing_members.weight`): de cada vuelta
   (la suma de los pesos) le tocan tantos leads como su peso, así que "5 a la setter por cada 1 al
   closer" es peso 5 y peso 1, y con más gente se suman filas sin tocar código. El algoritmo es el
   reparto ponderado **suave** (`backend/services/leadRouting.js`, con su espejo `src/leadRouting.js`
