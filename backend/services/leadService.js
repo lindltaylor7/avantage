@@ -1772,7 +1772,7 @@ export class LeadService {
    * (`deletionBlockReason`), para que el botón que se ve y lo que el servidor
    * acepta no puedan decir cosas distintas.
    */
-  async deleteLead(id) {
+  async deleteLead(id, { actor = null } = {}) {
     const workload = (await this.workloadByLead([id])).get(Number(id));
     const motivo = deletionBlockReason(workload);
     if (motivo) {
@@ -1780,7 +1780,34 @@ export class LeadService {
       error.code = 'LEAD_HAS_WORK';
       throw error;
     }
-    return db('leads').where({ id }).del();
+
+    /*
+     * La ficha se lee ANTES de borrarla: después no queda nada de ella (sus
+     * notas, su historial de etapas y sus comisiones están en CASCADE), así que
+     * este es el único momento en que se puede dejar constancia.
+     */
+    const lead = await db('leads').where({ id }).first();
+    const borrados = await db('leads').where({ id }).del();
+    if (!borrados || !lead) return borrados;
+
+    try {
+      await db('lead_deletions').insert({
+        lead_id: lead.id,
+        full_name: lead.full_name || null,
+        phone: lead.phone || null,
+        phone_key: phoneMatchKey(lead.phone),
+        status: lead.status || null,
+        deleted_by_user_id: actor?.id || null,
+        deleted_by_name: actor?.name || null
+      });
+    } catch (error) {
+      // La bitácora no puede deshacer un borrado que ya ocurrió ni fallarle a
+      // quien lo pidió: si la tabla todavía no existe en este entorno (falta
+      // `npm run migrate`), el lead se borró igual y queda dicho en el log.
+      console.warn('⚠️ No se pudo registrar el borrado del lead', id, '—', error.message);
+    }
+
+    return borrados;
   }
 }
 

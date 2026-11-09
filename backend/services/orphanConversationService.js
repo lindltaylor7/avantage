@@ -52,6 +52,66 @@ export function isOrphanConversation(waId, { exactPhones, phoneKeys } = {}) {
   return !phoneKeys?.has(key);
 }
 
+/**
+ * ¿La ficha de esta conversación no existe porque **alguien la borró**?
+ *
+ * Desde que el barrido las adopta solo, "nunca se abrió" y "la sacaron a
+ * propósito" se ven igual —en las dos hay conversación y no hay ficha— y se
+ * resuelven al revés: una hay que abrirla y la otra hay que dejarla en paz, o
+ * el lead que alguien borró reaparece a los diez minutos.
+ *
+ * Lo que decide es la fecha: el borrado tapa lo que pasó **antes** de él, y
+ * nunca lo de después. Si el contacto volvió a escribir después de que lo
+ * borraron, eso es actividad nueva y su ficha se abre igual — que es lo mismo
+ * que haría el webhook con ese mensaje.
+ */
+export function wasDeletedOnPurpose(orphan, deletions = []) {
+  if (!deletions.length) return false;
+  const last = orphan.lastAt ? new Date(orphan.lastAt).getTime() : null;
+
+  return deletions.some((deletion) => {
+    const when = deletion.deleted_at ? new Date(deletion.deleted_at).getTime() : null;
+    if (when === null) return false;
+    return last === null || last <= when;
+  });
+}
+
+/**
+ * Los borrados que podrían explicar la falta de ficha de estas conversaciones,
+ * indexados igual que los teléfonos: por la cadena exacta y por los últimos 9
+ * dígitos.
+ *
+ * Una consulta para todas y no una por conversación, por lo mismo que el
+ * índice de teléfonos.
+ */
+export async function loadDeletionIndex() {
+  const exact = new Map();
+  const byKey = new Map();
+
+  let rows = [];
+  try {
+    rows = await db('lead_deletions').select('phone', 'phone_key', 'deleted_at');
+  } catch (error) {
+    // Un entorno al que todavía no le corrió la migración no puede quedarse
+    // sin recuperar conversaciones: sin bitácora de borrados, el barrido se
+    // comporta como antes de que existiera.
+    console.warn('⚠️ No se pudo leer la bitácora de fichas borradas:', error.message);
+    return { exact, byKey };
+  }
+
+  for (const row of rows) {
+    if (row.phone) {
+      if (!exact.has(row.phone)) exact.set(row.phone, []);
+      exact.get(row.phone).push(row);
+    }
+    if (row.phone_key) {
+      if (!byKey.has(row.phone_key)) byKey.set(row.phone_key, []);
+      byKey.get(row.phone_key).push(row);
+    }
+  }
+  return { exact, byKey };
+}
+
 /** Los dos índices de teléfonos que ya tienen ficha. */
 export async function loadLeadPhoneIndex() {
   const leads = await db('leads').select('phone');
@@ -95,10 +155,26 @@ export async function findOrphanConversations({ days = DEFAULT_WINDOW_DAYS } = {
 
   const index = await loadLeadPhoneIndex();
   const huerfanas = conversaciones.filter((c) => isOrphanConversation(c.wa_id, index));
-  if (!huerfanas.length) return { total: conversaciones.length, orphans: [] };
+  if (!huerfanas.length) return { total: conversaciones.length, orphans: [], borradas: 0 };
 
+  const deletions = await loadDeletionIndex();
   const orphans = [];
+  let borradas = 0;
   for (const c of huerfanas) {
+    /*
+     * La ficha que alguien borró a propósito no se vuelve a abrir. Se cuenta
+     * aparte y no se descarta en silencio: "no había nada que recuperar" y
+     * "había tres y las habían borrado" son dos respuestas distintas, y la
+     * segunda es la que explica por qué una conversación sigue sin ficha.
+     */
+    const waId = String(c.wa_id);
+    const key = phoneMatchKey(waId);
+    const candidatas = [...(deletions.exact.get(waId) || []), ...(key ? deletions.byKey.get(key) || [] : [])];
+    if (wasDeletedOnPurpose({ lastAt: c.ultimo }, candidatas)) {
+      borradas += 1;
+      continue;
+    }
+
     /*
      * El primer ENTRANTE y no el primer mensaje a secas: el nombre del perfil
      * y el `referral` solo viajan en lo que manda el contacto (los salientes
@@ -138,7 +214,7 @@ export async function findOrphanConversations({ days = DEFAULT_WINDOW_DAYS } = {
     });
   }
 
-  return { total: conversaciones.length, orphans };
+  return { total: conversaciones.length, orphans, borradas };
 }
 
 /**

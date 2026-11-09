@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isOrphanConversation } from '../orphanConversationService.js';
+import { isOrphanConversation, wasDeletedOnPurpose } from '../orphanConversationService.js';
 import { phoneMatchKey } from '../leadService.js';
 
 /**
@@ -67,4 +67,46 @@ test('sin índice de teléfonos no se da por hecho que todo está registrado', (
   // El valor por defecto tiene que ser "falta", no "está": dar por registrada
   // una conversación que no se pudo comprobar esconde justo lo que se busca.
   assert.equal(isOrphanConversation('+51931261225', {}), true);
+});
+
+
+/* ──────────── La ficha que alguien borró no se vuelve a abrir ──────────── */
+
+/**
+ * Desde que el barrido adopta solo, "nunca se abrió" y "la sacaron a
+ * propósito" se ven igual —conversación sí, ficha no— y se resuelven al revés.
+ * Lo que las separa es la fecha, y eso es lo que se prueba acá.
+ */
+
+const borradoEl = (fecha) => [{ deleted_at: fecha }];
+
+test('una conversación anterior al borrado no se vuelve a adoptar', () => {
+  assert.equal(
+    wasDeletedOnPurpose({ lastAt: '2026-11-05T10:00:00Z' }, borradoEl('2026-11-06T09:00:00Z')),
+    true
+  );
+});
+
+test('si el contacto volvió a escribir DESPUÉS del borrado, su ficha se abre igual', () => {
+  // Es actividad nueva, no el rastro de lo que alguien sacó: el webhook haría
+  // lo mismo con ese mensaje.
+  assert.equal(
+    wasDeletedOnPurpose({ lastAt: '2026-11-07T08:00:00Z' }, borradoEl('2026-11-06T09:00:00Z')),
+    false
+  );
+});
+
+test('sin ningún borrado registrado, nada queda excluido', () => {
+  assert.equal(wasDeletedOnPurpose({ lastAt: '2026-11-07T08:00:00Z' }, []), false);
+});
+
+test('con varios borrados del mismo número alcanza con que uno tape la conversación', () => {
+  const borrados = [{ deleted_at: '2026-10-01T00:00:00Z' }, { deleted_at: '2026-11-08T00:00:00Z' }];
+  assert.equal(wasDeletedOnPurpose({ lastAt: '2026-11-07T08:00:00Z' }, borrados), true);
+});
+
+test('un borrado sin fecha no excluye nada', () => {
+  // Preferir recuperar de más antes que dejar a una persona fuera del funnel
+  // por una fila a la que le falta el dato.
+  assert.equal(wasDeletedOnPurpose({ lastAt: '2026-11-07T08:00:00Z' }, [{ deleted_at: null }]), false);
 });

@@ -37,10 +37,42 @@
  * el resumen de cada corrida queda en el log del servidor. El botón de cada
  * conciliación sigue existiendo para cuando hay que mirar el detalle ahora
  * mismo.
+ *
+ * Desde el 09/11/2026 el barrido tiene una **tercera pata, y con otra
+ * cadencia**: las conversaciones de WhatsApp que quedaron sin ficha
+ * (`orphanConversationService`). Guardar el mensaje entrante y abrir la ficha
+ * son dos escrituras del mismo webhook, que ya respondió 200 — si la segunda
+ * falla no se reintenta nunca, y lo que queda es una persona que escribió, a la
+ * que el bot hasta le contestó, y que no figura en ningún tablero. Era lo mismo
+ * que el botón de las otras dos conciliaciones: existía el script para
+ * recuperarlas y dependía de que alguien lo corriera, así que las fichas
+ * aparecían recién cuando alguien buscaba a mano a UN contacto que no
+ * encontraba (02/11/2026, ocho conversaciones; 09/11/2026, otra más).
+ *
+ * Esa pata corre en **cada vuelta del temporizador** y no una vez al día: un
+ * contacto que escribe y no tiene ficha no lo ve el setter, así que esperar
+ * hasta las 7 de la mañana siguiente es perder el día en que escribió. Puede
+ * correr seguido porque no le pregunta nada a ninguna API de afuera —son dos
+ * consultas a nuestra propia base— y porque adoptar es idempotente:
+ * `findOrCreateFromWhatsApp()` cruza por teléfono antes de crear nada.
  */
 
 /** Cada cuánto se revisa si ya toca correr (el barrido decide solo si corre). */
 export const SWEEP_CHECK_INTERVAL_MS = 10 * 60 * 1000;
+
+/**
+ * Ventana de la pata frecuente de conversaciones huérfanas.
+ *
+ * Corta y no la de 30 días del repaso diario porque esta corre cada diez
+ * minutos: con dos días, cualquier conversación que se haya quedado sin ficha
+ * se recupera dentro de los diez minutos y se la sigue reintentando por dos
+ * días más, que es lo que cubre un proceso que estuvo caído un rato. Lo más
+ * viejo que eso lo barre la corrida diaria, que mira el mes entero.
+ */
+export const ORPHAN_FREQUENT_DAYS = 2;
+
+/** Ventana del repaso diario de conversaciones huérfanas. */
+export const ORPHAN_DAILY_DAYS = 30;
 
 const TZ = 'America/Lima';
 
@@ -68,12 +100,20 @@ export class LeadReconciliationSweep {
    * @param {object} deps
    * @param {object} deps.metaReconciliation servicio de conciliación de Meta
    * @param {object} deps.tiktokLeads        importación de leads de TikTok
+   * @param {object} [deps.whatsappOrphans]  `{ find, adopt }` de conversaciones sin ficha
    * @param {number} [deps.hour]             hora de Lima a la que corre
    * @param {number} [deps.days]             días hacia atrás que revisa
    */
-  constructor({ metaReconciliation, tiktokLeads, hour = null, days = null } = {}) {
+  constructor({ metaReconciliation, tiktokLeads, whatsappOrphans = null, hour = null, days = null } = {}) {
     this.meta = metaReconciliation || null;
     this.tiktok = tiktokLeads || null;
+    /*
+     * `{ find, adopt }` y no el servicio entero: el barrido es orquestación y
+     * no toca la base, que es lo que permite probarlo con dos funciones falsas
+     * igual que las otras dos conciliaciones.
+     */
+    this.orphans = whatsappOrphans || null;
+    this.recoveringOrphans = false;
     this.hour = Number.isFinite(Number(hour)) ? Number(hour) : 7;
     this.days = Number.isFinite(Number(days)) ? Number(days) : 3;
     /*
@@ -85,6 +125,65 @@ export class LeadReconciliationSweep {
      */
     this.lastRunDay = null;
     this.running = false;
+  }
+
+  /**
+   * Una vuelta del temporizador: lo que corre siempre y lo que corre si toca.
+   *
+   * Que las dos cadencias vivan acá y no repartidas en el `setInterval` de
+   * `server.js` es lo que permite verificarlas: quien llama no tiene que saber
+   * cuál de las tres patas corre ahora.
+   */
+  async tick(now = new Date()) {
+    const orphans = await this.recoverOrphanConversations(ORPHAN_FREQUENT_DAYS);
+    const daily = await this.runIfDue(now);
+    return { orphans, daily };
+  }
+
+  /**
+   * Abre la ficha que le falta a cada conversación de WhatsApp de la ventana.
+   *
+   * Tres cuidados: **no se solapa consigo misma** (la vuelta anterior puede
+   * seguir adoptando), el fallo de UNA conversación no detiene a las demás
+   * —casi siempre es el dato de esa ficha y no el camino de alta—, y el
+   * silencio es silencio: cuando no hay nada que recuperar no escribe una
+   * línea, porque un log que dice "0 huérfanas" cada diez minutos es un log que
+   * nadie vuelve a leer.
+   */
+  async recoverOrphanConversations(days = ORPHAN_FREQUENT_DAYS) {
+    if (!this.orphans || this.recoveringOrphans) return null;
+
+    this.recoveringOrphans = true;
+    const resumen = { revisadas: 0, huerfanas: 0, adoptadas: 0, borradas: 0, errores: [] };
+    try {
+      const { total, orphans, borradas } = await this.orphans.find({ days });
+      resumen.revisadas = total || 0;
+      resumen.huerfanas = orphans.length;
+      // Las que no se adoptan porque alguien borró su ficha a propósito. Van
+      // en el resumen y no descartadas en silencio: es la respuesta a "esta
+      // conversación sigue sin ficha y el barrido dice que no hay nada".
+      resumen.borradas = borradas || 0;
+
+      for (const orphan of orphans) {
+        try {
+          await this.orphans.adopt(orphan);
+          resumen.adoptadas += 1;
+          console.log(`🩹 [Conversaciones sin ficha] Ficha abierta para ${orphan.waId}`
+            + `${orphan.contactName ? ` (${orphan.contactName})` : ''}, `
+            + `${orphan.messages} mensaje(s) desde ${orphan.firstAt}.`);
+        } catch (error) {
+          resumen.errores.push({ waId: orphan.waId, error: error.message });
+          console.error(`❌ [Conversaciones sin ficha] No se pudo abrir la ficha de ${orphan.waId}:`, error.message);
+        }
+      }
+    } catch (error) {
+      resumen.errores.push({ waId: null, error: error.message });
+      console.error('❌ [Conversaciones sin ficha] Error al buscar conversaciones sin ficha:', error.message);
+    } finally {
+      this.recoveringOrphans = false;
+    }
+
+    return resumen;
   }
 
   /** ¿Ya es la hora y todavía no corrió hoy? */
@@ -117,9 +216,29 @@ export class LeadReconciliationSweep {
 
     const since = dayKeyBefore(this.days, now);
     const until = limaDayKey(now);
-    const resumen = { dia: until, ventana: { since, until }, meta: null, tiktok: null, errores: [] };
+    const resumen = {
+      dia: until,
+      ventana: { since, until },
+      meta: null,
+      tiktok: null,
+      huerfanas: null,
+      errores: []
+    };
 
     try {
+      /*
+       * El repaso del mes de conversaciones sin ficha. La pata frecuente ya
+       * cubre lo de los últimos dos días; esta es la red para lo que quedó
+       * atrás —el proceso caído un fin de semana, o una ficha borrada a mano
+       * que dejó su conversación suelta—, y es la misma razón por la que las
+       * dos conciliaciones miran varios días y no solo el de ayer.
+       */
+      resumen.huerfanas = await this.recoverOrphanConversations(ORPHAN_DAILY_DAYS);
+      if (resumen.huerfanas?.huerfanas) {
+        console.log(`🔄 [Conciliación diaria] Conversaciones sin ficha (${ORPHAN_DAILY_DAYS} días): `
+          + `${resumen.huerfanas.huerfanas} encontradas, ${resumen.huerfanas.adoptadas} adoptadas.`);
+      }
+
       if (this.meta) {
         try {
           const report = await this.meta.reconcile({ since, until, apply: true });

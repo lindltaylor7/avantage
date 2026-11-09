@@ -45,6 +45,7 @@ import { MetaLeadReconciliationService } from './services/metaLeadReconciliation
 import { mergeDuplicateMetaLeads } from './scripts/mergeDuplicateMetaLeads.js';
 import { runMetaLeadgenBackfill } from './scripts/backfillMetaLeadgenFields.js';
 import { LeadReconciliationSweep } from './services/leadReconciliationSweep.js';
+import { adoptOrphanConversation, findOrphanConversations } from './services/orphanConversationService.js';
 import { PageInteractionService } from './services/pageInteractionService.js';
 import { PageMessageService } from './services/pageMessageService.js';
 import { PageFollowerService } from './services/pageFollowerService.js';
@@ -239,6 +240,15 @@ const tiktokLeadsService = new TikTokLeadsService({
 const leadReconciliationSweep = new LeadReconciliationSweep({
   metaReconciliation: metaLeadReconciliationService,
   tiktokLeads: tiktokLeadsService,
+  /*
+   * La tercera pata: las conversaciones de WhatsApp que quedaron sin ficha.
+   * Se inyectan las dos funciones y no el servicio para que el barrido siga
+   * sin tocar la base (ver su comentario de cabecera).
+   */
+  whatsappOrphans: {
+    find: (options) => findOrphanConversations(options),
+    adopt: (orphan) => adoptOrphanConversation(orphan, { leadService })
+  },
   hour: LEAD_RECONCILIATION_HOUR,
   days: LEAD_RECONCILIATION_DAYS
 });
@@ -3168,7 +3178,8 @@ app.put('/api/leads/:id', requireAuth, requireAnyPermission('leads.view', 'sette
  */
 app.delete('/api/leads/:id', requireAuth, requireAnyPermission('leads.view', 'setter.view'), requireLeadVisible, async (req, res) => {
   try {
-    const deleted = await leadService.deleteLead(req.params.id);
+    // Quién lo borró: es lo único que queda de la ficha (ver `lead_deletions`).
+    const deleted = await leadService.deleteLead(req.params.id, { actor: req.user });
     if (!deleted) {
       return res.status(404).json({ error: 'Lead no encontrado.' });
     }
@@ -6591,12 +6602,15 @@ app.listen(PORT, () => {
       console.error('❌ [WhatsApp Bot] Error al mandar la agenda diaria al vendedor:', error);
     });
     /*
-     * La conciliación de leads de anuncios. Va en este barrido y no en un
-     * temporizador propio porque el método ya decide solo si es su hora y si
-     * no corrió hoy; un fallo de una plataforma no detiene a la otra y nunca
-     * tumba el proceso (ver `leadReconciliationSweep.js`).
+     * La conciliación de leads. `tick()` y no `runIfDue()`: las conversaciones
+     * de WhatsApp que quedaron sin ficha se recuperan en CADA vuelta —un
+     * contacto sin ficha no lo ve nadie, así que esperar a las 7 de la mañana
+     * siguiente es perderle el día— y las dos conciliaciones de anuncios
+     * siguen corriendo una vez al día. Las dos cadencias las decide el propio
+     * barrido; un fallo nunca tumba el proceso (ver
+     * `leadReconciliationSweep.js`).
      */
-    leadReconciliationSweep.runIfDue().catch((error) => {
+    leadReconciliationSweep.tick().catch((error) => {
       console.error('❌ [Conciliación diaria] Error inesperado en el barrido:', error);
     });
   }, STALE_CONVERSATION_SWEEP_INTERVAL_MS);

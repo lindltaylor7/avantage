@@ -1020,6 +1020,50 @@ antes de tocar el arranque de producción.
   dinero no entró, y sin ese nombre se confundía con una cotización. Esa etiqueta es solo de la
   hoja: los cuatro cajones de `crmStage` con los que se cuentan los leads por anuncio siguen siendo
   cuatro, porque su suma tiene que ser el total de leads del anuncio.
+- **La conversación de WhatsApp que se quedó sin ficha se recupera sola, cada diez minutos**
+  (`orphanConversationService.js` + la tercera pata de `leadReconciliationSweep.tick()`). Guardar el
+  mensaje entrante y abrir la ficha son **dos escrituras del mismo webhook**, que ya respondió 200:
+  si la segunda falla no se reintenta nunca y lo que queda es una persona que escribió, a la que el
+  bot hasta le contestó, y que no figura en ningún tablero — un contacto perdido no falla,
+  simplemente no está. El servicio y los dos scripts existían desde el 02/11/2026 (ocho
+  conversaciones así) y dependían de que **alguien los corriera**, o sea el mismo botón de las otras
+  dos conciliaciones: el 09/11/2026 apareció otra, y se descubrió igual que la primera vez, porque
+  alguien buscó a mano a UN contacto que no encontraba. Corre en **cada vuelta** del temporizador y
+  no a las 07:00 como las de anuncios —a un contacto sin ficha no lo ve el setter, así que esperar
+  al día siguiente es perderle el día en que escribió—, y puede hacerlo porque no le pregunta nada a
+  ninguna API de afuera y porque adoptar es idempotente (`findOrCreateFromWhatsApp()` cruza por
+  teléfono antes de crear). La corrida diaria repite el repaso con la ventana de **30 días**, que es
+  la red para lo que quedó atrás con el proceso caído; la frecuente mira **2 días**. Adoptar usa el
+  MISMO camino del webhook y no un `insert` propio: de ahí cuelgan el sello de origen, la evidencia
+  y el reparto, y si ese camino está roto —la causa más probable de que haya huérfanas— el error se
+  ve tal cual, que es lo que hace falta ver.
+- **Una ficha borrada a mano no vuelve sola** (`lead_deletions`, `wasDeletedOnPurpose()`). Es la otra
+  cara de lo anterior: desde que el barrido adopta solo, "la ficha nunca se abrió" y "alguien la
+  sacó a propósito" se ven **igual** —conversación sí, ficha no— y se resuelven al revés, así que
+  sin distinguirlas borrar un lead cuya conversación sigue en la bandeja lo haría reaparecer a los
+  diez minutos. Lo que las separa es la **fecha**: el borrado tapa lo anterior a él y nunca lo
+  posterior, de modo que un contacto que vuelve a escribir después recupera su ficha igual — eso es
+  actividad nueva, y es lo mismo que haría el webhook con ese mensaje. `deleteLead()` escribe el
+  rastro **leyendo la ficha antes de borrarla**, que es el único momento en que se puede (sus notas,
+  su historial de etapas y sus comisiones están en CASCADE), y nunca puede tumbar el borrado: si la
+  tabla no existe todavía en ese entorno, el lead se borró igual y queda dicho en el log. La tabla
+  es además lo único que queda de un lead borrado —misma idea y misma forma que
+  `whatsapp_conversation_deletions`—, no una papelera: guarda con qué se lo reconoce y quién lo
+  borró, no la ficha entera. Las conversaciones salteadas por este motivo se **cuentan aparte**
+  (`borradas`) en el barrido y en los dos scripts: "no había nada que recuperar" y "había tres y las
+  habían borrado" son dos respuestas distintas.
+- **En el Reporte de Leads, un número se busca por sus dígitos** (`applySearch()` +
+  `PHONE_DIGITS_SQL`). El filtro hacía `LIKE '%982768859%'` sobre la columna cruda y no encontraba al
+  lead guardado como "+51 982 768 859" —el formato con el que entra el formulario de Meta, o sea la
+  mayoría—: los espacios caen justo en medio de lo que se buscó. Los dos tableros ya buscaban por
+  dígitos (`src/leadSearch.js`), así que el mismo número aparecía ahí y no acá, y de las dos
+  respuestas la del reporte es la que manda a revisar el webhook por un lead que estaba todo el
+  tiempo. Una consulta de puros dígitos mira **solo** id, teléfono y documento —los dos últimos sin
+  separadores—, que es la regla que ya tenían los tableros; la búsqueda por texto no cambió.
+  `PHONE_DIGITS_SQL` está aparte de `PHONE_MATCH_KEY_SQL` porque son dos preguntas distintas sobre
+  el mismo teléfono: "¿es la misma persona?" se contesta con los últimos 9 dígitos, "¿contiene lo
+  que escribí?" no — quien busca teclea un pedazo, y recortar a nueve antes de comparar deja fuera
+  la mitad de los casos.
 - **Las dos conciliaciones corren solas una vez al día** (`leadReconciliationSweep.js`, colgado del
   barrido de diez minutos que ya existía; `LEAD_RECONCILIATION_HOUR`, 07:00 de Lima por defecto).
   Recuperar leads dependía de que alguien apretara un botón, y así se perdió el 39% de los leads de

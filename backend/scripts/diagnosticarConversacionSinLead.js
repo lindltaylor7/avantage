@@ -153,10 +153,13 @@ async function barrido() {
    * cambie los dos scripts contestarían cosas distintas sobre los mismos
    * contactos.
    */
-  const { total, orphans } = await findOrphanConversations({ days: DIAS });
+  const { total, orphans, borradas } = await findOrphanConversations({ days: DIAS });
 
   linea(`   Conversaciones de los últimos ${DIAS} días: ${total}`);
   linea(`   Sin ficha en el CRM: ${orphans.length}`);
+  // Conversaciones cuya ficha alguien borró: no están perdidas, están sacadas
+  // a propósito, y el barrido no las vuelve a abrir (ver `lead_deletions`).
+  if (borradas) linea(`   Con la ficha borrada a mano: ${borradas} (no se recuperan)`);
   if (!orphans.length) {
     linea();
     linea('   Todas tienen su ficha. Si igual no aparecen en el tablero, el problema es de');

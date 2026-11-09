@@ -51,10 +51,11 @@ const momento = (valor) => (valor ? new Date(valor).toISOString().replace('T', '
 async function main() {
   titulo(`Conversaciones sin ficha · últimos ${DIAS} días · ${APLICAR ? 'APLICANDO' : 'solo reporte'}`);
 
-  const { total, orphans } = await findOrphanConversations({ days: DIAS });
+  const { total, orphans, borradas } = await findOrphanConversations({ days: DIAS });
   linea();
   linea(`   Conversaciones en el período: ${total}`);
   linea(`   Sin ficha en el CRM: ${orphans.length}`);
+  if (borradas) linea(`   Con la ficha borrada a mano: ${borradas} (no se vuelven a abrir)`);
 
   if (!orphans.length) {
     linea();
