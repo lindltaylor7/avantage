@@ -1673,6 +1673,47 @@ antes de tocar el arranque de producción.
   entera a la vista; arrastrar tarjetas entre columnas no funciona en táctil (es HTML5 drag and
   drop), y por eso en el celular el tablero es para mirar y entrar a la ficha, donde el desplegable
   de etapa sí mueve el lead.
+- **Mi perfil** (`/admin/perfil`, `ProfileView.vue`, entrada en el menú del avatar del navbar) es la
+  cuenta vista por su propio dueño: su **contraseña** y su **foto**. Es la única pantalla de
+  `/admin` **sin permiso** en el router, y a propósito: todo el mundo tiene una cuenta con una
+  contraseña, así que un permiso para entrar al propio perfil habría que darle a todos — y el día
+  que a alguien no se le dé, esa persona se queda sin poder cambiarla. Las rutas (`/api/profile*`)
+  **no reciben id**: el usuario es el del token. Con el id en la ruta, cada una tendría que
+  comprobar que es el propio, y la que se olvide deja a cualquiera cambiándole la contraseña a
+  cualquiera. Lo que NO se edita desde ahí es el nombre, el correo y el rol: de los tres cuelgan
+  cosas de otros módulos (el correo es la identidad del login, el rol decide los permisos, y el
+  nombre se copia como texto legible en `leads.assigned_to`, en los avisos y en los documentos ya
+  emitidos), así que se gestionan desde Perfiles, que es donde se ve a quién afectan.
+  Cambiar la propia contraseña **pide la actual** aunque la sesión ya esté abierta — un panel que
+  se queda abierto en una pantalla compartida permitiría que cualquiera que pase se quede con la
+  cuenta—, y **restablecer la de otro** desde Perfiles (`PUT /api/users/:id/password`, bajo
+  `roles.manage`) no la pide, porque quien restablece no la sabe: es la única forma de volver a
+  entrar que tiene alguien que la olvidó, ya que el panel interno no manda correos de recuperación
+  como el portal de clientes. Las dos puntas pasan por `#writePassword()` en `userService.js`, que
+  es donde viven las dos reglas —el mínimo (`MIN_PASSWORD_LENGTH`, 8, el mismo del alta de la
+  cuenta y el mismo que valida la pantalla) y que no sea la que ya tenía, porque una pantalla que
+  acepta "la cambié" sin cambiarla deja a la persona convencida de que rotó una contraseña
+  filtrada—. El token **no se invalida**: es stateless y dura 8 h, y lo que cambió es la
+  contraseña, no la identidad. `password_changed_at` no gobierna nada —nada caduca—: existe para
+  que la pantalla pueda decir "la cambiaste el 9 de noviembre", que es lo único que contesta si
+  esa sigue siendo la que le dieron al crearle la cuenta.
+  La **foto** es `users.avatar_filename`, y en la columna va **solo el nombre del archivo**: la
+  carpeta base la decide `UPLOADS_DIR` y puede cambiar entre despliegues, así que una ruta guardada
+  queda apuntando al disco de ayer. La URL se arma en cada lectura con `avatarUrlFor()`, un solo
+  sitio para el `avatar_url` que viaja en el usuario de la sesión (el navbar lo dibuja en todas las
+  pantallas), en el equipo de cada proyecto —cuyo template ya lo esperaba— y en la tabla de
+  Perfiles. Donde no haya foto se siguen viendo las iniciales de `src/avatars.js`: el círculo es el
+  mismo, cambia lo que lleva dentro.
+  Dos decisiones del archivo. **Se sirve por una ruta sin sesión** (`GET /uploads/avatars/:filename`),
+  la única del panel: un `<img>` no manda el header `Authorization`, y el camino de los
+  comprobantes de Finanzas —`fetch` + blob— para una foto que aparece en cada pantalla sería una
+  descarga por página sin caché. Lo que la protege es que el nombre son **16 bytes al azar**, así
+  que no se puede pedir la foto de alguien sin que el panel la haya dado antes (con `3.jpg` la foto
+  de cualquiera quedaría a un número de distancia), y por eso reemplazar una foto **borra la
+  anterior**: el nombre viejo seguiría sirviendo el archivo viejo mientras exista en disco. Y **no
+  se aceptan SVG** aunque sean imágenes, que es la única exclusión: un SVG puede traer `<script>`
+  adentro y, servido desde nuestro propio dominio, correría con los permisos de la página — subir
+  una foto de perfil alcanzaría para robarle la sesión a quien la mire.
 - **RBAC**: `roles` ↔ `permissions` (N:N vía `role_permissions`) ↔ `users` (N:1 vía `role_id`), más
   `user_permissions`, que son las **excepciones de una persona** sobre lo que le da su rol. Los
   permisos efectivos (rol + otorgados − revocados) se resuelven en UN solo sitio

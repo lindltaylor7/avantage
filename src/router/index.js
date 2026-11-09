@@ -8,6 +8,7 @@ import ProjectsView from '../views/ProjectsView.vue';
 import ProjectDetailView from '../views/ProjectDetailView.vue';
 import DeliverablesView from '../views/DeliverablesView.vue';
 import RolesView from '../views/RolesView.vue';
+import ProfileView from '../views/ProfileView.vue';
 import CareersView from '../views/CareersView.vue';
 import LeadRoutingView from '../views/LeadRoutingView.vue';
 import LeadReportView from '../views/LeadReportView.vue';
@@ -46,6 +47,15 @@ const router = createRouter({
     { path: '/evaluador-tesis', name: 'home', component: HomeView },
     { path: '/login', name: 'login', component: LoginView },
     { path: '/dashboard', name: 'dashboard', component: DashboardView, meta: { requiresAuth: true } },
+    /*
+     * "Mi perfil" no lleva `permission`, y es la única pantalla de /admin que no
+     * lleva: todo el mundo tiene una cuenta con una contraseña y una foto, así
+     * que un permiso para entrar al propio perfil habría que darle a todos — y
+     * el día que a alguien se le olvide dárselo, esa persona se queda sin poder
+     * cambiar su contraseña. La ruta no recibe ningún id: el perfil que se edita
+     * es el del token (ver /api/profile en server.js).
+     */
+    { path: '/admin/perfil', name: 'profile', component: ProfileView, meta: { requiresAuth: true } },
     { path: '/admin/database', name: 'database', component: DatabaseView, meta: { requiresAuth: true, permission: 'database.view' } },
     { path: '/admin/leads', name: 'leads', component: LeadsView, meta: { requiresAuth: true, permission: 'leads.view' } },
     { path: '/admin/setter-funnel', name: 'setter-funnel', component: SetterFunnelView, meta: { requiresAuth: true, permission: 'setter.view' } },

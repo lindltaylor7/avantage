@@ -36,7 +36,7 @@ import { TikTokLeadsService } from './services/tiktokLeadsService.js';
 import { AttributionConflictService } from './services/attributionConflictService.js';
 import { TikTokConversionsService, TIKTOK_EVENT_NAMES } from './services/tiktokConversionsService.js';
 import { CampaignExportService } from './services/campaignExportService.js';
-import { UserService } from './services/userService.js';
+import { UserService, MIN_PASSWORD_LENGTH } from './services/userService.js';
 import { RoleService } from './services/roleService.js';
 import { ProjectUpdateService } from './services/projectUpdateService.js';
 import { DeliverableService } from './services/deliverableService.js';
@@ -76,7 +76,7 @@ import { buildAttachmentPreview, readImagePreviewBytes, resolveAttachmentKind } 
 import { planWinDeal } from './services/winDeal.js';
 import { signToken, requireAuth, requirePermission, requireAnyPermission, signGoogleOAuthState, verifyGoogleOAuthState, signClientToken, requireClientAuth } from './middleware/auth.js';
 
-import { uploadProjectUpdateAttachment, uploadDir, uploadDeliverableAttachment, deliverableDir, uploadFinanceReceipt, uploadFinanceFile, uploadEmailAttachments, uploadSignedContract, financeReceiptDir, whatsappMediaDir, campaignAdImageDir, signedContractDir } from './middleware/upload.js';
+import { uploadProjectUpdateAttachment, uploadDir, uploadDeliverableAttachment, deliverableDir, uploadFinanceReceipt, uploadFinanceFile, uploadEmailAttachments, uploadSignedContract, uploadAvatar, financeReceiptDir, whatsappMediaDir, campaignAdImageDir, signedContractDir, avatarDir } from './middleware/upload.js';
 import { db } from './db/connection.js';
 
 // Estado del funnel Kanban que marca el fin del proceso comercial: al llegar
@@ -357,6 +357,88 @@ app.get('/api/auth/me', requireAuth, async (req, res) => {
     console.error('❌ Error al obtener el usuario actual:', error);
     res.status(500).json({ error: 'Error al obtener el usuario actual.', details: error.message });
   }
+});
+
+// =====================================================================
+// MI PERFIL (/api/profile)
+// =====================================================================
+// La cuenta vista por su propio dueño: su contraseña y su foto. No pide ningún
+// permiso más que estar autenticado —todo el mundo tiene un perfil, y un
+// permiso para ver el suyo sería un permiso que habría que darle a todos— y
+// nunca recibe un id: el usuario es `req.user.id`, el del token. Con el id en
+// la ruta, cada una de estas tendría que comprobar que es el propio, y la que
+// se olvide deja a cualquiera cambiándole la contraseña a cualquiera.
+
+app.get('/api/profile', requireAuth, async (req, res) => {
+  try {
+    const profile = await userService.getProfile(req.user.id);
+    if (!profile) return res.status(404).json({ error: 'La cuenta ya no existe.' });
+    res.json({ profile, minPasswordLength: MIN_PASSWORD_LENGTH });
+  } catch (error) {
+    console.error('❌ Error al obtener el perfil:', error);
+    res.status(500).json({ error: 'Error al obtener el perfil.', details: error.message });
+  }
+});
+
+app.put('/api/profile/password', requireAuth, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body || {};
+    const result = await userService.changeOwnPassword(req.user.id, currentPassword, newPassword);
+    console.log(`🔐 [Auth] Contraseña cambiada por su dueño: ${req.user.email}`);
+    res.json(result);
+  } catch (error) {
+    // Los mensajes de `changeOwnPassword` están escritos para mostrarse tal
+    // cual ("La contraseña actual no es correcta."), así que viajan como están.
+    res.status(400).json({ error: error.message || 'Error al cambiar la contraseña.' });
+  }
+});
+
+app.post('/api/profile/avatar', requireAuth, uploadAvatar, async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No se recibió ninguna imagen.' });
+    const result = await userService.setAvatar(req.user.id, req.file.filename);
+    res.json(result);
+  } catch (error) {
+    console.error('❌ Error al guardar la foto de perfil:', error);
+    res.status(400).json({ error: error.message || 'Error al guardar la foto de perfil.' });
+  }
+});
+
+app.delete('/api/profile/avatar', requireAuth, async (req, res) => {
+  try {
+    const result = await userService.removeAvatar(req.user.id);
+    res.json(result);
+  } catch (error) {
+    console.error('❌ Error al quitar la foto de perfil:', error);
+    res.status(400).json({ error: error.message || 'Error al quitar la foto de perfil.' });
+  }
+});
+
+/**
+ * Sirve una foto de perfil.
+ *
+ * Es la única ruta de archivos del panel **sin sesión**, y tiene que serlo: el
+ * avatar se dibuja con un `<img>` en el navbar de todas las pantallas y en el
+ * equipo de cada proyecto, y un `<img>` no manda el header `Authorization` —
+ * por eso los comprobantes de Finanzas se piden con `fetch` y se muestran como
+ * blob, que para una foto que aparece en cada página sería una descarga por
+ * pantalla sin caché.
+ *
+ * Lo que la protege es que el nombre del archivo son 16 bytes al azar (ver
+ * `uploads.js`): no se puede pedir la foto de alguien sin que el panel te la
+ * haya dado antes. `path.basename` corta cualquier intento de salirse de la
+ * carpeta (`..%2f`), y solo se sirve lo que tenga extensión de imagen: un
+ * archivo con otra extensión en esa carpeta no puede llegar por acá.
+ */
+app.get('/uploads/avatars/:filename', (req, res) => {
+  const filename = path.basename(String(req.params.filename || ''));
+  if (!/\.(jpe?g|png|webp|gif)$/i.test(filename)) return res.status(404).end();
+
+  const filePath = path.join(avatarDir, filename);
+  if (!fs.existsSync(filePath)) return res.status(404).end();
+
+  res.set('Cache-Control', 'public, max-age=86400');
+  res.sendFile(filePath);
 });
 
 // =====================================================================
@@ -6106,8 +6188,11 @@ app.post('/api/users', requireAuth, requirePermission('roles.manage'), async (re
     if (!name || !email || !password || !roleId) {
       return res.status(400).json({ error: 'Nombre, correo, contraseña y rol son requeridos.' });
     }
-    if (password.length < 6) {
-      return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres.' });
+    // El mismo mínimo que piden el cambio y el restablecimiento
+    // (`MIN_PASSWORD_LENGTH`): con 6 acá, una cuenta podía nacer con una
+    // contraseña que el propio panel después no deja volver a poner.
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      return res.status(400).json({ error: `La contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres.` });
     }
     const user = await userService.createUser({ name: name.trim(), email: email.trim(), password, roleId });
     res.json({ user });
@@ -6131,6 +6216,29 @@ app.patch('/api/users/:id/role', requireAuth, requirePermission('roles.manage'),
   } catch (error) {
     console.error('❌ Error al actualizar el rol del usuario:', error);
     res.status(500).json({ error: 'Error al actualizar el rol del usuario.', details: error.message });
+  }
+});
+
+/**
+ * Le pone una contraseña nueva a otra cuenta.
+ *
+ * Es la contracara de `/api/profile/password`: ahí la cambia su dueño y por eso
+ * se le pide la actual; acá la cambia quien administra el panel, que no la sabe.
+ * Existe porque el panel interno **no tiene recuperación por correo** (sí la
+ * tiene el portal de clientes), así que sin esto una cuenta cuya contraseña se
+ * olvidó solo se recupera tocando la base a mano.
+ *
+ * El tope es `roles.manage`, el mismo permiso con el que se crea la cuenta y se
+ * le dan sus herramientas: quien puede darle acceso al módulo de Finanzas ya
+ * puede, de hecho, entrar a cualquier cuenta.
+ */
+app.put('/api/users/:id/password', requireAuth, requirePermission('roles.manage'), async (req, res) => {
+  try {
+    const result = await userService.setPasswordFor(req.params.id, req.body?.newPassword);
+    console.log(`🔐 [Auth] Contraseña restablecida por ${req.user.email} para el usuario ${req.params.id}`);
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || 'Error al restablecer la contraseña.' });
   }
 });
 

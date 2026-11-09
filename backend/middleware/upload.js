@@ -1,6 +1,7 @@
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 
@@ -51,6 +52,68 @@ fs.mkdirSync(whatsappMediaDir, { recursive: true });
 // caduca, así que se descarga una sola vez en cada sincronización.
 const campaignAdImageDir = path.join(uploadsBase, 'campaign-ads');
 fs.mkdirSync(campaignAdImageDir, { recursive: true });
+
+/**
+ * Foto de perfil de un usuario interno.
+ *
+ * Carpeta propia por lo mismo que las demás: lo que se guarda acá tiene su
+ * propio ciclo de vida —una foto vieja se reemplaza y se borra, un comprobante
+ * no se borra nunca— y mezcladas no hay forma de saber qué se puede limpiar.
+ *
+ * **No se aceptan SVG** aunque sean imágenes, y es la única exclusión: un SVG
+ * es un documento que puede traer `<script>` adentro, y estos archivos se
+ * sirven por una ruta sin sesión (ver `/uploads/avatars/` en server.js) para
+ * que un `<img>` del panel pueda pedirlos. Servido desde nuestro propio
+ * dominio, ese script correría con los permisos de la página — o sea que subir
+ * una foto de perfil alcanzaría para robarle la sesión a quien la mire.
+ */
+const avatarDir = path.join(uploadsBase, 'avatars');
+fs.mkdirSync(avatarDir, { recursive: true });
+
+const AVATAR_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+
+const avatarStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, avatarDir),
+  filename: (req, file, cb) => {
+    /*
+     * El nombre es un token al azar y no el id del usuario: la ruta que sirve
+     * estos archivos no pide sesión, así que `3.jpg` sería adivinable y la foto
+     * de cualquiera quedaría a un número de distancia. Con 16 bytes al azar, el
+     * nombre ES la llave — y por eso al reemplazar una foto se borra la
+     * anterior (`setAvatar()` en userService.js): el nombre viejo seguiría
+     * sirviendo el archivo viejo mientras exista en disco.
+     */
+    const unique = crypto.randomBytes(16).toString('hex');
+    const ext = path.extname(file.originalname).toLowerCase().slice(0, 10);
+    cb(null, `${unique}${ext || '.jpg'}`);
+  }
+});
+
+const avatarUpload = multer({
+  storage: avatarStorage,
+  // 4 MB: es una foto de perfil, no un documento. Lo que llega del celular
+  // entra de sobra y un recorte de pantalla también.
+  limits: { fileSize: 4 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (AVATAR_MIMES.has(file.mimetype || '')) return cb(null, true);
+    cb(new Error('La foto de perfil debe ser una imagen JPG, PNG, WEBP o GIF.'));
+  }
+}).single('avatar');
+
+/**
+ * Middleware de la ruta que cambia la foto de perfil: sube el archivo del campo
+ * "avatar".
+ */
+export function uploadAvatar(req, res, next) {
+  avatarUpload(req, res, (err) => {
+    if (err) {
+      return res.status(400).json({ error: 'Error al subir la foto de perfil: ' + err.message });
+    }
+    next();
+  });
+}
+
+export { avatarDir };
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),

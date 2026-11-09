@@ -93,7 +93,7 @@
           <button type="button" class="avatar-wrapper" @click="isUserMenuOpen = !isUserMenuOpen">
             <span class="avatar-circle-wrap">
               <span class="avatar-circle">
-                <img v-if="authState.user?.avatar" :src="authState.user.avatar" alt="Avatar" />
+                <img v-if="authState.user?.avatar_url" :src="authState.user.avatar_url" alt="Avatar" />
                 <span v-else class="avatar-initials">{{ userInitials }}</span>
               </span>
               <span class="online-indicator"></span>
@@ -111,6 +111,19 @@
               <div class="user-email">{{ authState.user?.email || 'admin@avantage.pe' }}</div>
               <div class="user-role-badge">{{ authState.user?.role || 'Admin' }}</div>
             </div>
+
+            <div class="dropdown-divider"></div>
+
+            <!-- "Mi perfil" va primero y sin `v-if`: es la única entrada del
+                 menú que no depende de ningún permiso, porque todo el mundo
+                 tiene cuenta. -->
+            <router-link to="/admin/perfil" class="dropdown-item" @click="isUserMenuOpen = false">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                <circle cx="12" cy="7" r="4"/>
+              </svg>
+              Mi perfil
+            </router-link>
 
             <div class="dropdown-divider"></div>
 
@@ -230,6 +243,7 @@ const currentPageTitle = computed(() => {
   if (route.path === '/admin/social') return 'Interacciones de Facebook';
   if (route.path.startsWith('/admin/projects')) return 'Gestión de Proyectos';
   if (route.path === '/admin/roles') return 'Roles y Permisos';
+  if (route.path === '/admin/perfil') return 'Mi perfil';
   return 'Dashboard';
 });
 
