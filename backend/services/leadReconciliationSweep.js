@@ -141,6 +141,31 @@ export class LeadReconciliationSweep {
   }
 
   /**
+   * El repaso de arranque: el mes entero de conversaciones sin ficha, una vez,
+   * apenas levanta el proceso.
+   *
+   * Hacen falta las dos cosas que no da el temporizador. La primera vuelta de
+   * `setInterval` llega recién a los **diez minutos**, así que sin esto un
+   * despliegue hecho para recuperar un contacto no recupera nada hasta la
+   * vuelta siguiente — y lo que se acaba de desplegar se juzga en ese rato. Y
+   * la pata frecuente mira **dos días**: todo lo que se quedó sin ficha antes
+   * de eso esperaría hasta las 07:00 del día siguiente, que es justo el atraso
+   * acumulado que un despliegue viene a saldar.
+   *
+   * Es el mismo sondeo inicial que ya hace `pageFollowerService` al arrancar, y
+   * por la misma razón.
+   */
+  async catchUpOnStart() {
+    const resumen = await this.recoverOrphanConversations(ORPHAN_DAILY_DAYS);
+    if (resumen?.huerfanas || resumen?.borradas) {
+      console.log(`🩹 [Conversaciones sin ficha] Repaso de arranque (${ORPHAN_DAILY_DAYS} días): `
+        + `${resumen.huerfanas} sin ficha, ${resumen.adoptadas} adoptadas, `
+        + `${resumen.borradas} con la ficha borrada a mano.`);
+    }
+    return resumen;
+  }
+
+  /**
    * Abre la ficha que le falta a cada conversación de WhatsApp de la ventana.
    *
    * Tres cuidados: **no se solapa consigo misma** (la vuelta anterior puede

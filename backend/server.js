@@ -6585,6 +6585,16 @@ app.listen(PORT, () => {
     }, FOLLOWER_POLL_INTERVAL_MS);
   }
 
+  /*
+   * El repaso de arranque de conversaciones sin ficha. Va acá y no esperando a
+   * la primera vuelta del temporizador —que llega a los diez minutos y solo
+   * mira dos días— porque un despliegue es justamente cuando hay atraso que
+   * saldar: ver `catchUpOnStart()`.
+   */
+  leadReconciliationSweep.catchUpOnStart().catch((error) => {
+    console.error('❌ [Conversaciones sin ficha] Error en el repaso de arranque:', error);
+  });
+
   setInterval(() => {
     whatsappBotService.checkStaleConversations().catch((error) => {
       console.error('❌ [WhatsApp Bot] Error en el barrido de conversaciones inactivas:', error);

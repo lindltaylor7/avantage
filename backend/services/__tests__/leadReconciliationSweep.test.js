@@ -260,3 +260,17 @@ test('sin la dependencia de huérfanas el barrido sigue funcionando igual', asyn
   assert.equal(resultado.orphans, null);
   assert.equal(meta.calls.length, 1);
 });
+
+test('al arrancar repasa el mes entero, sin esperar la primera vuelta', async () => {
+  // El temporizador llega a los diez minutos y su pata frecuente mira dos
+  // días: sin este repaso, un despliegue hecho para recuperar un contacto no
+  // recupera nada hasta la vuelta siguiente, y lo viejo hasta las 07:00.
+  const orphans = fakeOrphans(['51982768859']);
+  const sweep = new LeadReconciliationSweep({ whatsappOrphans: orphans });
+
+  const resumen = await sweep.catchUpOnStart();
+
+  assert.deepEqual(orphans.found, [{ days: ORPHAN_DAILY_DAYS }]);
+  assert.deepEqual(orphans.adopted, ['51982768859']);
+  assert.equal(resumen.adoptadas, 1);
+});

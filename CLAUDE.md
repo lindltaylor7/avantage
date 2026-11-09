@@ -1033,7 +1033,11 @@ antes de tocar el arranque de producción.
   al día siguiente es perderle el día en que escribió—, y puede hacerlo porque no le pregunta nada a
   ninguna API de afuera y porque adoptar es idempotente (`findOrCreateFromWhatsApp()` cruza por
   teléfono antes de crear). La corrida diaria repite el repaso con la ventana de **30 días**, que es
-  la red para lo que quedó atrás con el proceso caído; la frecuente mira **2 días**. Adoptar usa el
+  la red para lo que quedó atrás con el proceso caído; la frecuente mira **2 días**, y al **arrancar** el proceso se hace el repaso del mes una vez
+  (`catchUpOnStart()`): la primera vuelta del temporizador llega recién a los diez minutos y mira
+  dos días, así que sin eso un despliegue hecho para recuperar un contacto no recupera nada — y es
+  en ese rato cuando se lo juzga. Es el mismo sondeo inicial que ya hacía `pageFollowerService`.
+  Adoptar usa el
   MISMO camino del webhook y no un `insert` propio: de ahí cuelgan el sello de origen, la evidencia
   y el reparto, y si ese camino está roto —la causa más probable de que haya huérfanas— el error se
   ve tal cual, que es lo que hace falta ver.
