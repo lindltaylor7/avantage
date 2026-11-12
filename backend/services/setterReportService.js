@@ -1,13 +1,19 @@
 import { db } from '../db/connection.js';
 import { applyLeadVisibility } from './leadService.js';
 import { buildStatusLabeler, loadFunnelStageIndex } from './funnelStageLabel.js';
-import { LOST_STATUSES, leadHasGraduated, loadWinningStatuses } from './salesFunnelStage.js';
+import {
+  LOST_STATUSES,
+  isAppointmentStatus,
+  leadHasGraduated,
+  loadWinningStatuses
+} from './salesFunnelStage.js';
 import {
   firstDayAfter,
   firstDayOf,
   lastMonthKeys,
   normalizeMonths,
   percentChange,
+  percentile,
   ratio
 } from './reportPeriod.js';
 
@@ -73,6 +79,59 @@ import {
 const TOP_STAGES = 6;
 
 /**
+ * Los tramos en los que se reparte la primera respuesta, en minutos.
+ *
+ * Se publica la DISTRIBUCIÓN y no el cumplimiento de un SLA, porque el SLA no
+ * existe todavía: la auditoría del 10/11/2026 propuso cinco minutos en horario
+ * comercial, y eso es una decisión del área —con su definición de horario— que
+ * el panel no puede inventar. Con los tramos a la vista, el día que se fije el
+ * umbral el número ya está calculado; al revés, un "cumple el 62%" contra una
+ * meta que nadie acordó es una cifra que no se puede discutir.
+ *
+ * El último tramo no tiene techo a propósito: ahí caían los 51 leads que
+ * esperaron más de una hora, y partirlo en más cajones reparte entre varios
+ * justo lo que hay que ver junto.
+ */
+const RESPONSE_BUCKETS = [
+  { key: 'under5', label: 'Hasta 5 min', max: 5 },
+  { key: 'under15', label: '5 a 15 min', max: 15 },
+  { key: 'under60', label: '15 a 60 min', max: 60 },
+  { key: 'over60', label: 'Más de 1 hora', max: Infinity }
+];
+
+/**
+ * A partir de cuántos días sin un solo movimiento un lead abierto se considera
+ * dormido.
+ *
+ * 7 y no 30: en el corte del 10/11/2026 los 50 leads congelados llevaban una
+ * mediana de 16,5 días, y con el umbral en un mes ninguno habría aparecido —
+ * que es precisamente cómo se llega a tener medio centenar de fichas que nadie
+ * mira. Es un aviso, no una regla: no bloquea nada ni mueve ningún lead.
+ */
+const STALE_DAYS = 7;
+
+/**
+ * Minutos entre que entró el lead y que alguien le contestó por primera vez.
+ *
+ * Sale de `leads.first_response_at` —la marca de la ficha, que cubre tanto el
+ * mensaje de WhatsApp como la primera nota, que es el único registro que deja
+ * una llamada— y no del primer saliente de la conversación. El lead de
+ * formulario que nunca escribió por WhatsApp no tiene conversación, así que
+ * medido por ahí salía siempre vacío y "no se le contactó" y "se le llamó y
+ * nadie lo registró" se escribían igual (109 de 450 leads en el corte del
+ * 10/11/2026). Ver `leadFirstResponse.js`.
+ */
+export function responseMinutes(lead) {
+  const entro = Date.parse(lead?.created_at);
+  const contesto = Date.parse(lead?.first_response_at);
+  if (!Number.isFinite(entro) || !Number.isFinite(contesto)) return null;
+  // Una respuesta anterior al alta de la ficha es "al instante" y no un dato
+  // roto: pasa cuando el bot contesta y la ficha se cuelga después (misma
+  // lectura que `daysBetween`).
+  return Math.max(0, Math.round(((contesto - entro) / 60000) * 10) / 10);
+}
+
+/**
  * El setter al que se le atribuye este lead. Ver la decisión 1 del encabezado:
  * primero el sello de la graduación y después el responsable actual.
  */
@@ -132,6 +191,16 @@ export function emptyStats() {
     meetingsAttended: 0,
     meetingsCancelled: 0,
     meetingsManual: 0,
+    /*
+     * La cita que la etapa afirma y la agenda no tiene. El lead está en
+     * `cita_agendada` y no hay ninguna reunión con fecha y hora detrás, así
+     * que el closer no la ve en su Calendario, el bot no manda el recordatorio
+     * y nadie puede ir a buscarla. Se cuenta aparte de `withMeeting` —que son
+     * las reuniones de verdad— porque es lo que explica que el funnel diga 43
+     * citas y la agenda tenga 36 (corte del 10/11/2026): sin esta cifra, la
+     * resta parece un error del reporte.
+     */
+    appointmentWithoutMeeting: 0,
     won: 0,
     wonWithMeeting: 0,
     lost: 0,
@@ -139,6 +208,48 @@ export function emptyStats() {
     openSetter: 0,
     openSales: 0,
     unmoved: 0,
+    /*
+     * ── Atención: a cuántos se les contestó, cuándo y quién ──
+     *
+     * Es lo que el reporte no sabía medir. `noFirstResponse` son los leads que
+     * se le atribuyeron a este setter y a los que NADIE contestó nunca —109 de
+     * 450 en el corte del 10/11/2026—, y las tres cifras de tiempo van juntas
+     * porque una sola engaña: la mediana de ~20 segundos era Avan acusando
+     * recibo, con 51 leads esperando más de una hora debajo.
+     *
+     * `respondedByHuman` es "alguien del panel escribió", contra la respuesta
+     * que salió sin nadie detrás. No se afirma que esa otra fue del bot: un
+     * asesor escribiendo desde la app de WhatsApp Business llega por el mismo
+     * camino y deja el responsable en null (la convención de `sent_by`).
+     */
+    noFirstResponse: 0,
+    respondedByHuman: 0,
+    responseMedianMin: null,
+    responseP90Min: null,
+    humanResponseMedianMin: null,
+    responseBuckets: Object.fromEntries(RESPONSE_BUCKETS.map((b) => [b.key, 0])),
+    /*
+     * ── Calificación comercial: tres estados ──
+     *
+     * Calificar es trabajo del setter, así que la cobertura es parte de su
+     * desempeño. El vacío NO es un "no": separa al lead que nadie revisó del
+     * revisado y descartado, y en el corte del 10/11/2026 los 450 estaban sin
+     * revisar — un dato que no se registra no mide la calidad de ningún
+     * anuncio, que es para lo único que sirve esa marca.
+     */
+    qualifiedYes: 0,
+    qualifiedNo: 0,
+    qualifiedPending: 0,
+    /*
+     * ── Cartera dormida ──
+     *
+     * Leads todavía abiertos que llevan más de `STALE_DAYS` sin un solo
+     * movimiento. Los 50 congelados del corte tenían una mediana de 16,5 días
+     * y no figuraban en ninguna cifra del reporte: un lead que nadie toca no
+     * falla, simplemente se enfría.
+     */
+    stale: 0,
+    staleDaysMedian: null,
     daysToMeeting: null,
     daysToWin: null
   };
@@ -174,15 +285,43 @@ export function classifyLead(lead, { wonStatuses, salesStatuses, projectIds, mee
  * setter y en el de su mes, y clasificarlo tres veces es como se llega a que
  * los tres números no cuadren.
  */
-export function summarize(entries) {
+export function summarize(entries, { now = new Date() } = {}) {
   const stats = emptyStats();
   const toMeeting = [];
   const toWin = [];
+  const responses = [];
+  const humanResponses = [];
+  const staleDays = [];
+  // Como Date y no como milisegundos: `daysBetween` parsea lo que no sea Date
+  // con `Date.parse`, que sobre un número devuelve NaN.
+  const ahora = now instanceof Date ? now : new Date(now);
 
   for (const { lead, verdict, movedAt } of entries) {
     stats.leads += 1;
     if (verdict.graduated) stats.graduated += 1;
     if (!movedAt) stats.unmoved += 1;
+
+    // ── Atención: cuánto esperó este lead y quién le contestó ──
+    const espera = responseMinutes(lead);
+    if (espera === null) {
+      stats.noFirstResponse += 1;
+    } else {
+      responses.push(espera);
+      // El primer tramo que lo contiene: los cortes son excluyentes y en
+      // orden, así que la suma de los cuatro más `noFirstResponse` es siempre
+      // el total de leads — sin eso, la barra de tramos mentiría.
+      const tramo = RESPONSE_BUCKETS.find((b) => espera <= b.max) || RESPONSE_BUCKETS[RESPONSE_BUCKETS.length - 1];
+      stats.responseBuckets[tramo.key] += 1;
+      if (lead.first_response_by) {
+        stats.respondedByHuman += 1;
+        humanResponses.push(espera);
+      }
+    }
+
+    // ── Calificación comercial, en sus tres estados ──
+    if (lead.qualified === null || lead.qualified === undefined) stats.qualifiedPending += 1;
+    else if (lead.qualified) stats.qualifiedYes += 1;
+    else stats.qualifiedNo += 1;
 
     const meeting = verdict.meeting;
     if (meeting) {
@@ -212,11 +351,36 @@ export function summarize(entries) {
       stats.open += 1;
       if (verdict.graduated) stats.openSales += 1;
       else stats.openSetter += 1;
+      /*
+       * Dormido solo se puede estar estando abierto: un ganado o un perdido
+       * que nadie vuelve a tocar está terminado, no abandonado. La antigüedad
+       * se cuenta desde el último movimiento y, si nunca se movió, desde que
+       * entró — que es el peor caso y el que más importa ver.
+       */
+      const quieto = daysBetween(movedAt || lead.created_at, ahora);
+      if (quieto !== null && quieto >= STALE_DAYS) {
+        stats.stale += 1;
+        staleDays.push(quieto);
+      }
+    }
+
+    /*
+     * La etapa afirma que hay cita y la agenda no la tiene. Se mira el status
+     * y no `verdict.meeting` a secas: lo que falla acá es que las dos cosas no
+     * coinciden, y la que se puede trabajar es la que el tablero muestra.
+     */
+    if (isAppointmentStatus(lead.status) && !(verdict.meeting?.active > 0)) {
+      stats.appointmentWithoutMeeting += 1;
     }
   }
 
   stats.daysToMeeting = median(toMeeting);
   stats.daysToWin = median(toWin);
+  stats.responseMedianMin = median(responses);
+  stats.humanResponseMedianMin = median(humanResponses);
+  const p90 = percentile(responses, 0.9);
+  stats.responseP90Min = p90 === null ? null : Math.round(p90 * 10) / 10;
+  stats.staleDaysMedian = median(staleDays);
   return withRates(stats);
 }
 
@@ -252,7 +416,22 @@ export function withRates(stats) {
      * reunión daba "200%". Una tasa que supera el 100% no es un dato, es un
      * aviso de que el numerador no pertenece al denominador.
      */
-    meetingToWinRate: ratio(stats.wonWithMeeting, stats.withMeeting)
+    meetingToWinRate: ratio(stats.wonWithMeeting, stats.withMeeting),
+    /*
+     * Qué porcentaje de los leads de este setter recibió alguna respuesta.
+     * Va como tasa y no solo como conteo porque es lo único comparable entre
+     * dos setters con carteras de tamaño distinto: "12 sin respuesta" es otra
+     * cosa sobre 20 leads que sobre 200.
+     */
+    responseRate: ratio(stats.leads - stats.noFirstResponse, stats.leads),
+    /*
+     * Cobertura de la calificación: sobre cuántos de sus leads este setter se
+     * pronunció. Es distinta de "cuántos calificó que SÍ" a propósito — lo
+     * primero mide si está haciendo el trabajo y lo segundo, su criterio, y
+     * confundirlas es como se llega a que un equipo que no registra nada se
+     * lea igual que uno que descarta todo.
+     */
+    qualificationCoverage: ratio(stats.qualifiedYes + stats.qualifiedNo, stats.leads)
   };
 }
 
@@ -309,6 +488,16 @@ export class SetterReportService {
           'leads.deal_cancelled_at',
           'leads.setter_user_id',
           'leads.assigned_user_id',
+          /*
+           * Cuándo se le contestó y quién, y la calificación comercial. Las
+           * tres son columnas del lead y no consultas aparte: medir la
+           * atención con el primer saliente de la conversación dejaba fuera al
+           * lead de formulario, que es la mayoría de lo que entra por anuncios
+           * (ver `leadFirstResponse.js` y la migración de `qualified`).
+           */
+          'leads.first_response_at',
+          'leads.first_response_by',
+          'leads.qualified',
           db.raw("DATE_FORMAT(leads.created_at, '%Y-%m') as month")
         ),
 
@@ -402,7 +591,7 @@ export class SetterReportService {
     const porSetter = new Map();
     const actuales = [];
     const anteriores = [];
-    const sinResponsable = { leads: 0, won: 0, withMeeting: 0 };
+    const sinResponsable = { leads: 0, won: 0, withMeeting: 0, noFirstResponse: 0 };
     /*
      * Las etapas del equipo entero se acumulan en la misma pasada y no sumando
      * después las listas de cada setter: esas vienen recortadas a las más
@@ -457,6 +646,13 @@ export class SetterReportService {
         sinResponsable.leads += 1;
         if (verdict.won) sinResponsable.won += 1;
         if (verdict.meeting?.active > 0) sinResponsable.withMeeting += 1;
+        /*
+         * El peor caso del reporte, y el que estaba partido en dos cifras que
+         * nadie cruzaba: un lead que no es de nadie y al que además nadie
+         * contestó. No aparece en ninguna fila de la tabla —no tiene setter a
+         * quien atribuirlo— y por eso tiene que decirse acá.
+         */
+        if (responseMinutes(row) === null) sinResponsable.noFirstResponse += 1;
         continue;
       }
 
@@ -503,7 +699,11 @@ export class SetterReportService {
           // no cuadren con la suma de sus filas, que es lo primero que se
           // revisa cuando un reporte no se entiende.
           formerMember: Boolean(persona?.formerMember) || !persona,
-          ...summarize(setter.entries),
+          // `now` viaja para que la antigüedad de la cartera dormida se mida
+          // contra el mismo instante en todas las filas: con `new Date()` por
+          // defecto dentro de cada llamada, dos setters de la misma corrida
+          // podrían caer a los dos lados del umbral de 7 días.
+          ...summarize(setter.entries, { now }),
           activity: {
             moves: Number(movimientos?.moves || 0),
             blocked: Number(movimientos?.blocked || 0),
@@ -520,8 +720,8 @@ export class SetterReportService {
       })
       .sort((a, b) => b.leads - a.leads || a.name.localeCompare(b.name, 'es'));
 
-    const actual = summarize(actuales);
-    const previo = summarize(anteriores);
+    const actual = summarize(actuales, { now });
+    const previo = summarize(anteriores, { now });
 
     const porMes = new Map(keys.map((key) => [key, []]));
     for (const entry of actuales) porMes.get(entry.lead.month)?.push(entry);
@@ -539,6 +739,15 @@ export class SetterReportService {
       months,
       generatedAt: now.toISOString(),
       scope: visibility.scope,
+      /*
+       * Los tramos de respuesta y el umbral de la cartera dormida viajan con
+       * el reporte en vez de estar copiados en la pantalla: son las etiquetas
+       * de una barra cuyos valores arma el servidor, y con una copia por lado
+       * basta agregar un tramo acá para que la barra reparta mal los colores
+       * sin que nada falle.
+       */
+      responseBuckets: RESPONSE_BUCKETS.map(({ key, label }) => ({ key, label })),
+      staleDays: STALE_DAYS,
       period: { months: keys, previous: prevKeys },
       team: actual,
       teamStages: topStages(etapasEquipo),
@@ -551,7 +760,18 @@ export class SetterReportService {
         meetingRate: puntos('meetingRate'),
         winRate: puntos('winRate'),
         meetingToWinRate: puntos('meetingToWinRate'),
-        daysToMeeting: puntos('daysToMeeting')
+        daysToMeeting: puntos('daysToMeeting'),
+        /*
+         * Los tres de atención. `noFirstResponse` va como KPI con variación
+         * —es un conteo y bajar está bien—, y los tiempos en puntos, como las
+         * tasas: una mediana que pasa de 0,3 a 0,6 minutos no es "+100%", es
+         * medio minuto.
+         */
+        noFirstResponse: kpi('noFirstResponse'),
+        responseMedianMin: puntos('responseMedianMin'),
+        responseP90Min: puntos('responseP90Min'),
+        qualificationCoverage: puntos('qualificationCoverage'),
+        stale: kpi('stale')
       },
       monthly: {
         months: keys,

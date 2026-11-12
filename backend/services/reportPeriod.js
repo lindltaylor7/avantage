@@ -69,6 +69,36 @@ export function percentChange(current, previous) {
   return Math.round(((cur - prev) / Math.abs(prev)) * 1000) / 10;
 }
 
+/**
+ * El percentil `p` (0 a 1) de una lista de números, por interpolación lineal.
+ *
+ * Vive acá y no en cada reporte porque es la respuesta a una pregunta que se
+ * hacen los tres —Campañas y el de Setters la publican hoy, el General la va a
+ * necesitar—: **la mediana sola engaña**. En el corte del 10/11/2026 la primera
+ * respuesta tenía una mediana de ~20 segundos (Avan acusa recibo al instante) y
+ * debajo de esa cifra había 62 leads atendidos después de 15 minutos y 51
+ * después de una hora. Una medida de centro no dice nada de la cola, y la cola
+ * es justo la parte que se arregla.
+ *
+ * El P90 por sí solo tampoco serviría: sin la mediana al lado no se distingue
+ * un equipo lento de uno rápido con unos pocos casos olvidados, y se corrigen
+ * distinto. Por eso las dos se publican juntas en las dos pantallas.
+ *
+ * Una lista vacía devuelve `null` y no 0: "nadie respondió todavía" no es
+ * "responden al instante", y un cero ahí haría ver como inmejorable justo al
+ * anuncio —o al setter— cuyos leads nadie atendió.
+ */
+export function percentile(values, p) {
+  const nums = values.filter((v) => typeof v === 'number' && Number.isFinite(v)).sort((x, y) => x - y);
+  if (!nums.length) return null;
+  if (nums.length === 1) return nums[0];
+  const pos = (nums.length - 1) * p;
+  const bajo = Math.floor(pos);
+  const alto = Math.ceil(pos);
+  if (bajo === alto) return nums[bajo];
+  return nums[bajo] + (nums[alto] - nums[bajo]) * (pos - bajo);
+}
+
 /** División que no explota: sin denominador no hay tasa. */
 export function ratio(part, total) {
   const t = Number(total) || 0;

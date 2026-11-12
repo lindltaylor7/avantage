@@ -89,6 +89,14 @@
                   <th scope="col" class="num">Cerrados</th>
                   <th scope="col" class="num">Cierre / reunión</th>
                   <th scope="col" class="num">Días a la reunión</th>
+                  <!--
+                    Las tres de atención y seguimiento. Van en la tabla y no solo
+                    en los gráficos porque son las que se comparan persona a
+                    persona cuando hay que decidir a quién pedirle qué.
+                  -->
+                  <th scope="col" class="num">Sin respuesta</th>
+                  <th scope="col" class="num">Calificados</th>
+                  <th scope="col" class="num">Dormidos</th>
                   <th scope="col" class="num">Sin mover</th>
                   <th scope="col" class="num">Movimientos</th>
                 </tr>
@@ -129,6 +137,23 @@
                   </td>
                   <td data-label="Cierre / reunión" class="num">{{ pct(s.meetingToWinRate) }}</td>
                   <td data-label="Días a la reunión" class="num">{{ days(s.daysToMeeting) }}</td>
+                  <td data-label="Sin respuesta" class="num">
+                    <strong :class="{ 'text-warn': s.noFirstResponse > 0 }">{{ integer(s.noFirstResponse) }}</strong>
+                    <span v-if="s.responseMedianMin !== null" class="sr-sub">
+                      med. {{ minutes(s.responseMedianMin) }} · P90 {{ minutes(s.responseP90Min) }}
+                    </span>
+                  </td>
+                  <td data-label="Calificados" class="num">
+                    {{ integer(s.qualifiedYes + s.qualifiedNo) }}
+                    <span class="sr-rate">{{ pct(s.qualificationCoverage) }}</span>
+                    <span v-if="s.qualifiedPending" class="sr-sub">
+                      {{ s.qualifiedPending }} sin calificar
+                    </span>
+                  </td>
+                  <td data-label="Dormidos" class="num">
+                    <span :class="{ 'text-warn': s.stale > 0 }">{{ integer(s.stale) }}</span>
+                    <span v-if="s.staleDaysMedian !== null" class="sr-sub">med. {{ days(s.staleDaysMedian) }}</span>
+                  </td>
                   <td data-label="Sin mover" class="num">
                     <span :class="{ 'text-warn': s.unmoved > 0 }">{{ integer(s.unmoved) }}</span>
                   </td>
@@ -158,6 +183,17 @@
                   </td>
                   <td data-label="Cierre / reunión" class="num">{{ pct(report.team.meetingToWinRate) }}</td>
                   <td data-label="Días a la reunión" class="num">{{ days(report.team.daysToMeeting) }}</td>
+                  <td data-label="Sin respuesta" class="num">
+                    <strong>{{ integer(report.team.noFirstResponse) }}</strong>
+                    <span v-if="report.team.responseMedianMin !== null" class="sr-sub">
+                      med. {{ minutes(report.team.responseMedianMin) }} · P90 {{ minutes(report.team.responseP90Min) }}
+                    </span>
+                  </td>
+                  <td data-label="Calificados" class="num">
+                    {{ integer(report.team.qualifiedYes + report.team.qualifiedNo) }}
+                    <span class="sr-rate">{{ pct(report.team.qualificationCoverage) }}</span>
+                  </td>
+                  <td data-label="Dormidos" class="num">{{ integer(report.team.stale) }}</td>
                   <td data-label="Sin mover" class="num">{{ integer(report.team.unmoved) }}</td>
                   <td data-label="Movimientos" class="num">{{ integer(totalMoves) }}</td>
                 </tr>
@@ -183,6 +219,26 @@
           <ReportStackedBars
             :rows="compositionRows"
             :series="COMPOSITION_SERIES"
+            category-label="Setter"
+            empty-text="Sin leads con responsable en el período."
+          />
+        </article>
+
+        <article class="sr-card sr-card-wide">
+          <header class="sr-card-head">
+            <h4>¿Cuánto esperó cada lead su primera respuesta?</h4>
+            <p>
+              El reparto de los leads de cada uno por lo que tardaron en recibir la primera
+              respuesta, venga de Avan, del panel o de una llamada anotada en la ficha. La mediana
+              del equipo la baja el acuse automático, que sale en segundos; lo que se mira acá es
+              el otro extremo: el azul más oscuro y, sobre todo, el rojo — un lead sin respuesta no
+              falla, simplemente nadie lo atendió. Pasa el mouse por un segmento para ver su
+              mediana y su P90.
+            </p>
+          </header>
+          <ReportStackedBars
+            :rows="responseRows"
+            :series="responseSeries"
             category-label="Setter"
             empty-text="Sin leads con responsable en el período."
           />
@@ -306,6 +362,29 @@
           Un lead sin responsable no lo ve nadie salvo quien reparte: se asignan desde el tablero
           o se configura el reparto automático.
         </p>
+        <p v-if="report.unassigned.noFirstResponse">
+          📵 De los leads sin responsable, {{ report.unassigned.noFirstResponse }}
+          tampoco {{ report.unassigned.noFirstResponse === 1 ? 'tiene' : 'tienen' }} ninguna
+          respuesta registrada. Es el peor caso del reporte y no aparece en ninguna fila de la
+          tabla: nadie los tiene asignados, así que no hay a quién pedírselos.
+        </p>
+        <p v-if="report.team.appointmentWithoutMeeting">
+          📅 {{ report.team.appointmentWithoutMeeting }}
+          lead{{ report.team.appointmentWithoutMeeting === 1 ? '' : 's' }} del período
+          {{ report.team.appointmentWithoutMeeting === 1 ? 'está' : 'están' }} en la etapa
+          «cita agendada» sin una reunión con fecha y hora detrás, así que no
+          {{ report.team.appointmentWithoutMeeting === 1 ? 'cuenta' : 'cuentan' }} en «Con reunión»:
+          el closer no la ve en su Calendario y el bot no manda el recordatorio. Se cargan con
+          «Agendar reunión» desde la ficha del lead.
+        </p>
+        <p>
+          ⏱️ La primera respuesta sale de la ficha del lead y cubre tanto el mensaje de WhatsApp
+          —lo mande Avan o una persona— como la primera nota, que es el único registro que deja una
+          llamada. Se publican la mediana y el P90 juntos porque la mediana es casi siempre el acuse
+          automático de Avan: una medida de centro no dice nada de la cola, y la cola es lo que se
+          arregla. Los leads «dormidos» son los que siguen abiertos y llevan más de
+          {{ report.staleDays }} días sin un solo movimiento.
+        </p>
         <p v-if="report.team.meetingsCancelled">
           🗑️ {{ report.team.meetingsCancelled }}
           reunión{{ report.team.meetingsCancelled === 1 ? '' : 'es' }} de estos leads
@@ -356,6 +435,17 @@ const COMPOSITION_SERIES = [
   { key: 'lost', label: 'Perdido', color: 'var(--viz-lost)' }
 ];
 
+/**
+ * La rampa de los tramos de respuesta, de más rápido a más lento. Los tramos
+ * y sus nombres los manda el servidor (`report.responseBuckets`), que es quien
+ * los calcula; acá solo se les pone color, en orden. Si algún día se agrega un
+ * tramo, el último color se repite en vez de romper la barra — y se ve, que es
+ * lo que hace falta para venir a agregar el tono que falta.
+ */
+const RESPONSE_COLORS = [
+  'var(--viz-resp-1)', 'var(--viz-resp-2)', 'var(--viz-resp-3)', 'var(--viz-resp-4)'
+];
+
 function readStoredMonths() {
   try {
     const n = Number(localStorage.getItem(STORAGE_KEY));
@@ -398,6 +488,21 @@ onMounted(load);
 
 // --- Formatos propios de esta pantalla ---
 const days = (v) => (v === null || v === undefined ? '—' : `${String(v).replace('.', ',')} d`);
+
+/**
+ * Minutos escritos como los diría una persona. Un "0,3 min" no se entiende de
+ * un vistazo y es justo el valor que más aparece: el acuse de Avan sale en
+ * segundos, así que por debajo del minuto se escribe en segundos.
+ */
+function minutes(v) {
+  if (v === null || v === undefined) return '—';
+  const n = Number(v);
+  if (n < 1) return `${Math.round(n * 60)} s`;
+  if (n < 60) return `${String(Math.round(n * 10) / 10).replace('.', ',')} min`;
+  const horas = Math.floor(n / 60);
+  const resto = Math.round(n % 60);
+  return resto ? `${horas} h ${resto} min` : `${horas} h`;
+}
 
 const shortMonth = (key) => shortMonthOf(key, months.value === 12);
 const monthLabels = computed(() => report.value.monthly.months.map(shortMonth));
@@ -481,6 +586,42 @@ const kpiTiles = computed(() => {
       previous: days(k.daysToMeeting.previous),
       note: 'Mediana desde que entra el lead'
     },
+    /*
+     * Los cuatro de atención. Van juntos y en este orden porque se leen como
+     * una sola frase: a cuántos no se les contestó, cuánto tardó el caso
+     * típico y cuánto el caso malo. La mediana sola decía ~20 segundos en un
+     * período con 51 leads esperando más de una hora, así que el P90 va al
+     * lado y no escondido en un gráfico.
+     */
+    {
+      key: 'noResponse', label: 'Leads sin respuesta', value: integer(k.noFirstResponse.current),
+      valueClass: t.noFirstResponse > 0 ? 'text-warn' : '',
+      // Menos es mejor: la flecha dice qué pasó y el color, si está bien.
+      delta: delta(k.noFirstResponse.change, { higherIsBetter: false }),
+      previous: integer(k.noFirstResponse.previous),
+      note: t.responseRate !== null ? `Se contestó al ${pct(t.responseRate)} de los leads` : null
+    },
+    {
+      key: 'responseTime', label: '1ª respuesta (mediana)', value: minutes(t.responseMedianMin),
+      note: t.responseP90Min !== null
+        ? `P90: ${minutes(t.responseP90Min)} · 1 de cada 10 esperó al menos eso`
+        : null
+    },
+    {
+      key: 'humanResponse', label: 'Atención humana (mediana)', value: minutes(t.humanResponseMedianMin),
+      note: `${integer(t.respondedByHuman)} de ${integer(t.leads)} contestados por alguien del panel`
+    },
+    {
+      key: 'qualification', label: 'Calificación registrada', value: pct(t.qualificationCoverage),
+      valueClass: (t.qualificationCoverage || 0) < 50 ? 'text-warn' : '',
+      note: `${integer(t.qualifiedPending)} ${t.qualifiedPending === 1 ? 'lead' : 'leads'} sin calificar`
+    },
+    {
+      key: 'stale', label: `Dormidos +${report.value.staleDays} días`, value: integer(t.stale),
+      valueClass: t.stale > 0 ? 'text-warn' : '',
+      delta: delta(k.stale.change, { higherIsBetter: false }), previous: integer(k.stale.previous),
+      note: t.staleDaysMedian !== null ? `Mediana: ${days(t.staleDaysMedian)} sin moverse` : null
+    },
     {
       key: 'unmoved', label: 'Leads sin un solo movimiento', value: integer(t.unmoved),
       valueClass: t.unmoved > 0 ? 'text-warn' : '',
@@ -488,6 +629,34 @@ const kpiTiles = computed(() => {
     }
   ];
 });
+
+/** Las series de la barra de atención: los tramos del servidor + la ausencia. */
+const responseSeries = computed(() => [
+  ...(report.value.responseBuckets || []).map((bucket, i) => ({
+    key: bucket.key,
+    label: bucket.label,
+    color: RESPONSE_COLORS[i] || RESPONSE_COLORS[RESPONSE_COLORS.length - 1]
+  })),
+  { key: 'none', label: 'Sin respuesta', color: 'var(--viz-resp-none)' }
+]);
+
+/**
+ * Una fila por setter con el reparto de sus leads por tiempo de respuesta. El
+ * total es SUS leads, así que los cinco segmentos cierran siempre al 100% y
+ * dos personas con carteras de tamaño distinto se pueden comparar.
+ */
+const responseRows = computed(() => report.value.setters.map((s) => ({
+  key: String(s.id),
+  label: s.name,
+  total: s.leads,
+  totalText: `${integer(s.leads)} ${s.leads === 1 ? 'lead' : 'leads'}`,
+  values: { ...s.responseBuckets, none: s.noFirstResponse },
+  hints: {
+    none: s.responseMedianMin !== null
+      ? `De los contestados: mediana ${minutes(s.responseMedianMin)} · P90 ${minutes(s.responseP90Min)}`
+      : 'A ninguno de sus leads le quedó una respuesta registrada'
+  }
+})));
 
 // --- Puntos clave ---
 /** Con menos de esto, un porcentaje es anécdota y no un dato comparable. */
@@ -524,6 +693,48 @@ const highlights = computed(() => {
     list.push({
       icon: '🎯', tone: 'neutral',
       text: `La mejor tasa de reunión es de ${mejorTasa.name}: ${pct(mejorTasa.meetingRate)} con ${mejorTasa.leads} leads.`
+    });
+  }
+
+  /*
+   * La atención va arriba de todo cuando hay leads sin contestar: de los
+   * hallazgos del reporte es el único que se puede arreglar hoy mismo y el
+   * único donde cada día que pasa cuesta un lead. Se nombra el P90 y no la
+   * mediana a propósito — la mediana es el acuse de Avan y no dice nada del
+   * lead que nadie atendió.
+   */
+  const t = report.value.team;
+  if (t.noFirstResponse > 0) {
+    list.unshift({
+      icon: '📵', tone: 'bad',
+      text: `${t.noFirstResponse} de ${t.leads} leads del período no tienen ninguna respuesta registrada`
+        + (t.responseP90Min !== null ? `, y 1 de cada 10 de los que sí esperó al menos ${minutes(t.responseP90Min)}.` : '.')
+    });
+  }
+
+  const lento = setters
+    .filter((s) => s.leads >= MIN_LEADS_PARA_TASA && s.noFirstResponse > 0)
+    .sort((a, b) => (b.noFirstResponse / b.leads) - (a.noFirstResponse / a.leads))[0];
+  if (lento && setters.length > 1) {
+    list.push({
+      icon: '⏱️', tone: 'warn',
+      text: `${lento.name} es quien más leads tiene sin contestar: ${lento.noFirstResponse} de ${lento.leads}.`
+    });
+  }
+
+  if (t.qualificationCoverage !== null && t.qualificationCoverage < 50) {
+    list.push({
+      icon: '🏷️', tone: 'warn',
+      text: `Solo el ${pct(t.qualificationCoverage)} de los leads tiene calificación registrada: sin ella no se`
+        + ' puede medir la calidad de ningún anuncio, que es para lo único que sirve esa marca.'
+    });
+  }
+
+  if (t.appointmentWithoutMeeting > 0) {
+    list.push({
+      icon: '📅', tone: 'warn',
+      text: `${t.appointmentWithoutMeeting} lead${t.appointmentWithoutMeeting === 1 ? ' está' : 's están'} en`
+        + ' «cita agendada» sin una reunión con fecha y hora: nadie puede ir a buscarla en la agenda.'
     });
   }
 
@@ -644,6 +855,30 @@ const monthlyExtras = computed(() => monthlySource.value.months.map((_, i) => {
   --viz-meet: #A64D8C;
   --viz-won: #6F8125;
   --viz-lost: #D03B3B;
+
+  /*
+   * Los tramos de la primera respuesta son datos ORDENADOS y no categorías, así
+   * que van en una rampa de un solo tono —más oscuro cuanto más esperó el
+   * lead— y no en cuatro colores distintos: una escala secuencial se lee en
+   * orden sin leyenda y es la única que sobrevive a cualquier daltonismo,
+   * porque la diferencia es de claridad y no de tono. "Sin respuesta" queda
+   * fuera de la rampa en rojo porque no es un tiempo más largo: es la ausencia
+   * de respuesta, y mezclarla al final del azul la haría leer como "muy lento".
+   *
+   * Los cinco tonos están elegidos contra el BLANCO y no contra el fondo de la
+   * página: el valor va escrito en blanco dentro de cada segmento
+   * (`.rsb-seg-value`) y los segmentos cubren la barra entera, así que el fondo
+   * nunca se ve por detrás. Todos pasan 4.5:1 con blanco (4,51 · 6,53 · 9,63 ·
+   * 13,93 · 6,54) y los pares contiguos quedan en ΔE 10,6 a 13,1, también
+   * simulando deuteranopía. Por eso mismo son los mismos en los dos temas: lo
+   * que tiene que contrastar es el texto de adentro, que es blanco en ambos.
+   */
+  --viz-resp-1: #4178BE;
+  --viz-resp-2: #2F5E9E;
+  --viz-resp-3: #1F4578;
+  --viz-resp-4: #122C52;
+  --viz-resp-none: #B3261E;
+
   padding: var(--page-py) var(--page-px) var(--page-pb);
 }
 :root[data-theme="dark"] .setter-report-page {

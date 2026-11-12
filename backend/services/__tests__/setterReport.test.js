@@ -5,6 +5,7 @@ import {
   classifyLead,
   daysBetween,
   median,
+  responseMinutes,
   summarize,
   topStages,
   withRates
@@ -209,4 +210,150 @@ test('topStages agrupa la cola en vez de dibujar una barra por etapa', () => {
 
   // Con pocas etapas no se agrupa nada.
   assert.equal(topStages(etapas, 20).length, 9);
+});
+
+/* ───────────── Atención: a quién se le contestó, cuándo y quién ─────────────
+ *
+ * Lo que el reporte no sabía medir hasta la auditoría comercial del corte del
+ * 10/11/2026: 109 de 450 leads sin una sola respuesta, y una mediana de ~20
+ * segundos que los tapaba a todos porque medía el acuse automático de Avan.
+ */
+
+test('responseMinutes mide desde que entró el lead hasta la marca de la ficha', () => {
+  assert.equal(
+    responseMinutes({ created_at: '2026-10-01T10:00:00Z', first_response_at: '2026-10-01T10:04:30Z' }),
+    4.5
+  );
+  /*
+   * Sin marca no hay cero: "nadie contestó" no es "contestaron al instante", y
+   * un 0 ahí mejoraría la mediana del setter justo con los leads que no
+   * atendió. Es la misma regla con la que el exportable separa el cobrado CERO
+   * del cobrado DESCONOCIDO.
+   */
+  assert.equal(responseMinutes({ created_at: '2026-10-01T10:00:00Z', first_response_at: null }), null);
+  // Una respuesta anterior al alta de la ficha es "al instante": pasa cuando
+  // el bot contesta y la ficha se cuelga después (misma lectura que daysBetween).
+  assert.equal(
+    responseMinutes({ created_at: '2026-10-01T10:05:00Z', first_response_at: '2026-10-01T10:00:00Z' }),
+    0
+  );
+});
+
+test('los tramos de respuesta más los sin respuesta suman siempre los leads', () => {
+  const lead = (id, min, by = null) => ({
+    id,
+    status: 'calificando',
+    created_at: '2026-10-01T10:00:00Z',
+    first_response_at: min === null ? null : new Date(Date.parse('2026-10-01T10:00:00Z') + min * 60000),
+    first_response_by: by
+  });
+
+  const stats = summarize([
+    entrada(lead(1, 0.3), {}),      // acuse de Avan
+    entrada(lead(2, 12, 4), {}),    // una persona, dentro del cuarto de hora
+    entrada(lead(3, 45, 4), {}),
+    entrada(lead(4, 180, 4), {}),   // el caso que la mediana escondía
+    entrada(lead(5, null), {})      // nadie le contestó nunca
+  ]);
+
+  assert.deepEqual(stats.responseBuckets, { under5: 1, under15: 1, under60: 1, over60: 1 });
+  assert.equal(stats.noFirstResponse, 1);
+  // La propiedad que sostiene la barra: si los tramos no suman el total, la
+  // barra reparte mal los porcentajes y nadie se entera.
+  const enTramos = Object.values(stats.responseBuckets).reduce((a, b) => a + b, 0);
+  assert.equal(enTramos + stats.noFirstResponse, stats.leads);
+  assert.equal(stats.responseRate, 80);
+});
+
+test('la mediana la baja el acuse de Avan y el P90 muestra al que esperó', () => {
+  const lead = (id, min, by = null) => ({
+    id,
+    status: 'calificando',
+    created_at: '2026-10-01T10:00:00Z',
+    first_response_at: new Date(Date.parse('2026-10-01T10:00:00Z') + min * 60000),
+    first_response_by: by
+  });
+
+  const stats = summarize([
+    entrada(lead(1, 0.3), {}), entrada(lead(2, 0.3), {}), entrada(lead(3, 0.4), {}),
+    entrada(lead(4, 0.5), {}), entrada(lead(5, 0.5), {}), entrada(lead(6, 0.6), {}),
+    entrada(lead(7, 0.6), {}), entrada(lead(8, 0.7), {}),
+    entrada(lead(9, 90, 4), {}), entrada(lead(10, 180, 4), {})
+  ]);
+
+  assert.equal(stats.responseMedianMin, 0.6, 'la mediana es el acuse automático');
+  assert.ok(stats.responseP90Min > 90, 'el P90 señala al lead que esperó horas');
+  /*
+   * Y la atención HUMANA aparte: los dos que esperó una persona. Con las dos
+   * mezcladas, el funnel se presentaba atendido en medio minuto.
+   */
+  assert.equal(stats.respondedByHuman, 2);
+  assert.equal(stats.humanResponseMedianMin, 135);
+});
+
+test('la calificación comercial se cuenta en sus tres estados', () => {
+  const lead = (id, qualified) => ({
+    id, status: 'calificando', created_at: '2026-10-01T10:00:00Z', qualified
+  });
+
+  const stats = summarize([
+    entrada(lead(1, true), {}),
+    entrada(lead(2, false), {}),
+    entrada(lead(3, null), {}),
+    entrada(lead(4, undefined), {})
+  ]);
+
+  /*
+   * El vacío NO es un "no": separa al lead que nadie revisó del revisado y
+   * descartado, y en el corte del 10/11/2026 los 450 estaban sin revisar. La
+   * cobertura mide si el setter hace el trabajo; cuántos calificó que SÍ mide
+   * su criterio, que es otra cosa.
+   */
+  assert.equal(stats.qualifiedYes, 1);
+  assert.equal(stats.qualifiedNo, 1);
+  assert.equal(stats.qualifiedPending, 2);
+  assert.equal(stats.qualificationCoverage, 50);
+});
+
+test('la cita que no tiene reunión detrás se cuenta aparte de las conseguidas', () => {
+  const ctx = {
+    meetingsByLead: new Map([
+      [1, { active: 1, cancelled: 0, manual: 0, firstBookedAt: '2026-10-03T10:00:00Z' }]
+    ])
+  };
+
+  const stats = summarize([
+    entrada({ id: 1, status: 'cita_agendada', created_at: '2026-10-01T10:00:00Z' }, { ctx }),
+    entrada({ id: 2, status: 'cita_agendada', created_at: '2026-10-01T10:00:00Z' }, { ctx }),
+    entrada({ id: 3, status: 'calificando', created_at: '2026-10-01T10:00:00Z' }, { ctx })
+  ]);
+
+  /*
+   * El lead 2 dice "cita agendada" en el tablero y no hay ninguna reunión con
+   * fecha y hora: el closer no la ve en su Calendario y el bot no manda el
+   * recordatorio. Es lo que explica que el funnel cuente 43 citas y la agenda
+   * tenga 36 — sin esta cifra, la resta parece un error del reporte.
+   */
+  assert.equal(stats.withMeeting, 1);
+  assert.equal(stats.appointmentWithoutMeeting, 1);
+});
+
+test('solo un lead abierto puede estar dormido, y se cuenta desde su último movimiento', () => {
+  const ahora = new Date('2026-11-10T10:00:00Z');
+  const lead = (id, status) => ({ id, status, created_at: '2026-10-01T10:00:00Z' });
+
+  const stats = summarize([
+    // Abierto y sin tocar desde hace 20 días: dormido.
+    entrada(lead(1, 'calificando'), { movedAt: '2026-10-21T10:00:00Z' }),
+    // Abierto y movido ayer: despierto.
+    entrada(lead(2, 'calificando'), { movedAt: '2026-11-09T10:00:00Z' }),
+    // Perdido hace un mes: terminado, no abandonado — no cuenta.
+    entrada(lead(3, 'perdido'), { movedAt: '2026-10-05T10:00:00Z' }),
+    // Abierto y que nadie movió nunca: se cuenta desde que entró, que es el
+    // peor caso y el que más importa ver.
+    entrada(lead(4, 'conversacion_abierta'), {})
+  ], { now: ahora });
+
+  assert.equal(stats.stale, 2);
+  assert.equal(stats.staleDaysMedian, 30, 'mediana entre 20 y 40 días');
 });

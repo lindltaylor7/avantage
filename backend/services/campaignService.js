@@ -6,7 +6,8 @@ import { PHONE_MATCH_KEY_SQL, phoneMatchKey } from './leadService.js';
 import { LEAD_ORIGIN_COLUMNS, bareSourceId, leadOrigin, onlyGreeted } from './leadOrigin.js';
 import { LEVELS, SPEND_LEVEL, levelLabel } from './smartPlusLevel.js';
 import { GENERIC_CONTACT_NAME } from './contactName.js';
-import { LOST_STATUSES, loadWinningStatuses } from './salesFunnelStage.js';
+import { APPOINTMENT_STATUSES, LOST_STATUSES, loadWinningStatuses } from './salesFunnelStage.js';
+import { percentile } from './reportPeriod.js';
 
 /**
  * Campañas de marketing digital: definición manual (nombre, presupuesto,
@@ -47,26 +48,14 @@ function median(values) {
   return nums.length % 2 ? nums[mid] : (nums[mid - 1] + nums[mid]) / 2;
 }
 
-/**
- * El percentil `p` (0 a 1) de una lista de números, por interpolación lineal.
- *
- * Va al lado de la mediana porque sin él la mediana engaña: en el corte del
- * 10/11/2026 la primera respuesta tenía una mediana de ~20 segundos —Avan
- * contesta al instante— y, debajo de esa cifra, 51 leads esperando más de una
- * hora. Una medida de centro no puede decir nada de la cola, y la cola es
- * justo la parte que se arregla. Se publica el P90 junto a la mediana para
- * que las dos se lean a la vez.
+/*
+ * El P90 de la primera respuesta sale de `reportPeriod.js`, el módulo de
+ * aritmética que comparten los reportes: la pregunta ("¿qué esconde la
+ * mediana?") es la misma acá y en el Reporte de Setters, y con una copia por
+ * pantalla las dos terminarían midiendo la cola distinto. Se re-exporta porque
+ * la prueba que fija su comportamiento vive al lado de este reporte.
  */
-export function percentile(values, p) {
-  const nums = values.filter((v) => typeof v === 'number' && !Number.isNaN(v)).sort((x, y) => x - y);
-  if (!nums.length) return null;
-  if (nums.length === 1) return nums[0];
-  const pos = (nums.length - 1) * p;
-  const bajo = Math.floor(pos);
-  const alto = Math.ceil(pos);
-  if (bajo === alto) return nums[bajo];
-  return nums[bajo] + (nums[alto] - nums[bajo]) * (pos - bajo);
-}
+export { percentile };
 
 const AD_IMAGE_MIME_TYPES = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' };
 
@@ -86,7 +75,6 @@ const AD_IMAGE_MIME_TYPES = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image
  * la misma pregunta con tres listas propias es exactamente como se llega a que
  * cada una diga un número distinto.
  */
-const APPOINTMENT_STATUSES = new Set(['cita_agendada']);
 
 /**
  * ¿Esta venta está cerrada? Tres caminos, y hacen falta los tres.

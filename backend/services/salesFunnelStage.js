@@ -88,6 +88,24 @@ export function isLostStatus(status) {
   return LOST_STATUSES.has(status);
 }
 
+/**
+ * La etapa que afirma que hay una cita.
+ *
+ * Es un desenlace fijo y no una columna configurable: `cita_agendada` es el que
+ * pone el bot al reservar el bloque, y de él cuelga que el reporte cuente una
+ * cita. Vive acá —el módulo del vocabulario de `leads.status`, igual que
+ * `LOST_STATUSES`— porque lo preguntan dos reportes: el de Campañas, para
+ * contar las citas de un anuncio, y el de Setters, para señalar las que no
+ * tienen reunión detrás. Con una copia en cada uno, el día que la etapa cambie
+ * de nombre una de las dos pantallas deja de contarlas sin que nada falle.
+ */
+export const APPOINTMENT_STATUSES = new Set(['cita_agendada']);
+
+/** ¿Este status dice que el lead tiene una cita? */
+export function isAppointmentStatus(status) {
+  return APPOINTMENT_STATUSES.has(status);
+}
+
 export async function loadWinningStatuses() {
   const columns = await db('funnel_columns').where({ final: true }).select('key');
   return new Set(['ganado', ...columns.map((column) => column.key)]);

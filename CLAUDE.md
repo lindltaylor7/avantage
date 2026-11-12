@@ -1836,6 +1836,47 @@ antes de tocar el arranque de producción.
   La aritmética del período (`reportPeriod.js`) y los formatos de cifra y de variación
   (`src/components/report/reportFormat.js`) se comparten con el Reporte General: con una copia por
   pantalla, el mismo mes se leería distinto según desde dónde se mire.
+  Desde el 12/11/2026 mide además **la atención**, que es lo que la auditoría comercial del corte
+  del 10/11/2026 encontró que el reporte no sabía contestar. Son cuatro cifras y no una:
+  `noFirstResponse` (leads a los que NADIE contestó: 109 de 450 en ese corte), la **mediana**, el
+  **P90** y la **mediana de la respuesta humana**. Van juntas porque una sola engaña —la mediana
+  del equipo era de ~20 segundos, que es Avan acusando recibo, con 62 leads atendidos después de 15
+  minutos y 51 después de una hora debajo—: una medida de centro no dice nada de la cola y la cola
+  es lo que se arregla, y el P90 solo tampoco serviría, porque sin la mediana al lado no se
+  distingue un equipo lento de uno rápido con unos pocos casos olvidados. El dato sale de
+  `leads.first_response_at` / `_by` (`responseMinutes()`), que cubre el mensaje de WhatsApp y la
+  primera nota de la ficha —el único registro que deja una llamada—: medido como el primer saliente
+  de la conversación, el lead de formulario que nunca escribió por WhatsApp salía siempre vacío.
+  Se publica la **distribución en tramos** (`RESPONSE_BUCKETS`) y **no el cumplimiento de un SLA**:
+  el SLA no existe todavía —la auditoría propuso cinco minutos en horario comercial, que es una
+  decisión del área con su definición de horario—, y un «cumple el 62%» contra una meta que nadie
+  acordó es una cifra que no se puede discutir. Los tramos son excluyentes y su suma más
+  `noFirstResponse` es siempre el total de leads, que es lo que sostiene la barra.
+  Dos cifras más del mismo origen: la **cobertura de calificación** en sus tres estados (el vacío no
+  es un «no» — separa al lead que nadie revisó del revisado y descartado, y mide si el setter hace
+  el trabajo, que es distinto de su criterio) y la **cartera dormida** (`STALE_DAYS`, 7): leads
+  todavía abiertos sin un solo movimiento en más de una semana. 7 y no 30 porque los 50 congelados
+  del corte llevaban una mediana de 16,5 días, y con el umbral en un mes ninguno habría aparecido —
+  que es exactamente cómo se llega a tener medio centenar de fichas que nadie mira. Dormido solo se
+  puede estar estando abierto: un ganado o un perdido que nadie toca está terminado, no abandonado.
+  Y `appointmentWithoutMeeting`, que es el lead en la etapa «cita agendada» **sin** una reunión con
+  fecha y hora: se cuenta aparte de `withMeeting` porque es lo que explica que el funnel diga 43
+  citas y la agenda tenga 36 — sin esa cifra, la resta parece un error del reporte. La etapa se
+  pregunta con `isAppointmentStatus()` de `salesFunnelStage.js`, el módulo del vocabulario de
+  `leads.status`, que es el mismo que usa Campañas: con una copia en cada reporte, el día que la
+  etapa cambie de nombre una de las dos pantallas deja de contarlas sin que nada falle.
+  La rampa de los tramos de respuesta es **secuencial de un solo tono** (`--viz-resp-1..4`, azul de
+  claro a oscuro) más el rojo de «sin respuesta», y no cuatro colores distintos: son datos
+  ordenados, una escala de claridad se lee en orden sin leyenda y es la única que sobrevive a
+  cualquier daltonismo. «Sin respuesta» queda **fuera** de la rampa porque no es un tiempo más
+  largo sino la ausencia de respuesta, y al final del azul se leería como «muy lento». Los cinco
+  tonos están validados contra el **blanco** y no contra el fondo de la página —el valor va escrito
+  en blanco dentro de cada segmento y los segmentos cubren la barra entera—: todos pasan 4.5:1 y
+  los pares contiguos quedan en ΔE 10,6 a 13,1, también simulando deuteranopía. Por eso son los
+  mismos en los dos temas.
+  `percentile()` vive en `reportPeriod.js` y no en cada reporte: la pregunta («¿qué esconde la
+  mediana?») es la misma acá y en Campañas, y con una copia por pantalla las dos medirían la cola
+  distinto.
 - Los botones de barra y de fila del panel (`.btn-action-primary` / `-secondary` / `-ghost`), el
   encabezado de los modales (`.modal-title`, `.modal-close-btn`) y `.heading-icon` viven en
   `src/style.css`. Estaban copiados dentro del `<style scoped>` de cada vista, así que una pantalla
