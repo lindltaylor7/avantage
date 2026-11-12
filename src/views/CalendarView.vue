@@ -316,6 +316,7 @@
 </template>
 
 <script setup>
+import { meetingCreatedNotice } from '../meetingNotice.js';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { apiFetch } from '../apiClient.js';
 import { authState } from '../auth.js';
@@ -815,10 +816,8 @@ function openCreate(dateIso, time) {
 }
 
 function onCreated(data) {
-  notice.value = data.calendarError
-    ? `Reunión guardada, pero sin evento en Google Calendar (${data.calendarError})`
-    : '✅ Reunión agendada y enviada al calendario del asesor.';
-  setTimeout(() => { notice.value = ''; }, 8000);
+  notice.value = meetingCreatedNotice(data);
+  setTimeout(() => { notice.value = ''; }, 14000);
   load();
 }
 

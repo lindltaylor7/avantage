@@ -124,6 +124,11 @@ export class ScheduledMeetingService {
     let evento = null;
     let calendarError = null;
     let calendarOwner = null;
+    // Por qué el calendario del asesor no aceptó el evento, si no lo aceptó.
+    // `calendarError` se limpia cuando el respaldo funciona, y sin esto la
+    // pantalla decía "agendada en el calendario del asesor" con el evento en
+    // el calendario de otra persona (caso del 12/11/2026).
+    let advisorCalendarError = null;
 
     if (this.google) {
       for (const candidato of candidatos) {
@@ -143,6 +148,7 @@ export class ScheduledMeetingService {
           break;
         } catch (error) {
           calendarError = error.message;
+          if (candidato.userId === advisorUserId) advisorCalendarError = error.message;
         }
       }
     } else {
@@ -182,7 +188,17 @@ export class ScheduledMeetingService {
       calendarError = 'Google creó el evento pero no generó el enlace de Meet; revisa los permisos de Meet de esa cuenta.';
     }
 
-    return { meeting: await this.getById(meeting.id), calendarError, calendarOwner };
+    /*
+     * Dónde quedó el evento, dicho para la pantalla. Si no fue en el
+     * calendario del asesor, el que agenda tiene que enterarse de que lo va a
+     * encontrar en el SUYO (y de por qué), o lo busca en el del asesor y
+     * concluye que no se agendó.
+     */
+    const calendarFallback = evento && calendarOwner !== advisorUserId
+      ? { reason: advisorCalendarError || 'El asesor no tiene su Google Calendar conectado.' }
+      : null;
+
+    return { meeting: await this.getById(meeting.id), calendarError, calendarOwner, calendarFallback };
   }
 
   /**
