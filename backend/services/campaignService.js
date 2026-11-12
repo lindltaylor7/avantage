@@ -47,6 +47,27 @@ function median(values) {
   return nums.length % 2 ? nums[mid] : (nums[mid - 1] + nums[mid]) / 2;
 }
 
+/**
+ * El percentil `p` (0 a 1) de una lista de números, por interpolación lineal.
+ *
+ * Va al lado de la mediana porque sin él la mediana engaña: en el corte del
+ * 10/11/2026 la primera respuesta tenía una mediana de ~20 segundos —Avan
+ * contesta al instante— y, debajo de esa cifra, 51 leads esperando más de una
+ * hora. Una medida de centro no puede decir nada de la cola, y la cola es
+ * justo la parte que se arregla. Se publica el P90 junto a la mediana para
+ * que las dos se lean a la vez.
+ */
+export function percentile(values, p) {
+  const nums = values.filter((v) => typeof v === 'number' && !Number.isNaN(v)).sort((x, y) => x - y);
+  if (!nums.length) return null;
+  if (nums.length === 1) return nums[0];
+  const pos = (nums.length - 1) * p;
+  const bajo = Math.floor(pos);
+  const alto = Math.ceil(pos);
+  if (bajo === alto) return nums[bajo];
+  return nums[bajo] + (nums[alto] - nums[bajo]) * (pos - bajo);
+}
+
 const AD_IMAGE_MIME_TYPES = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' };
 
 /*
@@ -602,6 +623,17 @@ export class CampaignService {
           // La calificación del setter es un dato propio del lead y ya no se
           // deduce de su etapa (ver la migración de `qualified`).
           'qualified', 'qualified_at',
+          /*
+           * A este lead ya se le contestó, y quién. Es una COLUMNA del lead y
+           * no el primer saliente de su conversación de WhatsApp, que es como
+           * se calculaba acá: el lead de formulario que nunca escribió por
+           * WhatsApp no tiene conversación, así que salía con la celda vacía
+           * y "no se le contactó" y "se le llamó y nadie lo registró" se
+           * escribían igual (109 de 450 leads en el corte del 10/11/2026).
+           * `first_response_by` nulo = contestó Avan o llegó por el eco de la
+           * app de WhatsApp Business, la misma convención que `sent_by`.
+           */
+          'first_response_at', 'first_response_by',
           // Con qué se decide si el contacto dejó algo con lo que trabajar o
           // solo saludó (ver `onlyGreeted`): sin la universidad, un lead que
           // sí contó dónde estudia figuraría como que solo saludó.
@@ -652,6 +684,21 @@ export class CampaignService {
       if (!previo || esMejorLead(lead, previo, wonStatuses)) leadByWa.set(key, lead);
     }
     const leadById = new Map(leads.map((l) => [l.id, l]));
+    /*
+     * Quién contestó primero, por su nombre. Hace falta para separar el ACUSE
+     * —Avan, que responde en segundos— de la ATENCIÓN HUMANA, que es la que
+     * de verdad mueve al lead: con las dos mezcladas en una sola cifra, la
+     * mediana de 20 segundos del corte del 10/11/2026 daba por atendido un
+     * funnel con 51 leads esperando más de una hora a que alguien les
+     * escribiera.
+     */
+    const responderIds = [...new Set(leads.map((l) => l.first_response_by).filter(Boolean))];
+    const responderById = new Map(
+      responderIds.length
+        ? (await db('users').whereIn('id', responderIds).select('id', 'name'))
+          .map((u) => [u.id, u.name])
+        : []
+    );
     const sessionByWa = new Map(sessions.map((s) => [s.wa_id, s]));
     const meetingByWa = new Map();
     const meetingByLead = new Map();
@@ -761,7 +808,20 @@ export class CampaignService {
         || null;
       const firstOut = a.waId ? firstOutByWa.get(a.waId) || null : null;
 
-      const responded = !!firstOut;
+      /*
+       * Cuándo se le contestó por primera vez a este lead.
+       *
+       * Gana la marca de la ficha (`leads.first_response_at`) y el primer
+       * saliente de WhatsApp queda de respaldo para el contacto que escribió y
+       * al que nadie registró como lead. La marca cubre los dos caminos por
+       * los que de verdad se contesta —cualquier saliente de WhatsApp y la
+       * primera nota de la ficha, que es el único registro que deja una
+       * llamada—, así que es la que reconoce al lead de formulario que nunca
+       * escribió por WhatsApp. Ver `leadFirstResponse.js`.
+       */
+      const firstResponseAt = lead?.first_response_at || firstOut || null;
+      const responderId = lead?.first_response_at ? lead.first_response_by : null;
+      const responded = !!firstResponseAt;
       const qualified = (session && session.status === 'completed')
         || (lead && lead.overall_viability_score != null)
         || (lead && !['nuevo'].includes(lead.status));
@@ -769,7 +829,19 @@ export class CampaignService {
       const won = isWonLead(lead, wonStatuses, wonProjectLeadIds, paidLeadIds);
       const lost = lead && LOST_STATUSES.has(lead.status);
 
-      const quote = won && lead ? quoteByLead.get(lead.id) : null;
+      /*
+       * La cotización del lead, lo haya ganado o no.
+       *
+       * Estaba condicionada a `won`, así que el valor del pipeline ABIERTO era
+       * invisible: en el corte del 10/11/2026 había 63 oportunidades en
+       * "Cotización / propuesta" y las 63 salían con cotizado 0, de modo que
+       * no se podía saber cuánto dinero había en juego, ni qué descuento se
+       * ofreció, ni qué tan efectivas son las propuestas — que es justo lo que
+       * se mira para decidir si el problema es el anuncio o el cierre. Lo que
+       * se cotizó es un hecho con fecha propia y no un atributo de haber
+       * ganado; que la venta se cierre o no es otra columna.
+       */
+      const quote = lead ? quoteByLead.get(lead.id) : null;
       /*
        * `null` es "no se puede saber" y `0` es "no entró nada", y son dos
        * cosas distintas que estaban colapsadas en cero. Un contacto SIN ficha
@@ -804,7 +876,23 @@ export class CampaignService {
         lead,
         leadStatus: lead?.status || null,
         viability: lead?.overall_viability_score ?? null,
-        firstResponseMinutes: minutesBetween(a.firstMessageAt, firstOut),
+        firstResponseMinutes: minutesBetween(a.firstMessageAt, firstResponseAt),
+        /*
+         * Quién contestó, y el tiempo de la respuesta HUMANA por separado.
+         *
+         * Son dos relojes distintos y hay que medirlos distinto: el acuse de
+         * Avan sale en segundos y la atención de una persona es la que mueve
+         * al lead. Promediados en una sola cifra, el funnel se ve atendido
+         * —mediana de 20 segundos— con 51 leads esperando más de una hora. El
+         * responsable nulo es "Avan o el eco de la app de WhatsApp Business",
+         * la misma convención que `whatsapp_messages.sent_by`, así que no se
+         * afirma que contestó el bot: se dice que no fue nadie del panel.
+         */
+        firstResponseBy: responderId ? responderById.get(responderId) || null : null,
+        firstResponseIsHuman: !!responderId,
+        humanFirstResponseMinutes: responderId
+          ? minutesBetween(a.firstMessageAt, firstResponseAt)
+          : null,
         qualifiedAt: session && session.status === 'completed' ? session.updated_at : null,
         meetingAt: meeting?.start_time || null,
         meetingBookedAt: meeting?.created_at || null,
@@ -815,9 +903,31 @@ export class CampaignService {
          */
         meetingAttendance: meeting?.attendance || null,
         meetingCancelled: !!meeting?.cancelled_at,
+        /*
+         * La etapa dice "cita agendada" y no hay ninguna reunión con fecha y
+         * hora. No se frena el movimiento —el setter puede no tener permiso
+         * para agendar, ver `updateLeadStatus()`— pero sí se deja el rastro:
+         * sin él, "cita con reunión" y "cita sin reunión" se escriben igual en
+         * la columna y el reporte cuenta 43 citas de las que solo 36 se pueden
+         * ir a buscar en una agenda (corte del 10/11/2026). Se deriva en cada
+         * lectura y no se guarda: en cuanto alguien cargue la reunión deja de
+         * ser cierto.
+         */
+        appointmentWithoutMeeting: !!hasAppointment && !meeting,
         quotedValue: quote ? Number(quote.amount) : null,
         quotedCurrency: quote?.currency || null,
         paidRevenue,
+        /*
+         * `billedRevenue` es TODO lo registrado en Finanzas para ese lead, y
+         * mezclaba dos cosas que se deciden distinto: lo de una venta ya
+         * cerrada y lo de un acuerdo que todavía no se ganó. En el corte del
+         * 10/11/2026 esa única columna decía S/ 40.600 —S/ 14.800 de 7 ventas
+         * ganadas y S/ 25.800 de 7 leads en "Cuota pactada" sin un solo cobro—
+         * y se leía como facturación cerrada. El total sigue publicándose,
+         * pero con sus dos mitades al lado para que no haga falta restarlas.
+         */
+        wonRevenue: won ? billedRevenue : (lead ? 0 : null),
+        pactedRevenue: won ? (lead ? 0 : null) : billedRevenue,
         billedRevenue,
         hasProposal,
         crmStage,
@@ -1022,11 +1132,24 @@ export class CampaignService {
         enteredAt: origin.enteredAt || c.firstMessageAt || null,
         firstMessageAt: c.firstMessageAt,
         firstResponseMinutes: c.firstResponseMinutes,
-        // Tres estados: `null` es "sin calificar", y se escribe vacío.
+        /*
+         * El acuse y la atención humana, separados. La hoja publica los dos
+         * porque con uno solo no se puede distinguir al lead al que Avan le
+         * contestó en 20 segundos y nadie volvió a escribirle, del lead que un
+         * setter atendió de verdad.
+         */
+        firstResponseBy: c.firstResponseBy,
+        firstResponseIsHuman: c.firstResponseIsHuman,
+        humanFirstResponseMinutes: c.humanFirstResponseMinutes,
+        // Tres estados: `null` es "sin calificar", y se escribe con todas las
+        // letras para que ningún importador lo lea como un "No".
         qualified: c.setterQualified,
         // Agendada y asistida son dos columnas y no una: de la segunda cuelga
         // si el público del anuncio de verdad se presenta.
         meetingAttendance: c.meetingAttendance,
+        // La etapa dice "cita agendada" y no hay reunión con fecha y hora:
+        // esa cita no se puede ir a buscar en ninguna agenda.
+        appointmentWithoutMeeting: c.appointmentWithoutMeeting,
         viability: c.viability,
         meetingAt: c.meetingAt,
         /*
@@ -1046,6 +1169,10 @@ export class CampaignService {
         quotedValue: c.quotedValue,
         // Se pasan tal cual: `null` (sin ficha, no se puede saber) no es 0.
         paidRevenue: c.paidRevenue ?? null,
+        // Las dos mitades de lo registrado, al lado del total: una venta
+        // ganada y un acuerdo que no se cerró no son la misma plata.
+        wonRevenue: c.wonRevenue ?? null,
+        pactedRevenue: c.pactedRevenue ?? null,
         billedRevenue: c.billedRevenue ?? null
       };
     };
@@ -1130,11 +1257,48 @@ export class CampaignService {
     const appointments = contacts.filter((c) => c.hasAppointment).length;
     const won = contacts.filter((c) => c.won).length;
     const lost = contacts.filter((c) => c.lost).length;
+    /*
+     * Los desenlaces que faltaban para que el reporte se pueda auditar sin
+     * salir de él: a cuántos no se les contestó nunca, cuántas de las citas
+     * agendadas no tienen una reunión que ir a buscar, cuántas se asistieron
+     * y cuántos leads tienen una cotización emitida.
+     */
+    const noFirstResponse = contacts.filter((c) => !c.responded).length;
+    const appointmentsWithoutMeeting = contacts.filter((c) => c.appointmentWithoutMeeting).length;
+    const attended = contacts.filter((c) => c.meetingAttendance === 'asistio').length;
+    const quotedLeads = contacts.filter((c) => c.quotedValue != null).length;
+    /*
+     * La calificación comercial tiene TRES estados y el vacío es información:
+     * separa al lead que nadie revisó del revisado y descartado. Se publican
+     * los tres, porque una tasa de calificación en cero puede ser un público
+     * malo o un equipo que no está registrando el dato, y a uno se le corta el
+     * presupuesto y al otro se le pide que complete la ficha.
+     */
+    const setterQualified = contacts.filter((c) => c.setterQualified === true).length;
+    const setterDisqualified = contacts.filter((c) => c.setterQualified === false).length;
+    const setterUnreviewed = contacts.filter((c) => c.setterQualified == null).length;
 
     const spend = campaign ? resolveSpend(campaign) : 0;
     const meta = campaign ? parseMetaInsights(campaign.meta_insights) : null;
     const metaAds = (campaign ? parseMetaInsights(campaign.meta_ads_insights) : null) || [];
+    /*
+     * Las cuatro cifras de dinero del funnel, separadas porque se deciden
+     * distinto y estaban colapsadas en dos:
+     *
+     *   quotedValue    lo COTIZADO: el pipeline abierto, lo que se propuso.
+     *   wonRevenue     lo registrado en Finanzas de ventas YA ganadas.
+     *   pactedRevenue  lo registrado de acuerdos que todavía no se ganaron.
+     *   collectedRevenue  lo COBRADO y verificado, el hecho más difícil de
+     *                  discutir de los cuatro.
+     *
+     * `billedRevenue` (ganado + pactado) se sigue publicando porque es lo que
+     * venían leyendo las hojas, pero ya no es la única cifra disponible.
+     */
     const quotedValue = contacts.reduce((sum, c) => sum + (c.quotedValue || 0), 0);
+    const wonRevenue = contacts.reduce((sum, c) => sum + (c.wonRevenue || 0), 0);
+    const pactedRevenue = contacts.reduce((sum, c) => sum + (c.pactedRevenue || 0), 0);
+    const collectedRevenue = contacts.reduce((sum, c) => sum + (c.paidRevenue || 0), 0);
+    const billedRevenue = wonRevenue + pactedRevenue;
 
     const rate = (num, den) => (den > 0 ? Math.round((num / den) * 1000) / 10 : 0);
     const perStage = (den) => (den > 0 && spend > 0 ? Math.round((spend / den) * 100) / 100 : null);
@@ -1166,9 +1330,25 @@ export class CampaignService {
         appointments,
         won,
         lost,
+        noFirstResponse,
+        appointmentsWithoutMeeting,
+        attended,
+        quotedLeads,
+        setterQualified,
+        setterDisqualified,
+        setterUnreviewed,
         qualificationRate: rate(qualified, conversations),
         conversationToAppointmentRate: rate(appointments, conversations),
         appointmentToWonRate: rate(won, appointments),
+        /*
+         * El cierre se mide sobre las citas ASISTIDAS y no sobre las
+         * agendadas: una cita a la que nadie fue no tuvo oportunidad de
+         * cerrar, y contarla en el denominador castiga al closer por un
+         * problema del público del anuncio. Va junto a la de agendadas, no en
+         * su lugar: la brecha entre las dos es lo que se mira.
+         */
+        attendedToWonRate: rate(won, attended),
+        attendanceRate: rate(attended, appointments),
         avgViability: (() => {
           const vals = contacts.map((c) => c.viability).filter((v) => v != null);
           return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
@@ -1177,12 +1357,49 @@ export class CampaignService {
           const m = median(contacts.map((c) => c.firstResponseMinutes));
           return m == null ? null : Math.round(m * 10) / 10;
         })(),
+        /*
+         * El P90 va al lado de la mediana y no en su lugar: con la mediana
+         * sola, un funnel donde Avan acusa recibo en segundos se ve atendido
+         * aunque la décima parte de los leads espere horas. Y la mediana de la
+         * respuesta HUMANA aparte, que es el reloj que de verdad importa.
+         */
+        p90FirstResponseMin: (() => {
+          const p = percentile(contacts.map((c) => c.firstResponseMinutes), 0.9);
+          return p == null ? null : Math.round(p * 10) / 10;
+        })(),
+        medianHumanResponseMin: (() => {
+          const m = median(contacts.map((c) => c.humanFirstResponseMinutes));
+          return m == null ? null : Math.round(m * 10) / 10;
+        })(),
         spend,
         quotedValue,
-        roas: spend > 0 && quotedValue > 0 ? Math.round((quotedValue / spend) * 100) / 100 : null,
+        wonRevenue,
+        pactedRevenue,
+        billedRevenue,
+        collectedRevenue,
+        /*
+         * El ROAS se calcula sobre lo COBRADO y verificado, no sobre lo
+         * cotizado.
+         *
+         * Antes dividía el valor cotizado de los leads ganados entre el gasto,
+         * y eso ya era discutible; con la cotización abierta ahora incluida
+         * —que es lo que hacía falta para ver el pipeline— sería directamente
+         * falso: un anuncio que solo genera propuestas sin cerrar ninguna
+         * mostraría el mejor retorno del libro. Lo cotizado no es dinero que
+         * entró, y de esta cifra cuelga la decisión de dónde poner el
+         * presupuesto. El retorno sobre lo cotizado se sigue publicando
+         * aparte, nombrado por lo que es.
+         */
+        roas: spend > 0 && collectedRevenue > 0
+          ? Math.round((collectedRevenue / spend) * 100) / 100 : null,
+        quotedToSpend: spend > 0 && quotedValue > 0
+          ? Math.round((quotedValue / spend) * 100) / 100 : null,
         costPerConversation: perStage(conversations),
         costPerQualified: perStage(qualified),
         costPerAppointment: perStage(appointments),
+        // Lo que de verdad cuesta una reunión que ocurrió. El costo por cita
+        // AGENDADA abarata a los anuncios cuyo público agenda y no aparece.
+        costPerAttended: perStage(attended),
         costPerWon: perStage(won),
         // Métricas tal como las reporta el Administrador de anuncios (Meta).
         // `metaSpend` es el gasto real de Meta; `spend` puede venir del gasto
@@ -1292,7 +1509,27 @@ export class CampaignService {
           followUp: 0,
           discarded: 0,
           won: 0,
+          /*
+           * Leads de este anuncio a los que NADIE contestó. Es la otra mitad
+           * de la mediana de respuesta: un anuncio puede traer leads baratos y
+           * que la cuarta parte se quede sin una sola respuesta, y entonces lo
+           * que hay que arreglar no es el anuncio.
+           */
+          noFirstResponse: 0,
+          /*
+           * Cuántos leads tienen una cotización emitida, que es el
+           * denominador de `quotedValue`: sin él, S/ 9.700 en una fila no
+           * dice si son una propuesta grande o diez chicas.
+           */
+          quoted: 0,
           paidRevenue: 0,
+          /*
+           * Las dos mitades de lo registrado: lo de las ventas ya ganadas y lo
+           * de los acuerdos que todavía no se cerraron. Sumadas en una sola
+           * columna se leen como facturación cerrada (ver `wonRevenue`).
+           */
+          wonRevenue: 0,
+          pactedRevenue: 0,
           billedRevenue: 0,
           /*
            * Contactos de este anuncio SIN ficha en el CRM. Su dinero no es cero,
@@ -1328,7 +1565,11 @@ export class CampaignService {
       else group.followUp += 1;
       if (c.paidRevenue === null) group.sinFicha += 1;
       if (c.attributionLevel === LEVELS.padre) group.piezaDesconocida += 1;
+      if (!c.responded) group.noFirstResponse += 1;
+      if (c.quotedValue != null) group.quoted += 1;
       group.paidRevenue += c.paidRevenue || 0;
+      group.wonRevenue += c.wonRevenue || 0;
+      group.pactedRevenue += c.pactedRevenue || 0;
       group.billedRevenue += c.billedRevenue || 0;
       group.quotedValue += c.quotedValue || 0;
       if (!group.headline && c.headline) group.headline = c.headline;
@@ -1456,6 +1697,10 @@ export class CampaignService {
     ).metrics;
     const totalSpend = campaigns.reduce((sum, c) => sum + resolveSpend(c), 0);
     const totalQuoted = contacts.reduce((sum, c) => sum + (c.quotedValue || 0), 0);
+    // Las tres cifras que estaban mezcladas en una. Ver `#summariseGroup()`.
+    const totalWonRevenue = contacts.reduce((sum, c) => sum + (c.wonRevenue || 0), 0);
+    const totalPactedRevenue = contacts.reduce((sum, c) => sum + (c.pactedRevenue || 0), 0);
+    const totalCollected = contacts.reduce((sum, c) => sum + (c.paidRevenue || 0), 0);
     const metaTotals = campaigns.reduce((acc, c) => {
       const m = parseMetaInsights(c.meta_insights);
       if (m) {
@@ -1490,9 +1735,23 @@ export class CampaignService {
         qualified: contacts.filter((c) => c.qualified).length,
         appointments: contacts.filter((c) => c.hasAppointment).length,
         won: contacts.filter((c) => c.won).length,
+        noFirstResponse: contacts.filter((c) => !c.responded).length,
+        attended: contacts.filter((c) => c.meetingAttendance === 'asistio').length,
+        appointmentsWithoutMeeting: contacts.filter((c) => c.appointmentWithoutMeeting).length,
+        setterUnreviewed: contacts.filter((c) => c.setterQualified == null).length,
         totalSpend,
         totalQuotedValue: totalQuoted,
-        roas: totalSpend > 0 && totalQuoted > 0 ? Math.round((totalQuoted / totalSpend) * 100) / 100 : null,
+        // Las tres cifras separadas: lo ganado, lo solo pactado y lo cobrado.
+        // Juntas en un único "registrado" se leían como facturación cerrada.
+        totalWonRevenue,
+        totalPactedRevenue,
+        totalCollectedRevenue: totalCollected,
+        // Sobre lo COBRADO y verificado, no sobre lo cotizado (ver
+        // `#summariseGroup()`).
+        roas: totalSpend > 0 && totalCollected > 0
+          ? Math.round((totalCollected / totalSpend) * 100) / 100 : null,
+        quotedToSpend: totalSpend > 0 && totalQuoted > 0
+          ? Math.round((totalQuoted / totalSpend) * 100) / 100 : null,
         costPerConversation: totalSpend > 0 && totalsClassified.conversations > 0
           ? Math.round((totalSpend / totalsClassified.conversations) * 100) / 100 : null,
         costPerAppointment: totalSpend > 0 && totalsClassified.appointments > 0

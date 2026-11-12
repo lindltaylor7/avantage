@@ -174,9 +174,15 @@ function trailFixture() {
         adName: 'FORM | Confianza | contrato | Jair | 25Oct', adHeadline: null,
         adSourceId: '120223847501938', platformLeadId: '1202238475019384', crmCampaignId: 1,
         enteredAt: '2026-10-25T14:05:00.000Z', firstMessageAt: '2026-10-25T14:05:00.000Z',
-        firstResponseMinutes: 4.5, qualified: true, viability: 72, meetingAt: null,
+        // Le contestó una persona: el acuse y la atención humana coinciden.
+        firstResponseMinutes: 4.5, firstResponseBy: 'Lucía Ramos', firstResponseIsHuman: true,
+        humanFirstResponseMinutes: 4.5,
+        qualified: true, viability: 72, meetingAt: null, appointmentWithoutMeeting: false,
         onlyGreeted: false, funnelColumn: 'Cotizado', commercialStage: 'Cotización / propuesta',
-        closedAt: '2026-10-29T16:00:00.000Z', quotedValue: 3500, paidRevenue: 1500, billedRevenue: 3500
+        closedAt: '2026-10-29T16:00:00.000Z', quotedValue: 3500, paidRevenue: 1500,
+        // Cotizado y con cuotas asentadas, pero la venta no se ganó: todo lo
+        // registrado es acuerdo, nada es facturación.
+        wonRevenue: 0, pactedRevenue: 3500, billedRevenue: 3500
       },
       {
         // El caso de los 21 leads de TikTok: id de anuncio guardado y prefijo
@@ -188,9 +194,15 @@ function trailFixture() {
         adName: null, adHeadline: null,
         adSourceId: '1824030199203842', platformLeadId: '1824030199203841', crmCampaignId: null,
         enteredAt: '2026-10-27T19:05:00.000Z', firstMessageAt: '2026-10-27T19:05:00.000Z',
-        firstResponseMinutes: null, qualified: null, viability: null, meetingAt: null,
+        // Nadie le contestó nunca, y su etapa dice "cita agendada" sin que
+        // haya una reunión con fecha y hora detrás: los dos casos que el
+        // reporte no sabía nombrar.
+        firstResponseMinutes: null, firstResponseBy: null, firstResponseIsHuman: false,
+        humanFirstResponseMinutes: null,
+        qualified: null, viability: null, meetingAt: null, appointmentWithoutMeeting: true,
         onlyGreeted: true, funnelColumn: 'Conversación abierta', commercialStage: 'En seguimiento',
-        closedAt: null, quotedValue: null, paidRevenue: 0, billedRevenue: 0
+        closedAt: null, quotedValue: null, paidRevenue: 0,
+        wonRevenue: 0, pactedRevenue: 0, billedRevenue: 0
       },
       {
         // Un lead que no vino de ningún anuncio: va en la misma hoja, con
@@ -200,9 +212,14 @@ function trailFixture() {
         campaignId: null, campaignName: null, adsetId: null, adsetName: null,
         adName: null, adHeadline: null, adSourceId: null, platformLeadId: null, crmCampaignId: null,
         enteredAt: '2026-10-30T11:00:00.000Z', firstMessageAt: '2026-10-30T11:00:00.000Z',
-        firstResponseMinutes: 2, qualified: false, viability: null, meetingAt: null,
+        // Respuesta registrada sin persona detrás: Avan o el eco de la app de
+        // WhatsApp Business. No hay reloj humano que publicar.
+        firstResponseMinutes: 2, firstResponseBy: null, firstResponseIsHuman: false,
+        humanFirstResponseMinutes: null,
+        qualified: false, viability: null, meetingAt: null, appointmentWithoutMeeting: false,
         onlyGreeted: false, funnelColumn: 'Nuevo', commercialStage: 'En seguimiento',
-        closedAt: null, quotedValue: null, paidRevenue: 0, billedRevenue: 0
+        closedAt: null, quotedValue: null, paidRevenue: 0,
+        wonRevenue: 0, pactedRevenue: 0, billedRevenue: 0
       }
     ]
   };
@@ -279,9 +296,71 @@ test('"Calificado" distingue el lead sin revisar del revisado y descartado', asy
 
   assert.equal(cell(2, 'Calificado'), 'Sí');
   assert.equal(cell(4, 'Calificado'), 'No');
-  // Vacío = nadie lo calificó todavía. Antes esta columna se derivaba de la
-  // etapa del lead y decía "Sí" en 403 de 403 filas.
-  assert.ok(!cell(3, 'Calificado'), 'sin calificar tiene que quedar vacío');
+  /*
+   * El tercer estado se ESCRIBE. Antes la celda quedaba vacía y eso era
+   * información solo para quien conoce la regla: el importador de marketing la
+   * leyó como un "No" y la planilla del corte del 10/11/2026 terminó diciendo
+   * que los 450 leads estaban descalificados — el mismo error con el signo
+   * cambiado que esta columna vino a evitar cuando se derivaba de la etapa y
+   * decía "Sí" en 403 de 403 filas. Un valor que no se puede colapsar no se
+   * colapsa.
+   */
+  assert.equal(cell(3, 'Calificado'), 'Sin calificar');
+});
+
+test('el tercer estado de la cita asistida también va escrito', async () => {
+  const { cell } = await trailSheet();
+  // Ninguno de los tres leads de la muestra tiene desenlace registrado: la
+  // celda lo dice en vez de dejar que se lea como una ausencia.
+  assert.equal(cell(2, 'Cita asistida'), 'Sin registrar');
+});
+
+test('la hoja separa el acuse de Avan de la atención humana', async () => {
+  const { cell } = await trailSheet();
+
+  /*
+   * Con una sola cifra de primera respuesta, el lead al que Avan le contestó
+   * en segundos y nadie volvió a escribirle se ve igual que el que un setter
+   * atendió de verdad. Son dos relojes y se arreglan distinto.
+   */
+  assert.equal(cell(2, 'Quién respondió primero'), 'Lucía Ramos');
+  assert.equal(cell(2, 'Respuesta humana (min)'), 4.5);
+
+  // Respuesta registrada sin persona detrás: no se afirma que fue el bot —un
+  // asesor escribiendo desde WhatsApp Business llega por el mismo camino.
+  assert.equal(cell(4, 'Quién respondió primero'), 'Avan o app de WhatsApp');
+  assert.equal(cell(4, 'Respuesta humana (min)'), '-');
+
+  // Y el lead al que nadie contestó lo dice con todas las letras: es el caso
+  // que hay que ir a buscar, no una celda que se olvidaron de llenar.
+  assert.equal(cell(3, 'Quién respondió primero'), 'Sin respuesta registrada');
+});
+
+test('lo registrado en Finanzas se parte en venta ganada y cuota pactada', async () => {
+  const { cell } = await trailSheet();
+
+  /*
+   * El lead de la fila 2 tiene S/ 3.500 asentados y todavía no se ganó: es un
+   * acuerdo, no facturación. Sumado con las ventas cerradas en una sola
+   * columna daba los S/ 40.600 que el reporte del 10/11/2026 presentaba como
+   * contratos, siendo S/ 25.800 de ellos acuerdos sin un solo cobro.
+   */
+  assert.equal(cell(2, 'Registrado de venta ganada (PEN)'), 0);
+  assert.equal(cell(2, 'Cuota pactada sin cerrar (PEN)'), 3500);
+  // El total sigue publicándose: lo que cambia es que ya no es la única cifra.
+  assert.equal(cell(2, 'Registrado, incl. por cobrar (PEN)'), 3500);
+});
+
+test('la cita que no tiene reunión detrás queda marcada', async () => {
+  const { cell } = await trailSheet();
+
+  /*
+   * Es lo que explica la diferencia entre las 43 citas que contaba la etapa y
+   * las 36 que tenían fecha: sin esta columna, la resta parece un error del
+   * reporte y no una cita que nadie puede ir a buscar en una agenda.
+   */
+  assert.equal(cell(3, 'Cita sin reunión registrada'), 'Sí');
+  assert.equal(cell(2, 'Cita sin reunión registrada'), '-');
 });
 
 test('la fecha de ingreso y la de cierre viajan como fechas', async () => {

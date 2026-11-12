@@ -1003,7 +1003,7 @@ antes de tocar el arranque de producción.
   lo que marketing va a buscar y nunca trata como cero.
   La hoja publica además **con qué evidencia** se supo cada origen —«Fuente de atribución»,
   «Confianza de atribución», «Conciliado» y «Plataforma secundaria»— y la **versión del esquema**
-  (`LEAD_TRAIL_SCHEMA_VERSION`, hoy 2), por fila y no en una celda al margen: una fila copiada a
+  (`LEAD_TRAIL_SCHEMA_VERSION`, hoy 3), por fila y no en una celda al margen: una fila copiada a
   otra herramienta tiene que poder decir sola con qué esquema se generó, y sin la fuente la hoja
   afirma una plataforma sin dejar comprobar cómo se llegó a ella.
   Y hay una tercera convención, que es de dinero: **`0` es "no entró nada" y `sin dato` es "no se
@@ -1347,6 +1347,71 @@ antes de tocar el arranque de producción.
   (`appointments`, `attended`, `quotation`, `won`, `collected` en `#breakdownByAd()`). Cerrada no
   es cobrada: «cobrado» es lo **verificado** en Finanzas, que es el hecho más difícil de discutir
   del funnel. La hoja «Ruta de leads» lleva además «Cita asistida» con los mismos tres estados.
+  Tres de esas columnas —«Citas agendadas», «Citas asistidas» y «Leads cobrados»— estuvieron
+  **declaradas y sin escribir** hasta el 12/11/2026: `adAttributionRow()` no copiaba el conteo que
+  `#breakdownByAd()` ya calculaba, así que salían en blanco en todas las filas del libro que se
+  reporta, y una columna vacía se lee como un cero — con ella así, ningún anuncio parecía haber
+  traído una sola cita. Lo mismo le pasaba a «Personas nuevas (CRM)» en la hoja de Campañas. Es un
+  fallo que no rompe nada y que solo se ve mirando el archivo, de ahí el test que recorre esas
+  columnas por su valor y no por su encabezado.
+- **El dinero del funnel son CUATRO cifras y no dos** (`#summariseGroup()`, `#breakdownByAd()` y
+  las tres hojas del exportable): lo **cotizado** (el pipeline abierto, lo que se propuso), lo
+  **registrado de ventas ganadas**, la **cuota pactada sin cerrar** (asentada en Finanzas para un
+  lead que todavía no se ganó) y lo **cobrado y verificado**. Vienen de la auditoría comercial del
+  corte del 10/11/2026, donde las dos que había decían cosas que no eran:
+  (1) **lo cotizado solo se llenaba para los leads ganados** (`won && lead ? quoteByLead...`), así
+  que las 63 oportunidades en «Cotización / propuesta» salían las 63 en cero y el valor del
+  pipeline no se podía consultar en ninguna parte — ni cuánto hay en juego, ni qué descuento se
+  ofreció, ni qué tan efectivas son las propuestas, que es lo que se mira para saber si el problema
+  es el anuncio o el cierre. Lo que se cotizó es un hecho con fecha propia y no un atributo de
+  haber ganado.
+  (2) **«Registrado» sumaba las ventas ganadas y los acuerdos sin cerrar en una sola celda**: los
+  S/ 40.600 que el reporte presentaba como contratos eran S/ 14.800 de 7 ventas ganadas y S/ 25.800
+  de 7 leads en «Cuota pactada» sin un solo cobro. El total se sigue publicando —es lo que las
+  hojas venían leyendo— pero con sus dos mitades al lado, para que no haga falta restarlas.
+  El **ROAS se calcula sobre lo cobrado** y no sobre lo cotizado. Antes dividía el valor cotizado
+  de los ganados entre el gasto, lo que ya era discutible; con la cotización abierta ahora incluida
+  sería directamente falso — el anuncio que solo genera propuestas que nunca cierran mostraría el
+  mejor retorno del libro. El cociente sobre lo cotizado se publica aparte y nombrado por lo que es
+  («Cotizado / gasto»), porque de esta cifra cuelga dónde se pone el presupuesto.
+- **La primera respuesta sale de la ficha del lead, y son dos relojes** (`leads.first_response_at`
+  / `_by`, ver `leadFirstResponse.js`). El exportable la calculaba como el primer saliente de la
+  conversación de WhatsApp, que es justo lo que no tiene el lead que importa: el de formulario que
+  nunca escribió por WhatsApp salía con la celda vacía, y «no se le contactó» y «se le llamó y
+  nadie lo registró» se escribían igual (109 de 450 leads en el corte del 10/11/2026). La columna
+  del lead cubre los dos caminos por los que de verdad se contesta —cualquier saliente y la primera
+  nota de la ficha, que es el único registro que deja una llamada—.
+  Los dos relojes son el **acuse** y la **atención humana**, y se publican separados porque se
+  arreglan distinto: la mediana de ~20 segundos del corte era Avan acusando recibo, y debajo de esa
+  cifra había 62 leads atendidos después de 15 minutos y 51 después de una hora. Por eso van juntos
+  la mediana, el **P90** (`percentile()`, con test propio) y la mediana de la respuesta humana: una
+  medida de centro no dice nada de la cola, y la cola es la parte que se arregla; el P90 solo
+  tampoco serviría, porque sin la mediana al lado no se distingue un equipo lento de uno rápido con
+  unos pocos casos olvidados. `first_response_by` nulo se escribe **«Avan o app de WhatsApp»** y
+  no «el bot»: un asesor escribiendo desde WhatsApp Business llega por el mismo camino, y afirmar
+  lo primero haría pasar por automática una respuesta humana.
+- **El tercer estado se escribe con todas las letras.** «Calificado» y «Cita asistida» dejaban la
+  celda **vacía** cuando nadie lo había registrado, y eso era información solo para quien conoce la
+  regla: el importador de marketing la leyó como un «No» y la planilla del corte del 10/11/2026
+  terminó diciendo que los 450 leads estaban descalificados — el mismo error con el signo cambiado
+  que esa columna vino a evitar cuando se derivaba de la etapa y decía «Sí» en 403 de 403 filas.
+  Ahora salen «Sin calificar» y «Sin registrar». **Un valor que no se puede colapsar no se
+  colapsa**: en una hoja que viaja a otra herramienta, la celda vacía es una invitación a
+  rellenarla con lo que le parezca al importador. Por lo mismo se publica «Cita sin reunión
+  registrada» (`appointmentWithoutMeeting`, derivado en cada lectura): es lo que explica que la
+  etapa contara 43 citas y solo 36 tuvieran fecha, y sin esa columna la resta parece un error del
+  reporte en vez de una cita que nadie puede ir a buscar en una agenda.
+- **El libro que se reporta se abre diciendo qué cuenta cada cifra** (hoja «Cómo leer este libro»,
+  `#addReadMeSheet()`). Va primera y es parte del reporte, no un anexo: estas cifras se comparan a
+  diario contra el Administrador de anuncios y contra la planilla de marketing, y las tres fuentes
+  cuentan cosas distintas con los mismos nombres —el campo «conversiones» de Meta no cuenta envíos
+  de formulario sino el evento de conversión configurado en la campaña—, así que exigir que
+  coincidan manda a buscar leads que nunca existieron. Lleva además las **dos marcas de tiempo**,
+  la del CRM y la de la última sincronización con Meta: el gasto viene de una y lo comercial de la
+  otra, de modo que un cero de ventas en los últimos días puede ser que no se vendió o que la
+  sincronización es anterior, y sin la fecha de cada lado las dos se leen igual. El resto de la
+  hoja es el glosario de las cuatro cifras de dinero, los tres estados y las dos convenciones de
+  redacción (`-` = no corresponde, `sin dato` = vino de un anuncio y falta).
 - **La calificación se audita con una muestra, no con una cifra**
   (`backend/scripts/auditarCalificacion.js`, solo lee). Contesta tres cosas distintas: cobertura
   (cuántos leads tienen la marca), sesgo (cómo se reparten los Sí y los No) y quién califica. Y

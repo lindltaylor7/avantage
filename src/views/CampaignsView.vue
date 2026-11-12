@@ -173,10 +173,30 @@
           <span class="kpi-label">Costo por ganado</span>
           <span class="kpi-value">{{ report.kpis.costPerWon != null ? money(report.kpis.costPerWon) : '—' }}</span>
         </div>
+        <!--
+          Las tres cifras de dinero, separadas. Antes había una sola —"Valor
+          cotizado (ganados)"— y el ROAS colgaba de ella, así que lo cotizado
+          se leía como dinero que entró y el pipeline abierto no figuraba en
+          ninguna parte. Lo cobrado y verificado va primero porque es el único
+          hecho difícil de discutir de los tres.
+        -->
         <div class="kpi-tile">
-          <span class="kpi-label">Valor cotizado (ganados)</span>
-          <span class="kpi-value">{{ money(report.kpis.totalQuotedValue) }}</span>
+          <span class="kpi-label">Cobrado y verificado</span>
+          <span class="kpi-value">{{ money(report.kpis.totalCollectedRevenue) }}</span>
           <span class="kpi-sub" v-if="report.kpis.roas != null">ROAS {{ report.kpis.roas }}×</span>
+        </div>
+        <div class="kpi-tile">
+          <span class="kpi-label">Valor cotizado (pipeline)</span>
+          <span class="kpi-value">{{ money(report.kpis.totalQuotedValue) }}</span>
+          <span class="kpi-sub" v-if="report.kpis.quotedToSpend != null">{{ report.kpis.quotedToSpend }}× el gasto</span>
+        </div>
+        <div class="kpi-tile">
+          <span class="kpi-label">Registrado en Finanzas</span>
+          <span class="kpi-value">{{ money(report.kpis.totalWonRevenue) }}</span>
+          <span class="kpi-sub">
+            de ventas ganadas<template v-if="report.kpis.totalPactedRevenue">
+              · {{ money(report.kpis.totalPactedRevenue) }} pactado sin cerrar</template>
+          </span>
         </div>
         <template v-if="report.kpis.metaImpressions != null">
           <div class="kpi-tile kpi-meta">
@@ -551,13 +571,23 @@
                           <div class="metric-grid">
                             <div class="metric"><span class="metric-label">Tasa de calificación</span><span class="metric-value">{{ campaign.metrics.qualificationRate }}%</span></div>
                             <div class="metric"><span class="metric-label">Conversación → cita</span><span class="metric-value">{{ campaign.metrics.conversationToAppointmentRate }}%</span></div>
-                            <div class="metric"><span class="metric-label">Cita → ganado</span><span class="metric-value">{{ campaign.metrics.appointmentToWonRate }}%</span></div>
+                            <!-- Asistencia y cierre sobre asistidas: un público que agenda y no
+                                 aparece se leía igual que uno que se presenta. -->
+                            <div class="metric"><span class="metric-label">Asistencia a citas</span><span class="metric-value">{{ campaign.metrics.attendanceRate }}%</span></div>
+                            <div class="metric"><span class="metric-label">Cita asistida → ganado</span><span class="metric-value">{{ campaign.metrics.attendedToWonRate }}%</span></div>
                             <div class="metric"><span class="metric-label">Viabilidad prom.</span><span class="metric-value">{{ campaign.metrics.avgViability != null ? campaign.metrics.avgViability + '%' : '—' }}</span></div>
+                            <!-- La mediana sola puede ser el acuse de Avan; el P90 mide la cola,
+                                 que es la parte que se arregla. -->
                             <div class="metric"><span class="metric-label">1ª respuesta (mediana)</span><span class="metric-value">{{ responseLabel(campaign.metrics.medianFirstResponseMin) }}</span></div>
+                            <div class="metric"><span class="metric-label">1ª respuesta (P90)</span><span class="metric-value">{{ responseLabel(campaign.metrics.p90FirstResponseMin) }}</span></div>
+                            <div class="metric"><span class="metric-label">Sin respuesta</span><span class="metric-value">{{ num(campaign.metrics.noFirstResponse) }}</span></div>
                             <div class="metric"><span class="metric-label">Costo / conversación</span><span class="metric-value">{{ campaign.metrics.costPerConversation != null ? money(campaign.metrics.costPerConversation) : '—' }}</span></div>
+                            <div class="metric"><span class="metric-label">Costo / cita asistida</span><span class="metric-value">{{ campaign.metrics.costPerAttended != null ? money(campaign.metrics.costPerAttended) : '—' }}</span></div>
                             <div class="metric"><span class="metric-label">Costo / ganado</span><span class="metric-value">{{ campaign.metrics.costPerWon != null ? money(campaign.metrics.costPerWon) : '—' }}</span></div>
-                            <div class="metric"><span class="metric-label">Valor cotizado</span><span class="metric-value">{{ money(campaign.metrics.quotedValue) }}</span></div>
-                            <div class="metric"><span class="metric-label">ROAS</span><span class="metric-value">{{ campaign.metrics.roas != null ? campaign.metrics.roas + '×' : '—' }}</span></div>
+                            <div class="metric"><span class="metric-label">Valor cotizado (pipeline)</span><span class="metric-value">{{ money(campaign.metrics.quotedValue) }}</span></div>
+                            <div class="metric"><span class="metric-label">Cobrado y verificado</span><span class="metric-value">{{ money(campaign.metrics.collectedRevenue) }}</span></div>
+                            <div class="metric"><span class="metric-label">Cuota pactada sin cerrar</span><span class="metric-value">{{ money(campaign.metrics.pactedRevenue) }}</span></div>
+                            <div class="metric"><span class="metric-label">ROAS (sobre cobrado)</span><span class="metric-value">{{ campaign.metrics.roas != null ? campaign.metrics.roas + '×' : '—' }}</span></div>
                           </div>
                         </div>
 
