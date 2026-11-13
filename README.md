@@ -466,7 +466,14 @@ plataforma. Lo corto:
 ```bash
 cd mobile
 flutter pub get
-flutter run --dart-define=API_BASE_URL=http://10.0.2.2:3000
+```
+
+Y para compilar el APK, el script hace los siete `--dart-define` solo (lee los
+identificadores de Firebase de `android/app/google-services.json`):
+
+```powershell
+.\build-apk.ps1 -ApiBaseUrl https://tu-dominio.com
+.\build-apk.ps1 -ApiBaseUrl http://localhost:3000   # con cable y adb reverse
 ```
 
 La app **arranca sin Firebase**: sondea el panel cada 45 s mientras está abierta
@@ -480,6 +487,62 @@ En la app: **Estado de los avisos → «Enviarme una notificación de prueba»**
 solo a los dispositivos de esa cuenta y no deja nada en la campana del panel:
 comprueba la cadena completa (servidor → Firebase → aparato) sin esperar a que
 alguien agende una reunión.
+
+### Desplegar el push a producción
+
+Lo que este módulo agrega al despliegue normal de la sección 3. El orden
+importa: el APK se compila **al final**, porque lleva la URL del panel adentro.
+
+**1. La migración.** `device_tokens` tiene que existir antes de que nadie abra
+la app, o el registro del dispositivo falla con un 500:
+
+```bash
+npm run migrate
+```
+
+**2. La credencial de FCM, en las variables de entorno de la app Node.js**
+(hPanel → Avanzado → Node.js → tu app). En hosting compartido lo más simple es
+el JSON entero en una variable, porque no hay que subir ni versionar un archivo:
+
+```
+FCM_SERVICE_ACCOUNT_JSON={"project_id":"...","client_email":"...","private_key":"-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"}
+```
+
+Se pega el contenido del JSON que descarga Firebase **tal cual**, con los `\n`
+escapados como vienen: `pushService.js` los deshace al leerlo.
+
+La alternativa es `FCM_SERVICE_ACCOUNT_FILE` con una ruta **absoluta y fuera de
+la carpeta del despliegue** — mismo cuidado que `UPLOADS_DIR`: dentro, el
+despliegue por Git se la lleva, y además una clave privada no puede vivir en una
+carpeta que sirve archivos.
+
+**Si estas variables no están, el push queda apagado y nada más**: el panel
+sigue igual, la campana sigue igual, y la app cae al sondeo. No hay que
+desplegar las dos mitades el mismo día.
+
+**3. Reiniciar la app** desde hPanel, y comprobar que el servidor tomó la
+credencial. Tiene que decir `"configured": true`:
+
+```bash
+curl -s https://tu-dominio.com/api/push/status -H "Authorization: Bearer <token>"
+```
+
+**4. Compilar el APK apuntando al dominio**, ya con HTTPS:
+
+```powershell
+cd mobile
+.\build-apk.ps1 -ApiBaseUrl https://tu-dominio.com -Output "$HOME\Desktop\AvisosAvantage.apk"
+```
+
+Con `https://` desaparece todo el asunto del tráfico sin cifrar: la
+`network_security_config.xml` tiene `base-config cleartextTrafficPermitted=false`,
+así que el APK de producción exige HTTPS y no hay nada que configurar.
+
+**5. Repartir el APK.** Hoy se firma con la clave de **debug** (ver el `TODO` de
+`android/app/build.gradle.kts`). Eso instala bien y sirve para el equipo, con dos
+consecuencias que conviene saber antes de repartirlo: no se puede publicar en
+Play Store, y el día que se firme con una clave propia **hay que desinstalar la
+versión anterior** — Android rechaza una actualización firmada con otra clave.
 
 ### Las plataformas
 
