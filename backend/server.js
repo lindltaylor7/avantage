@@ -63,6 +63,8 @@ import { DeliverableCalendarService } from './services/deliverableCalendarServic
 import { ScheduledMeetingService, activeMeetingForLead } from './services/scheduledMeetingService.js';
 import { CalendarSyncService } from './services/calendarSyncService.js';
 import { NotificationService } from './services/notificationService.js';
+import { DeviceTokenService } from './services/deviceTokenService.js';
+import { PushService } from './services/pushService.js';
 import { ProjectSettingsService } from './services/projectSettingsService.js';
 import { ProjectNoticeService } from './services/projectNoticeService.js';
 import { PaymentNoticeService } from './services/paymentNoticeService.js';
@@ -184,7 +186,14 @@ const careerCatalogService = new CareerCatalogService();
 const clientAccountService = new ClientAccountService();
 // La campana del panel se construye acá arriba porque el aviso de proyecto
 // nuevo la necesita, y ese aviso viaja dentro de projectService.
-const notificationService = new NotificationService();
+// Los dispositivos de la app movil y el push de Firebase. Se construyen
+// ANTES de la campana porque `notificationService.create()` empuja por aca: es
+// el punto unico por el que nace toda notificacion del panel, asi que colgar
+// el push de ahi es lo que hace que el noveno sitio que cree una no se olvide
+// de avisar al telefono.
+const deviceTokenService = new DeviceTokenService();
+const pushService = new PushService({ deviceTokenService });
+const notificationService = new NotificationService({ pushService });
 const projectSettingsService = new ProjectSettingsService();
 // Avisa al equipo cuando nace un proyecto: casi siempre lo crea el sistema solo
 // al cerrarse una venta, así que sin esto nadie se entera hasta entrar a mirar.
@@ -1222,6 +1231,99 @@ app.post('/api/notifications/read-all', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('❌ Error al marcar las notificaciones como leídas:', error);
     res.status(500).json({ error: 'Error al marcar las notificaciones como leídas.', details: error.message });
+  }
+});
+
+/**
+ * Dispositivos de la app móvil y push de Firebase.
+ *
+ * La campana del panel solo avisa a quien tenga una pestaña abierta; esto es la
+ * mitad que faltaba: el aviso en el teléfono con la app cerrada. Las rutas van
+ * con `requireAuth` a secas y sin permiso propio, igual que `/api/notifications`:
+ * lo que se empuja es exactamente lo que esa persona ya puede leer en la
+ * campana, así que un permiso aparte solo serviría para dejar a alguien con la
+ * campana y sin el teléfono.
+ */
+app.get('/api/push/status', requireAuth, async (req, res) => {
+  try {
+    // La app necesita esto para decidir si registra un token de Firebase o se
+    // pone a sondear: en Windows y Linux no hay FCM, y en cualquier plataforma
+    // un servidor sin credenciales no va a empujar nada.
+    res.json({ push: pushService.status(), devices: await deviceTokenService.counts() });
+  } catch (error) {
+    console.error('❌ Error al consultar el estado del push:', error);
+    res.status(500).json({ error: 'Error al consultar el estado del push.', details: error.message });
+  }
+});
+
+app.get('/api/devices', requireAuth, async (req, res) => {
+  try {
+    // Solo los propios, y nunca el token: es la dirección de envío de ese
+    // aparato, y una lista de tokens del equipo en una respuesta de API es una
+    // lista de pantallas a las que cualquiera podría escribirle.
+    res.json({ devices: await deviceTokenService.listForUser(req.user.id) });
+  } catch (error) {
+    console.error('❌ Error al listar los dispositivos:', error);
+    res.status(500).json({ error: 'Error al listar los dispositivos.', details: error.message });
+  }
+});
+
+app.post('/api/devices', requireAuth, async (req, res) => {
+  try {
+    const { token, platform, transport, deviceLabel, appVersion } = req.body || {};
+    const device = await deviceTokenService.register({
+      userId: req.user.id,
+      token,
+      platform,
+      transport: transport || 'fcm',
+      deviceLabel: deviceLabel || null,
+      appVersion: appVersion || null
+    });
+    res.json({ success: true, device: { id: device.id, platform: device.platform, transport: device.transport } });
+  } catch (error) {
+    // Un token mal formado o una plataforma que no existe es culpa de quien
+    // llama: 422 y el motivo, no un 500 que manda a revisar el servidor.
+    console.warn(`⚠️  Registro de dispositivo rechazado: ${error.message}`);
+    res.status(422).json({ error: error.message });
+  }
+});
+
+app.post('/api/devices/unregister', requireAuth, async (req, res) => {
+  try {
+    const removed = await deviceTokenService.unregister(req.body?.token);
+    res.json({ success: true, removed });
+  } catch (error) {
+    console.error('❌ Error al dar de baja el dispositivo:', error);
+    res.status(500).json({ error: 'Error al dar de baja el dispositivo.', details: error.message });
+  }
+});
+
+app.post('/api/devices/ping', requireAuth, async (req, res) => {
+  try {
+    await deviceTokenService.touch(req.body?.token);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ Error al marcar el dispositivo como visto:', error);
+    res.status(500).json({ error: 'Error al marcar el dispositivo como visto.', details: error.message });
+  }
+});
+
+app.post('/api/push/test', requireAuth, async (req, res) => {
+  try {
+    // El envío de prueba va SOLO a los dispositivos de quien lo pide, y no deja
+    // fila en `notifications`: es para comprobar la cadena de Firebase, no para
+    // llenarle la campana al equipo. Mismo patrón que el botón de correo de
+    // prueba de Entregables y de Proyectos.
+    const summary = await pushService.send({
+      title: 'Prueba de notificación',
+      body: `Si ves esto en tu dispositivo, el push está funcionando (${new Date().toLocaleString('es-PE', { timeZone: 'America/Lima' })}).`,
+      data: { type: 'push_test', link: '/admin/dashboard' },
+      userIds: [req.user.id]
+    });
+    res.json({ success: true, summary });
+  } catch (error) {
+    console.error('❌ Error al enviar el push de prueba:', error);
+    res.status(500).json({ error: 'Error al enviar el push de prueba.', details: error.message });
   }
 });
 

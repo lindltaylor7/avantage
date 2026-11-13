@@ -40,6 +40,26 @@ npm test                  # suite de pruebas (node --test sobre backend/**/*.tes
 
 No hay linter configurado en `package.json`.
 
+### App de notificaciones (`mobile/`)
+
+App Flutter multiplataforma que recibe las notificaciones del panel en el dispositivo.
+Vive en `mobile/` y tiene su propio `README.md` con la configuración de Firebase.
+
+```bash
+cd mobile
+flutter pub get
+flutter run --dart-define=API_BASE_URL=http://10.0.2.2:3000   # emulador Android
+flutter analyze           # sin avisos
+flutter test              # pruebas de los modelos
+flutter build apk --debug # Android
+flutter build web --release
+```
+
+`API_BASE_URL` por defecto es `http://10.0.2.2:3000`, que es cómo el emulador de Android ve
+el `localhost` de la máquina anfitriona. En un teléfono de verdad va la IP de la máquina en la
+red local. **Windows pide activar el «Modo de desarrollador»** para compilar (Flutter necesita
+enlaces simbólicos para los plugins).
+
 ## Arquitectura
 
 Full-stack monolítico: **Express (backend/) sirve tanto la API REST como el build estático de
@@ -1934,6 +1954,66 @@ antes de tocar el arranque de producción.
   se aceptan SVG** aunque sean imágenes, que es la única exclusión: un SVG puede traer `<script>`
   adentro y, servido desde nuestro propio dominio, correría con los permisos de la página — subir
   una foto de perfil alcanzaría para robarle la sesión a quien la mire.
+- **La campana del panel también llega al teléfono** (`pushService.js`,
+  `deviceTokenService.js`, tabla `device_tokens`, rutas `/api/devices*` y
+  `/api/push/*`, y la app Flutter de `mobile/` — ver su README). La campana
+  avisaba al equipo solo si alguien tenía una pestaña abierta: una reunión que
+  Avan agenda a las 11 de la noche o un pago verificado se veían cuando alguien
+  se acordaba de mirar.
+  **Se cuelga de `notificationService.create()` y no de cada ruta**: es el punto
+  único por el que nace toda notificación del panel —hoy ocho sitios: el bot
+  (cuatro), los dos avisos de Finanzas, el de proyecto nuevo y el del portal del
+  cliente— y es la misma razón por la que el aviso de proyecto nuevo vive en
+  `projectService` y no en sus tres rutas de alta: puesto en cada llamador, el
+  noveno que se agregue se olvida y nadie se entera de que no avisó. El envío
+  **no espera ni lanza**: la fila ya quedó asentada, que es lo que la campana
+  necesita, y un FCM lento o caído no puede demorar el cierre de una venta ni
+  tumbar el webhook del bot.
+  **No usa `firebase-admin`**: el SDK trae su propia cadena de dependencias y
+  esto corre en hosting compartido; la llamada son treinta líneas de REST y el
+  token OAuth lo firma `googleapis`, que ya es dependencia directa (la usa Google
+  Calendar). El precio es que HTTP v1 **no tiene multicast**, así que un aviso a
+  diez dispositivos son diez llamadas — irrelevante para un equipo chico, y si
+  deja de serlo el cambio es dentro de ese archivo.
+  **El token identifica al DISPOSITIVO y no a la persona**, y de ahí que el
+  índice único de `device_tokens` sea `token` a secas y no (`user_id`, `token`):
+  Firebase le da un token a cada instalación, así que si en ese celular entra
+  otra persona el token tiene que **mudarse** a la cuenta nueva. Con el único
+  sobre el par quedarían dos filas vivas con el mismo token y la notificación de
+  un lead le llegaría a la pantalla de quien usó el teléfono antes. Por lo mismo
+  el cierre de sesión **borra** la fila (no hay nada que diagnosticar y lo que
+  importa es que no le siga llegando nada), mientras que un token que Firebase
+  rechaza por caducado se **marca** (`revoked_at`), para que el envío no lo
+  reintente y la pantalla pueda decir que esa instalación dejó de responder.
+  La regla que más importa es `classifyFcmError()`: un **401/403 no da de baja
+  ningún token**. Es la cuenta de servicio, el proyecto o el permiso —el problema
+  es del servidor y los dispositivos están perfectos—, y tratarlo como "este
+  token no sirve" dejaría a todo el equipo sin dispositivos por una variable de
+  entorno mal pegada, con el agravante de que volver a registrarlos exige que
+  cada persona abra su app. Solo `UNREGISTERED` e `INVALID_ARGUMENT` la dan.
+  Las rutas van con `requireAuth` **y sin permiso propio**, igual que
+  `/api/notifications`: lo que se empuja es exactamente lo que esa persona ya
+  puede leer en la campana (`notifications` no tiene columna de usuario), así que
+  un permiso aparte solo serviría para dejar a alguien con la campana y sin el
+  teléfono. El push **no amplía** lo que alguien ve, lo mueve de pantalla.
+  Sin credenciales (`FCM_*` en el `.env`) la integración queda **apagada** y no
+  se intenta nada: el panel sigue igual. Y la app no depende de ellas —cae al
+  **sondeo** de `/api/notifications` y lo dice en pantalla—, porque en **Windows
+  y Linux Firebase Cloud Messaging no existe (no es que falte configurarlo: el
+  SDK no los soporta)** y porque una app de notificaciones que muestra un error
+  por una credencial faltante no sirve para nada hasta que alguien entre a la
+  consola de Firebase. De ahí la columna `transport` (`fcm` | `polling`): los
+  equipos que sondean se registran igual —así se sabe cuántas instalaciones hay—
+  pero `activeFcmTokens()` los excluye, para no gastar una llamada a Firebase en
+  una dirección que no existe.
+  `POST /api/push/test` manda un aviso **solo a los dispositivos de quien lo
+  pide** y **no deja fila en `notifications`**: es para comprobar la cadena
+  completa (servidor → Firebase → aparato) sin llenarle la campana al equipo.
+  Mismo patrón y mismas razones que los botones de correo de prueba de
+  Entregables y de Proyectos. **Lo que todavía no está verificado**: este entorno
+  no tiene un proyecto de Firebase, así que la forma del payload sale de la
+  documentación de FCM HTTP v1 y no de una respuesta observada. El primer envío
+  real hay que mirarlo con ese botón en la mano.
 - **RBAC**: `roles` ↔ `permissions` (N:N vía `role_permissions`) ↔ `users` (N:1 vía `role_id`), más
   `user_permissions`, que son las **excepciones de una persona** sobre lo que le da su rol. Los
   permisos efectivos (rol + otorgados − revocados) se resuelven en UN solo sitio
