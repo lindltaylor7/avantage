@@ -31,6 +31,10 @@ class NotificationMeta {
     'deliverables_unlocked': NotificationMeta('Entregables liberados', Icons.lock_open_outlined, Brand.emerald),
     'project_created': NotificationMeta('Proyecto nuevo', Icons.folder_special_outlined, Brand.olive),
     'push_test': NotificationMeta('Prueba de notificación', Icons.science_outlined, Brand.inkMuted),
+    // El aviso que una persona del equipo escribió a mano desde
+    // `/admin/avisos`. Es el único tipo que no nace de un evento del negocio,
+    // y por eso lleva un icono de persona y no de un módulo del panel.
+    'team_notice': NotificationMeta('Aviso del equipo', Icons.campaign_outlined, Brand.terracotta),
   };
 
   static NotificationMeta of(String type) =>

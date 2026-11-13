@@ -90,6 +90,20 @@
         </router-link>
 
         <router-link
+          v-if="hasPermission('notices.send')"
+          to="/admin/avisos"
+          class="nav-item"
+          :class="{ 'is-active': $route.path === '/admin/avisos' }"
+          @click="closeMobile"
+        >
+          <svg class="nav-icon" style="color: var(--accent-amber);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+          </svg>
+          <span class="nav-label" v-if="!isCollapsed">Avisos al equipo</span>
+        </router-link>
+
+        <router-link
           v-if="hasPermission('campaigns.view')"
           to="/admin/campaigns"
           class="nav-item"

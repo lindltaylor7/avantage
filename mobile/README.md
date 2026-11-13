@@ -2,8 +2,9 @@
 
 App Flutter que recibe en el dispositivo las **mismas notificaciones que la
 campana del panel** (`notifications`): reuniones que agenda Avan, pagos
-verificados, proyectos nuevos, comprobantes del cliente, entregables liberados
-y los avisos del bot de WhatsApp.
+verificados, proyectos nuevos, comprobantes del cliente, entregables liberados,
+los avisos del bot de WhatsApp y los que el equipo se escribe a mano desde
+`/admin/avisos`.
 
 No es un CRM en el celular: entra con la misma cuenta del panel, muestra la
 lista de avisos, marca leído y, cuando un aviso trae enlace, **abre esa pantalla

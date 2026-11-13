@@ -65,6 +65,7 @@ import { CalendarSyncService } from './services/calendarSyncService.js';
 import { NotificationService } from './services/notificationService.js';
 import { DeviceTokenService } from './services/deviceTokenService.js';
 import { PushService } from './services/pushService.js';
+import { NoticeService } from './services/noticeService.js';
 import { ProjectSettingsService } from './services/projectSettingsService.js';
 import { ProjectNoticeService } from './services/projectNoticeService.js';
 import { PaymentNoticeService } from './services/paymentNoticeService.js';
@@ -194,6 +195,9 @@ const clientAccountService = new ClientAccountService();
 const deviceTokenService = new DeviceTokenService();
 const pushService = new PushService({ deviceTokenService });
 const notificationService = new NotificationService({ pushService });
+// Los avisos que el equipo se escribe a mano: son filas de `notifications`
+// con autor, no una tabla paralela. Ver la cabecera de `noticeService.js`.
+const noticeService = new NoticeService({ notificationService });
 const projectSettingsService = new ProjectSettingsService();
 // Avisa al equipo cuando nace un proyecto: casi siempre lo crea el sistema solo
 // al cerrarse una venta, así que sin esto nadie se entera hasta entrar a mirar.
@@ -1196,7 +1200,9 @@ app.patch('/api/meetings/:id/attendance', requireAuth, requirePermission('calend
  */
 app.get('/api/notifications', requireAuth, async (req, res) => {
   try {
-    const notifications = await notificationService.getRecent();
+    // El filtro va en el servidor y no escondiendo filas en la pantalla: un
+    // aviso dirigido a otra persona no puede viajar en la respuesta.
+    const notifications = await notificationService.getRecent({ userId: req.user.id });
     res.json({ notifications });
   } catch (error) {
     console.error('❌ Error al obtener las notificaciones:', error);
@@ -1206,7 +1212,7 @@ app.get('/api/notifications', requireAuth, async (req, res) => {
 
 app.get('/api/notifications/unread-count', requireAuth, async (req, res) => {
   try {
-    const count = await notificationService.getUnreadCount();
+    const count = await notificationService.getUnreadCount({ userId: req.user.id });
     res.json({ count });
   } catch (error) {
     console.error('❌ Error al obtener el conteo de notificaciones:', error);
@@ -1216,7 +1222,10 @@ app.get('/api/notifications/unread-count', requireAuth, async (req, res) => {
 
 app.post('/api/notifications/:id/read', requireAuth, async (req, res) => {
   try {
-    await notificationService.markRead(req.params.id);
+    // Comprueba que sea visible para quien la marca, no solo que exista:
+    // filtrar la lista y dejar la fila abierta por id es una cortina.
+    const marcada = await notificationService.markRead(req.params.id, { userId: req.user.id });
+    if (!marcada) return res.status(404).json({ error: 'Notificación no encontrada.' });
     res.json({ success: true });
   } catch (error) {
     console.error('❌ Error al marcar la notificación como leída:', error);
@@ -1226,11 +1235,62 @@ app.post('/api/notifications/:id/read', requireAuth, async (req, res) => {
 
 app.post('/api/notifications/read-all', requireAuth, async (req, res) => {
   try {
-    await notificationService.markAllRead();
+    await notificationService.markAllRead({ userId: req.user.id });
     res.json({ success: true });
   } catch (error) {
     console.error('❌ Error al marcar las notificaciones como leídas:', error);
     res.status(500).json({ error: 'Error al marcar las notificaciones como leídas.', details: error.message });
+  }
+});
+
+
+/**
+ * Avisos al equipo: las notificaciones que una persona escribe a mano
+ * (`/admin/avisos`, `noticeService.js`).
+ *
+ * Piden `notices.send` y no solo sesión, a diferencia de leer la campana:
+ * esto le suena en el bolsillo a la gente, así que no es algo que convenga
+ * encendido por defecto para todos. La migración lo siembra a quien ya
+ * administra el panel (`roles.manage`).
+ */
+app.get('/api/notices/audiences', requireAuth, requirePermission('notices.send'), async (req, res) => {
+  try {
+    res.json(await noticeService.audiences());
+  } catch (error) {
+    console.error('❌ Error al listar los destinatarios:', error);
+    res.status(500).json({ error: 'Error al listar los destinatarios.', details: error.message });
+  }
+});
+
+app.get('/api/notices', requireAuth, requirePermission('notices.send'), async (req, res) => {
+  try {
+    res.json({ notices: await noticeService.history() });
+  } catch (error) {
+    console.error('❌ Error al listar los avisos enviados:', error);
+    res.status(500).json({ error: 'Error al listar los avisos enviados.', details: error.message });
+  }
+});
+
+app.post('/api/notices', requireAuth, requirePermission('notices.send'), async (req, res) => {
+  try {
+    const { title, body, link, everyone, userIds, roleIds } = req.body || {};
+    const summary = await noticeService.send({
+      title,
+      body,
+      link,
+      everyone: everyone === true,
+      userIds: Array.isArray(userIds) ? userIds : [],
+      roleIds: Array.isArray(roleIds) ? roleIds : [],
+      // El autor es la SESIÓN y nunca un campo del formulario: mandarlo desde
+      // la pantalla abriría la puerta a firmar un aviso con el nombre de otro.
+      senderId: req.user.id
+    });
+    res.json({ success: true, summary });
+  } catch (error) {
+    // Un título vacío, un enlace de afuera o nadie elegido es culpa de quien
+    // llama: 422 con el motivo, que es lo que la pantalla muestra.
+    console.warn(`⚠️  Aviso rechazado: ${error.message}`);
+    res.status(422).json({ error: error.message });
   }
 });
 

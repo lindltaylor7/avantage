@@ -346,7 +346,14 @@ export class PushService {
         notificationId: notification.id,
         type: notification.type,
         link: notification.link || ''
-      }
+      },
+      // El destinatario de la fila decide a qué teléfonos va. `user_id` en NULL
+      // significa "para todos" —así nacen todas las automáticas, que son avisos
+      // del negocio— y un aviso dirigido va solo al suyo. Esto tiene que salir
+      // de la MISMA columna que decide quién lo ve en la campana: si el push
+      // fuera a todos y la campana solo al destinatario, el aviso dirigido le
+      // sonaría en el bolsillo a gente que después no lo encuentra en el panel.
+      userIds: notification.user_id ? [notification.user_id] : null
     }).catch((error) => console.error(`[Push] Fallo al empujar la notificación: ${error.message}`));
   }
 }

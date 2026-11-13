@@ -2014,6 +2014,69 @@ antes de tocar el arranque de producción.
   no tiene un proyecto de Firebase, así que la forma del payload sale de la
   documentación de FCM HTTP v1 y no de una respuesta observada. El primer envío
   real hay que mirarlo con ese botón en la mano.
+- **Los avisos que el equipo se escribe a mano** (`/admin/avisos`,
+  `NoticesView.vue`, permiso `notices.send`, `noticeService.js`, rutas
+  `/api/notices*`). Con la app móvil instalada el equipo tiene un canal al
+  bolsillo de cada uno, y no había forma de usarlo para lo que la gente de
+  verdad necesita decirse: las notificaciones nacían SOLO de eventos del
+  negocio (ocho sitios: el bot, los dos avisos de Finanzas, el de proyecto
+  nuevo, el del portal del cliente).
+  **No tiene tabla propia**, como Cobranzas y el Reporte de Leads: un aviso
+  manual es una fila de `notifications` con `created_by` escrito. Una tabla
+  paralela obligaría a que la campana leyera de dos lados y a mantener
+  sincronizado el "no leído" en los dos — y el día que se separen, nadie sabría
+  cuál dice la verdad.
+  Lo que sí cambió es que las notificaciones pasaron a tener **destinatario**:
+  `notifications.user_id`, nullable, donde **NULL significa "para todos"**. Es
+  nullable y no se rellena a propósito: las filas que ya estaban y TODAS las
+  automáticas siguen naciendo en NULL, así que ni la campana ni los ocho sitios
+  que las crean cambian de comportamiento, y la lectura es un solo
+  `where('user_id', viewer).orWhereNull('user_id')` (`#visibleTo()`). Al revés
+  —una fila por usuario para todo— habría que tocar los ocho llamadores y
+  multiplicar cada aviso del bot por la cantidad de empleados.
+  **Un aviso dirigido a tres personas son TRES filas**, una por destinatario,
+  unidas por `batch_id`. Es lo que hace que `is_read` siga significando lo que
+  significa: cada quien marca el suyo. Con una fila compartida, el primero que
+  lo abre lo marca leído para los otros dos — que es, de hecho, lo que ya les
+  pasa a los avisos globales, y no hay razón para arrastrar esa rareza a lo
+  nuevo. `batch_id` es lo que vuelve a juntar esas filas en UN renglón del
+  historial: sin él, un aviso a diez personas se lee como diez avisos distintos
+  y no se puede decir "esto se mandó una vez, a diez".
+  **Los roles se expanden a personas en el momento de mandar**, no en cada
+  lectura: quien entre al rol la semana que viene vería un aviso que nunca
+  recibió —el push ya salió sin él— y quien salga perdería uno que sí le llegó
+  al teléfono. Es la misma razón por la que la comisión guarda su porcentaje en
+  la fila. Una persona elegida a dedo Y además por su rol es UNA destinataria
+  (`resolveRecipients()`, pura y con test): sin el desduplicado le llegarían dos
+  avisos idénticos y dos pushes. La pantalla cuenta con la MISMA regla, porque
+  con dos distintas prometería un número y el envío haría otro.
+  **El enlace del aviso solo puede ser una ruta de este panel**
+  (`isInternalPath()`): no alcanza con que empiece por `/` — `//evil.com`
+  también empieza por `/` y el navegador lo resuelve como `https://evil.com`, y
+  `/\evil.com` igual. De ese campo cuelga a dónde va quien toca un aviso que le
+  llegó al teléfono con el nombre de la empresa arriba, o sea la forma exacta de
+  un phishing interno. La primera versión de la comprobación era un
+  `startsWith('/')` y dejaba pasar los dos; lo pilló el test. En la pantalla el
+  destino es un desplegable cerrado y no un campo libre, por lo mismo que los
+  nombres de evento de la CAPI de mensajería no son configurables: el conjunto
+  válido es chico, y ofrecer un cuadro de texto solo da la oportunidad de
+  escribir algo que va a ser rechazado.
+  **Marcar leída comprueba que la notificación sea VISIBLE para quien la marca**
+  y no solo que exista (`markRead(id, { userId })`, la ruta responde 404): sin
+  eso, cualquiera con sesión podría marcar leído el aviso dirigido a otra
+  persona probando ids. Es el mismo cuidado de `requireLeadVisible` — filtrar la
+  lista y dejar la fila abierta por id es una cortina, no un permiso.
+  El push sale a quien dice la fila (`sendForNotification` pasa
+  `userIds: notification.user_id ? [...] : null`), y tiene que salir de la MISMA
+  columna que decide quién lo ve en la campana: si el push fuera a todos y la
+  campana solo al destinatario, el aviso dirigido le sonaría en el bolsillo a
+  gente que después no lo encuentra en el panel.
+  El permiso es propio y no "estar autenticado" como leer la campana: esto le
+  suena en el teléfono a la gente, así que no conviene encendido por defecto
+  para todos. La migración lo siembra a quien ya administra el panel
+  (`roles.manage`), y el autor sale de la **sesión** y nunca de un campo del
+  formulario — mandarlo desde la pantalla abriría la puerta a firmar un aviso
+  con el nombre de otro.
 - **RBAC**: `roles` ↔ `permissions` (N:N vía `role_permissions`) ↔ `users` (N:1 vía `role_id`), más
   `user_permissions`, que son las **excepciones de una persona** sobre lo que le da su rol. Los
   permisos efectivos (rol + otorgados − revocados) se resuelven en UN solo sitio
