@@ -114,10 +114,13 @@ flutter run \
 
 Para **Android** hace falta además `google-services.json` (Configuración del
 proyecto → tu app Android → «Descargar google-services.json») en
-`android/app/`, y descomentar las **dos** líneas del plugin de Google Services
-—una en `android/settings.gradle.kts` y otra en `android/app/build.gradle.kts`—.
-Están comentadas porque el plugin hace fallar la compilación si ese archivo no
-existe, y una app recién clonada tiene que poder compilar.
+`android/app/`. Ese archivo **no está en el repo** —es la configuración del
+proyecto de Firebase de cada entorno, ver el `.gitignore`— y el plugin de Google
+Services, que sí está activo en `android/settings.gradle.kts` y
+`android/app/build.gradle.kts`, **exige que exista**: sin él la compilación falla
+con «File google-services.json is missing». En una clonada nueva, entonces: o se
+baja de la consola, o se comentan esas dos líneas y la app compila igual y
+trabaja por sondeo.
 
 Para **web**, además, la clave VAPID (Cloud Messaging → «Certificados push
 web») en `--dart-define=FIREBASE_VAPID_KEY=...`: sin ella `getToken()` falla en
@@ -140,7 +143,7 @@ mitad.
 
 | Plataforma | Push | Compilada y verificada |
 |---|---|---|
-| Android | Sí (FCM) | ✅ `flutter build apk --debug` |
+| Android | Sí (FCM) | ✅ probada en un Redmi Note 13 Pro: login, registro del dispositivo, aviso publicado por el sistema (ver «Probar en un teléfono de verdad») |
 | Web | Sí (FCM + service worker) | ✅ `flutter build web --release` |
 | iOS | Sí (FCM, pide certificado APNs en Firebase) | ❌ necesita macOS |
 | macOS | Sí (FCM) | ❌ necesita macOS |
@@ -217,6 +220,100 @@ lo que se empuja es exactamente lo que esa persona ya puede leer en la campana.
 | `POST /api/devices`, `.../unregister`, `.../ping` | registrar este aparato |
 | `GET /api/devices` | los dispositivos de la propia cuenta |
 | `POST /api/push/test` | el envío de prueba |
+
+## Probar en un teléfono de verdad
+
+Lo de abajo salió de hacerlo el 13/11/2026 contra un Redmi Note 13 Pro
+(`2312DRA50G`) y una red de oficina. Los tres obstáculos que aparecieron no
+tienen nada que ver con la app y cada uno se ve como si la app estuviera rota.
+
+### El router de la oficina puede no dejar pasar nada
+
+Síntoma: `ClientException with SocketException: No route to host (errno 113)`
+al hacer login, con el teléfono y la PC **en la misma Wi-Fi y en el mismo
+rango** (`192.168.18.x` los dos).
+
+Eso es **aislamiento de clientes** (AP isolation) en el router: bloquea el
+tráfico entre dispositivos de la misma red. No es el firewall de Windows —ese
+daría «connection refused»— ni el puerto. Por Wi-Fi local no se puede, y
+cambiarlo es configuración del router.
+
+La salida sin tocar la red es el **cable**: `adb reverse` hace que el
+`localhost` del teléfono sea la PC.
+
+```bash
+adb reverse tcp:3000 tcp:3000
+# comprobar DESDE el teléfono:
+adb shell "curl -s -o /dev/null -w 'HTTP %{http_code}\n' http://localhost:3000/api/notifications"
+# tiene que decir HTTP 401 (pide token = llegó al backend)
+```
+
+Y el APK se compila apuntando a `localhost`, que ya está en la lista de
+`network_security_config.xml`:
+
+```bash
+flutter build apk --release --dart-define=API_BASE_URL=http://localhost:3000
+```
+
+El túnel vive mientras el cable esté conectado; al desenchufarlo hay que
+rearmarlo. **El push NO lo necesita**: viaja de los servidores de Google al
+teléfono por su propio internet. El cable solo es para que la app hable con
+nuestro backend (login, lista, marcar leído).
+
+### MIUI / HyperOS dice «Success» y no instala nada
+
+Síntoma: `adb install` responde `Success` y el paquete **no aparece** en
+`adb shell pm list packages`.
+
+Es la protección «Instalar vía USB» de MIUI. En vez de pelearla, se copia el
+APK al teléfono y se instala tocándolo:
+
+```bash
+# desde PowerShell (Git Bash convierte /sdcard en una ruta de Windows)
+adb push "C:\ruta\al\app-release.apk" /sdcard/Download/AvisosAvantage.apk
+```
+
+Después, en el teléfono: Archivos → Descargas → tocar el APK. MIUI pone una
+pantalla de permiso de fuente desconocida y un análisis de seguridad con cuenta
+atrás; las dos se aceptan.
+
+### MIUI mata la app en segundo plano
+
+Si el push no llega con la app cerrada, es el primer sospechoso. En el teléfono:
+Ajustes → Apps → Avisos Avantage → **Ahorro de batería: «Sin restricciones»**, y
+**Autoarranque** activado. Es el ajuste del que depende que FCM pueda despertar
+la app, y MIUI lo pone restrictivo por defecto.
+
+### Comprobar sin mirar el teléfono
+
+El sistema operativo dice la verdad sobre lo que se publicó:
+
+```bash
+# ¿se publicó el aviso #13 en la barra?
+adb shell dumpsys notification --noredact | grep "id=13 tag=null"
+
+# título y cuerpo de lo que se mostró
+adb shell dumpsys notification --noredact | grep -A40 "id=13 tag=null" | grep "android.title\|android.text"
+
+# ¿el canal quedó con la importancia correcta? (mImportance=4 es alta)
+adb shell dumpsys notification --noredact | grep "mId='avantage_avisos'"
+```
+
+**Ojo con un falso positivo**: `grep pe.avantage.avantage_avisos` a secas
+también coincide con la sección de *ajustes* de canales, que está ahí aunque no
+haya ningún aviso publicado. Hay que buscar el `NotificationRecord` con su
+`id=`, que es el id de la notificación del panel.
+
+### Disparar un aviso de prueba
+
+```bash
+node backend/scripts/avisoDePrueba.js "Reunión agendada" "Rafael Gonzales · hoy 4:30 p.m."
+```
+
+Pasa por `notificationService.create()`, o sea el mismo camino que el bot y
+Finanzas, y de paso imprime si el servidor tiene credenciales y cuántos
+dispositivos hay registrados — las dos preguntas que uno se hace cuando no
+llega nada.
 
 ## Lo que todavía no está verificado
 

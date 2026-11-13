@@ -5,13 +5,14 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 
     // Firebase: lee `android/app/google-services.json` y es lo que vuelve
-    // resoluble el proyecto de Firebase desde el lado nativo. Queda COMENTADO
-    // a propósito: sin ese archivo, el plugin hace fallar la compilación con
-    // "File google-services.json is missing", así que una app recién clonada
-    // no compilaría. Se descomenta junto con el `classpath` de
-    // `android/settings.gradle.kts` al configurar Firebase — ver el README de
-    // mobile/. Hasta entonces la app compila y trabaja por sondeo.
-    // id("com.google.gms.google-services")
+    // resoluble el proyecto de Firebase desde el lado nativo. Va en pareja con
+    // la línea de `android/settings.gradle.kts` y las dos EXIGEN ese archivo:
+    // sin él la compilación falla con "File google-services.json is missing".
+    // No está en el repo a propósito (es la configuración del proyecto de
+    // Firebase de cada entorno, ver el `.gitignore`), así que una clonada nueva
+    // lo baja de la consola o comenta las dos líneas — ahí la app compila igual
+    // y trabaja por sondeo. Ver el README de mobile/.
+    id("com.google.gms.google-services")
 }
 
 android {

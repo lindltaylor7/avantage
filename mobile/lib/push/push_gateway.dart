@@ -189,6 +189,17 @@ class PushGateway {
 
     await _register(token: token, transport: 'fcm');
 
+    // Este aparato pudo haber estado registrado por sondeo (una instalación
+    // anterior sin credenciales de Firebase, o un arranque en el que Firebase
+    // falló). Su fila se da de baja: el mismo teléfono en dos filas —una
+    // 'fcm' y una 'polling'— hace que la pantalla de dispositivos muestre dos
+    // aparatos donde hay uno, y esa pantalla existe justamente para
+    // diagnosticar. El id de sondeo es estable por instalación, así que se sabe
+    // exactamente cuál quitar. Al revés NO se hace: si el push falla y se cae
+    // al sondeo, el token de FCM sigue siendo válido y darlo de baja perdería
+    // el push por un fallo que puede ser de este arranque solamente.
+    await _unregisterQuietly(_identity!.pollingId);
+
     // El token ROTA (reinstalación, restauración de copia de seguridad, limpieza
     // de datos). Sin esto, el backend se queda con el viejo y a ese dispositivo
     // deja de llegarle todo, sin que nada falle a la vista.
@@ -345,6 +356,18 @@ class PushGateway {
       // El registro falla con el servidor caído o la sesión recién vencida. No
       // se escala: la app sigue funcionando y el registro se reintenta al
       // próximo arranque o al refrescar desde la pantalla de diagnóstico.
+    }
+  }
+
+  /// Da de baja un token sin que un fallo importe: se usa para limpiar el
+  /// registro viejo de este mismo aparato, que es ordenar y no una operación de
+  /// la que dependa nada.
+  Future<void> _unregisterQuietly(String token) async {
+    try {
+      await _devices.unregister(token);
+    } catch (_) {
+      // Queda la fila de más en la lista de dispositivos. Se vuelve a intentar
+      // en el próximo arranque.
     }
   }
 
