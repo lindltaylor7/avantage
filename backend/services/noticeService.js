@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { db } from '../db/connection.js';
+import { avatarUrlFor } from './userService.js';
 
 /**
  * Los avisos que el equipo se escribe a mano desde el panel
@@ -54,7 +55,10 @@ export class NoticeService {
     const [usuarios, roles] = await Promise.all([
       db('users')
         .leftJoin('roles', 'roles.id', 'users.role_id')
-        .select('users.id', 'users.name', 'users.email', 'roles.name as role_name')
+        .select(
+          'users.id', 'users.name', 'users.email', 'users.avatar_filename',
+          'users.role_id', 'roles.name as role_name'
+        )
         .orderBy('users.name', 'asc'),
       db('roles')
         .leftJoin('users', 'users.role_id', 'roles.id')
@@ -64,7 +68,14 @@ export class NoticeService {
         .orderBy('roles.name', 'asc')
     ]);
     return {
-      users: usuarios,
+      // La foto viaja como URL ya armada (`avatarUrlFor`, el mismo sitio que la
+      // del navbar y la del equipo de un proyecto) y no como nombre de archivo:
+      // la carpeta base la decide `UPLOADS_DIR` y puede cambiar entre
+      // despliegues. Donde no haya foto, la pantalla dibuja las iniciales.
+      users: usuarios.map(({ avatar_filename: avatarFilename, ...resto }) => ({
+        ...resto,
+        avatar_url: avatarUrlFor(avatarFilename)
+      })),
       roles: roles.map((rol) => ({ ...rol, people: Number(rol.people) }))
     };
   }
@@ -191,6 +202,8 @@ export class NoticeService {
         'autor.name as sender_name', 'destino.name as recipient_name'
       );
 
+    const leida = (fila) => fila.is_read === 1 || fila.is_read === true;
+
     return lotes.map(({ batch_id: batchId }) => {
       const delLote = filas.filter((f) => f.batch_id === batchId);
       const primera = delLote[0];
@@ -207,10 +220,25 @@ export class NoticeService {
         // ve cualquiera con sesión, y poner la cantidad de usuarios del panel
         // afirmaría que le llegó a gente que quizá nunca abrió la app.
         recipients: paraTodos ? null : delLote.length,
-        read_count: paraTodos ? null : delLote.filter((f) => f.is_read === 1 || f.is_read === true).length,
-        recipient_names: paraTodos
+        read_count: paraTodos ? null : delLote.filter(leida).length,
+        /*
+         * QUIÉNES, y no solo cuántos. Es lo que le permite a la pantalla
+         * dibujar el cuadro de "quién recibe qué" sin pedir otra ruta ni
+         * calcular otro estado: el cuadro se arma sobre estas mismas filas, así
+         * que el historial y el cuadro no pueden decir cosas distintas.
+         *
+         * `read` viaja por destinatario porque cada uno marca el suyo (son
+         * filas distintas, unidas por `batch_id`). En un aviso a TODOS no hay
+         * destinatarios ni lectura por persona que informar: es una sola fila
+         * con `user_id` en NULL, así que su `is_read` es el de quien la abrió
+         * primero y no dice nada de los demás.
+         */
+        recipient_list: paraTodos
           ? []
-          : delLote.map((f) => f.recipient_name).filter(Boolean).sort()
+          : delLote
+            .filter((f) => f.user_id !== null)
+            .map((f) => ({ id: f.user_id, name: f.recipient_name || null, read: leida(f) }))
+            .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'))
       };
     });
   }

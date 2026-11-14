@@ -2077,6 +2077,37 @@ antes de tocar el arranque de producción.
   (`roles.manage`), y el autor sale de la **sesión** y nunca de un campo del
   formulario — mandarlo desde la pantalla abriría la puerta a firmar un aviso
   con el nombre de otro.
+  **Su pantalla tiene dos vistas sobre los MISMOS datos** (pestañas, con lo
+  elegido recordado en `localStorage` entre `try`): «Enviados» contesta qué se
+  mandó y «Quién recibe qué» contesta a quién le llega — la otra mitad del
+  trabajo, que en la lista obliga a abrir aviso por aviso. Es el mismo recurso y
+  las mismas razones que las dos pestañas de Entregables y las dos vistas del
+  Setter Funnel: el cuadro **no pide otra ruta ni calcula otro estado**, se arma
+  sobre el mismo historial y la misma lista de destinatarios, porque dos vistas
+  con criterios propios es como se llega a que cada una diga un número distinto.
+  Para eso el historial devuelve `recipient_list` —**quiénes** y si cada uno lo
+  leyó, no solo cuántos—, que es también lo que permite dibujar las caras en la
+  lista con un anillo verde o naranja según lo haya leído o no.
+  En el cuadro, un aviso a todo el equipo es su propio estado (`all`, ○ hueco) y
+  **nunca «leído» ni «sin leer»**: es UNA fila con `user_id` en NULL, así que su
+  `is_read` es el de quien la abrió primero y afirmar con eso que a una persona
+  le consta sería inventar un dato — la misma razón por la que `read_count` vale
+  `null` ahí. Los tres estados se distinguen además por su **forma** (✓, ●, ○) y
+  no solo por color, porque el verde y el naranja son el mismo color con
+  deuteranopía, y sus tintes son los del sistema de píldoras del panel
+  (`.pill-success` / `.pill-warning` / `.pill-neutral`, con su corrección para el
+  tema oscuro) en vez de una paleta propia.
+  Tres cosas que esta pantalla hacía mal hasta el 14/11/2026 y conviene no
+  repetir: el icono del título era un `<svg>` **sin alto ni ancho** —el resto del
+  panel pone un emoji en `.heading-icon`, que solo le da `display` y un
+  desplazamiento—, así que el navegador lo estiraba hasta llenar la ventana y
+  tapaba el panel entero; los campos usaban `.form-control`, una clase de
+  Bootstrap que este proyecto **no tiene** (las suyas son `.form-input`,
+  `.form-textarea` y `.form-select`), así que se veían con el estilo por defecto
+  del navegador; y el encabezado no usaba el `h2.section-heading` +
+  `p.section-subheading` del resto de `/admin`. El cálculo de a quién le llega
+  cruzaba el rol **por su nombre** y ahora por `role_id`, que es el dato que de
+  verdad los une.
 - **RBAC**: `roles` ↔ `permissions` (N:N vía `role_permissions`) ↔ `users` (N:1 vía `role_id`), más
   `user_permissions`, que son las **excepciones de una persona** sobre lo que le da su rol. Los
   permisos efectivos (rol + otorgados − revocados) se resuelven en UN solo sitio

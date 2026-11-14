@@ -1,30 +1,33 @@
 <template>
   <main class="container-fluid notices-page">
-    <div class="page-head">
-      <h1 class="page-title">
-        <svg class="heading-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-        </svg>
-        Avisos al equipo
-      </h1>
-      <p class="page-sub">
-        Lo que escribas acá le llega a la campana del panel y, si tiene la app instalada,
-        al teléfono — aunque la tenga cerrada.
-      </p>
-    </div>
+    <header class="notices-header">
+      <div>
+        <h2 class="section-heading">
+          <span class="heading-icon">🔔</span> Avisos al equipo
+        </h2>
+        <p class="section-subheading">
+          Lo que escribas acá le llega a la campana del panel y, si tiene la app instalada,
+          al teléfono — aunque la tenga cerrada.
+        </p>
+      </div>
+      <button class="btn-action-secondary" :disabled="loadingHistory" @click="refresh">
+        <span :class="['btn-icon', { 'spin-animation': loadingHistory }]">🔄</span>
+        {{ loadingHistory ? 'Cargando…' : 'Actualizar' }}
+      </button>
+    </header>
 
     <div class="notices-grid">
       <!-- ───────────────────────── Escribir el aviso ───────────────────────── -->
       <section class="card compose">
-        <h2 class="card-title">Nuevo aviso</h2>
+        <h3 class="card-title">Nuevo aviso</h3>
 
-        <label class="field">
-          <span class="field-label">Título</span>
+        <div class="form-group">
+          <label class="form-label" for="aviso-titulo">Título</label>
           <input
+            id="aviso-titulo"
             v-model="form.title"
             type="text"
-            class="form-control"
+            class="form-input"
             maxlength="120"
             placeholder="Reunión de equipo a las 5"
             @keydown.enter.prevent="focusBody"
@@ -34,36 +37,35 @@
           <span v-if="form.title.length > 90" class="field-hint">
             {{ 120 - form.title.length }} caracteres restantes
           </span>
-        </label>
+        </div>
 
-        <label class="field">
-          <span class="field-label">Mensaje <em>(opcional)</em></span>
+        <div class="form-group">
+          <label class="form-label" for="aviso-cuerpo">Mensaje <em>(opcional)</em></label>
           <textarea
+            id="aviso-cuerpo"
             ref="bodyInput"
             v-model="form.body"
-            class="form-control"
+            class="form-textarea"
             rows="3"
             maxlength="1000"
             placeholder="En la sala de arriba. Traigan el reporte de la semana."
           ></textarea>
-        </label>
+        </div>
 
-        <label class="field">
-          <span class="field-label">Llevar a <em>(opcional)</em></span>
-          <select v-model="form.link" class="form-control">
+        <div class="form-group">
+          <label class="form-label" for="aviso-link">Llevar a <em>(opcional)</em></label>
+          <select id="aviso-link" v-model="form.link" class="form-select">
             <option value="">No llevar a ninguna pantalla</option>
             <option v-for="d in LINK_DESTINATIONS" :key="d.path" :value="d.path">{{ d.label }}</option>
           </select>
-          <span class="field-hint">
-            Al tocar el aviso, se abre esa pantalla del panel.
-          </span>
-        </label>
+          <span class="field-hint">Al tocar el aviso, se abre esa pantalla del panel.</span>
+        </div>
 
         <!-- ─────────────────────────── A quién ─────────────────────────── -->
-        <div class="field">
-          <span class="field-label">¿A quién?</span>
+        <div class="form-group">
+          <span class="form-label">¿A quién?</span>
 
-          <label class="choice">
+          <label class="choice" :class="{ 'is-on': form.everyone }">
             <input v-model="form.everyone" type="radio" :value="true" />
             <span>
               <strong>A todo el equipo</strong>
@@ -71,7 +73,7 @@
             </span>
           </label>
 
-          <label class="choice">
+          <label class="choice" :class="{ 'is-on': !form.everyone }">
             <input v-model="form.everyone" type="radio" :value="false" />
             <span>
               <strong>Solo a quien yo elija</strong>
@@ -107,24 +109,46 @@
                 v-for="u in audiences.users"
                 :key="'u' + u.id"
                 type="button"
-                class="chip"
-                :class="{ 'is-on': form.userIds.includes(u.id) }"
+                class="chip chip-person"
+                :class="{ 'is-on': form.userIds.includes(u.id), 'is-by-role': byRoleOnly(u) }"
+                :title="byRoleOnly(u) ? `Ya le llega por su rol (${u.role_name})` : (u.role_name || u.email)"
                 @click="toggle(form.userIds, u.id)"
               >
+                <span class="avatar avatar-xs" :style="avatarStyle(u)">
+                  <img v-if="u.avatar_url" :src="u.avatar_url" :alt="u.name || u.email" />
+                  <template v-else>{{ initials(u.name || u.email) }}</template>
+                </span>
                 {{ u.name || u.email }}
-                <span v-if="u.role_name" class="chip-role">{{ u.role_name }}</span>
               </button>
             </div>
           </div>
 
-          <!-- Cuántos reciben, resuelto en la pantalla con la misma regla que el
-               servidor (una persona elegida a dedo y además por su rol es UNA).
-               Sin esto, "Setter + Lucía" parece dos avisos para Lucía. -->
-          <p class="picker-total" :class="{ 'is-empty': recipientCount === 0 }">
-            {{ recipientCount === 0
-              ? 'Todavía no elegiste a nadie.'
-              : `Le va a llegar a ${recipientCount} ${recipientCount === 1 ? 'persona' : 'personas'}.` }}
-          </p>
+          <!-- Cuántos reciben Y quiénes, resuelto en la pantalla con la misma
+               regla que el servidor (una persona elegida a dedo y además por su
+               rol es UNA). Sin esto, "Setter + Lucía" parece dos avisos para
+               Lucía; y sin las caras, "le va a llegar a 8" obliga a recontar los
+               chips encendidos para saber si falta alguien. -->
+          <div class="picker-total" :class="{ 'is-empty': recipients.length === 0 }">
+            <template v-if="recipients.length === 0">Todavía no elegiste a nadie.</template>
+            <template v-else>
+              <span class="picker-total-text">
+                Le va a llegar a {{ recipients.length }}
+                {{ recipients.length === 1 ? 'persona' : 'personas' }}:
+              </span>
+              <span class="avatar-row">
+                <span
+                  v-for="u in recipients"
+                  :key="'sel' + u.id"
+                  class="avatar avatar-sm"
+                  :style="avatarStyle(u)"
+                  :title="u.name || u.email"
+                >
+                  <img v-if="u.avatar_url" :src="u.avatar_url" :alt="u.name || u.email" />
+                  <template v-else>{{ initials(u.name || u.email) }}</template>
+                </span>
+              </span>
+            </template>
+          </div>
         </div>
 
         <p v-if="error" class="alert-error">{{ error }}</p>
@@ -140,19 +164,38 @@
         </div>
       </section>
 
-      <!-- ──────────────────────────── Historial ──────────────────────────── -->
+      <!-- ──────── Lo enviado, en dos vistas sobre los MISMOS datos ─────────
+           «Enviados» contesta qué se mandó; «Quién recibe qué» contesta a quién
+           le llega — la otra mitad del trabajo, que en la lista obliga a abrir
+           aviso por aviso. El cuadro NO pide otra ruta ni calcula otro estado:
+           se arma sobre `notices` y `audiences`, así que las dos vistas no
+           pueden decir cosas distintas. -->
       <section class="card history">
-        <h2 class="card-title">
-          Enviados
-          <button type="button" class="btn-action-ghost btn-mini" @click="loadHistory">Actualizar</button>
-        </h2>
+        <div class="card-title">
+          <div class="tabs">
+            <button
+              type="button"
+              class="tab"
+              :class="{ 'is-on': view === 'lista' }"
+              @click="setView('lista')"
+            >Enviados</button>
+            <button
+              type="button"
+              class="tab"
+              :class="{ 'is-on': view === 'matriz' }"
+              @click="setView('matriz')"
+            >Quién recibe qué</button>
+          </div>
+          <span class="muted">{{ notices.length }} envío{{ notices.length === 1 ? '' : 's' }}</span>
+        </div>
 
         <p v-if="loadingHistory" class="muted">Cargando…</p>
         <p v-else-if="notices.length === 0" class="muted">
           Todavía no se mandó ningún aviso desde acá.
         </p>
 
-        <ul v-else class="notice-list">
+        <!-- ──────────────────────────── Lista ──────────────────────────── -->
+        <ul v-else-if="view === 'lista'" class="notice-list">
           <li v-for="n in notices" :key="n.batch_id" class="notice-row">
             <div class="notice-head">
               <strong class="notice-title">{{ n.title }}</strong>
@@ -160,22 +203,125 @@
             </div>
             <p v-if="n.body" class="notice-body">{{ n.body }}</p>
             <div class="notice-meta">
-              <span class="pill pill-neutral">
+              <span class="pill" :class="n.everyone ? 'pill-info' : 'pill-neutral'">
                 {{ n.everyone ? 'Todo el equipo' : `${n.recipients} ${n.recipients === 1 ? 'persona' : 'personas'}` }}
               </span>
-              <!-- Para un aviso a todos no se cuenta leído: la campana la ve
-                   cualquiera con sesión, así que no hay un conjunto de
-                   destinatarios contra el que medirlo. -->
-              <span v-if="!n.everyone" class="pill" :class="n.read_count === n.recipients ? 'pill-success' : 'pill-warning'">
+              <!-- Para un aviso a todos no se cuenta leído: es UNA fila con
+                   `user_id` en NULL, así que su `is_read` es el de quien la
+                   abrió primero y no dice nada de los demás. -->
+              <span
+                v-if="!n.everyone"
+                class="pill"
+                :class="n.read_count === n.recipients ? 'pill-success' : 'pill-warning'"
+              >
                 {{ n.read_count }} de {{ n.recipients }} leído{{ n.read_count === 1 ? '' : 's' }}
               </span>
               <span v-if="n.sender_name" class="notice-sender">por {{ n.sender_name }}</span>
             </div>
-            <p v-if="!n.everyone && n.recipient_names.length > 0" class="notice-to">
-              {{ n.recipient_names.join(' · ') }}
-            </p>
+            <div v-if="!n.everyone && n.recipient_list.length > 0" class="avatar-row notice-to">
+              <span
+                v-for="r in n.recipient_list"
+                :key="n.batch_id + '-' + r.id"
+                class="avatar avatar-sm"
+                :class="r.read ? 'is-read' : 'is-unread'"
+                :style="avatarStyle(personOf(r))"
+                :title="`${r.name || 'Sin nombre'} — ${r.read ? 'lo leyó' : 'todavía no lo leyó'}`"
+              >
+                <img v-if="personOf(r).avatar_url" :src="personOf(r).avatar_url" :alt="r.name || ''" />
+                <template v-else>{{ initials(r.name) }}</template>
+              </span>
+            </div>
           </li>
         </ul>
+
+        <!-- ───────────────────── Quién recibe qué ───────────────────── -->
+        <div v-else class="matrix-wrap">
+          <div class="legend">
+            <span class="legend-item"><i class="cell-dot is-read">✓</i> lo leyó</span>
+            <span class="legend-item"><i class="cell-dot is-unread">●</i> le llegó, sin leer</span>
+            <span class="legend-item"><i class="cell-dot is-all">○</i> le llega por ser para todo el equipo</span>
+            <span class="legend-item"><i class="cell-dot is-none">·</i> no le llegó</span>
+          </div>
+
+          <!-- Una tabla ancha se desplaza dentro de su propio contenedor: el
+               cuerpo de la página nunca se desplaza de lado. -->
+          <div class="matrix-scroll">
+            <table class="matrix">
+              <thead>
+                <tr>
+                  <th class="col-notice">Aviso</th>
+                  <th
+                    v-for="u in audiences.users"
+                    :key="'h' + u.id"
+                    class="col-person"
+                    :class="{ 'is-focus': focusId === u.id }"
+                  >
+                    <button type="button" class="person-head" :title="`Ver lo que le llegó a ${u.name || u.email}`" @click="focusOn(u.id)">
+                      <span class="avatar avatar-sm" :style="avatarStyle(u)">
+                        <img v-if="u.avatar_url" :src="u.avatar_url" :alt="u.name || u.email" />
+                        <template v-else>{{ initials(u.name || u.email) }}</template>
+                      </span>
+                      <span class="person-name">{{ shortName(u.name || u.email) }}</span>
+                      <span class="person-count">{{ statsFor(u.id).directed }}</span>
+                    </button>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="n in notices" :key="'m' + n.batch_id">
+                  <th class="col-notice" scope="row">
+                    <span class="matrix-title" :title="n.title">{{ n.title }}</span>
+                    <span class="matrix-when" :title="fullDate(n.created_at)">{{ relative(n.created_at) }}</span>
+                  </th>
+                  <td
+                    v-for="u in audiences.users"
+                    :key="n.batch_id + '-' + u.id"
+                    class="cell"
+                    :class="{ 'is-focus': focusId === u.id }"
+                  >
+                    <span class="cell-dot" :class="'is-' + cellState(n, u.id)" :title="cellTitle(n, u)">
+                      {{ CELL_GLYPH[cellState(n, u.id)] }}
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Tocar a una persona abre lo suyo: la columna contesta "¿le llegó
+               este aviso?" y esto contesta "¿qué le llegó?", que es la pregunta
+               con la que se entra acá cuando alguien dice que no se enteró. -->
+          <div v-if="focusPerson" class="focus">
+            <div class="focus-head">
+              <span class="avatar avatar-md" :style="avatarStyle(focusPerson)">
+                <img v-if="focusPerson.avatar_url" :src="focusPerson.avatar_url" :alt="focusPerson.name || ''" />
+                <template v-else>{{ initials(focusPerson.name || focusPerson.email) }}</template>
+              </span>
+              <div>
+                <strong>{{ focusPerson.name || focusPerson.email }}</strong>
+                <span class="focus-role">{{ focusPerson.role_name || 'Sin rol' }}</span>
+              </div>
+              <button type="button" class="btn-action-ghost btn-mini" @click="focusId = null">Cerrar</button>
+            </div>
+            <p class="focus-sum">
+              {{ focusStats.directed }} dirigido{{ focusStats.directed === 1 ? '' : 's' }}
+              ({{ focusStats.unread }} sin leer)
+              · {{ focusStats.broadcast }} a todo el equipo
+            </p>
+            <ul class="focus-list">
+              <li v-for="n in focusNotices" :key="'f' + n.batch_id">
+                <span class="cell-dot" :class="'is-' + cellState(n, focusPerson.id)">
+                  {{ CELL_GLYPH[cellState(n, focusPerson.id)] }}
+                </span>
+                <span class="focus-title" :title="n.title">{{ n.title }}</span>
+                <span class="focus-when">{{ relative(n.created_at) }}</span>
+              </li>
+              <li v-if="focusNotices.length === 0" class="muted">
+                De los últimos avisos, a esta persona no le llegó ninguno.
+              </li>
+            </ul>
+          </div>
+        </div>
       </section>
     </div>
   </main>
@@ -184,6 +330,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
 import { apiFetch } from '../apiClient.js';
+import { avatarColor, initials } from '../avatars.js';
 
 /**
  * A dónde puede llevar un aviso.
@@ -205,6 +352,9 @@ const LINK_DESTINATIONS = [
   { path: '/admin/finanzas', label: 'Finanzas' }
 ];
 
+/** El glifo de cada estado de una celda del cuadro. */
+const CELL_GLYPH = { read: '✓', unread: '●', all: '○', none: '·' };
+
 const audiences = ref({ users: [], roles: [] });
 const notices = ref([]);
 const loadingHistory = ref(true);
@@ -212,36 +362,138 @@ const sending = ref(false);
 const error = ref('');
 const sent = ref('');
 const bodyInput = ref(null);
+const focusId = ref(null);
 
 const emptyForm = () => ({ title: '', body: '', link: '', everyone: true, userIds: [], roleIds: [] });
 const form = ref(emptyForm());
 
-/**
- * Cuántas personas reciben. Se calcula acá con la MISMA regla del servidor
- * (`NoticeService.resolveRecipients`): quien está elegido a dedo y además por
- * su rol cuenta una vez. Con dos reglas distintas, la pantalla prometería un
- * número y el envío haría otro.
- */
-const recipientCount = computed(() => {
-  if (form.value.everyone) return 0;
-  const ids = new Set(form.value.userIds);
-  for (const rol of form.value.roleIds) {
-    for (const u of audiences.value.users) {
-      if (rolOf(u) === rol) ids.add(u.id);
-    }
+/* La vista elegida se recuerda, entre `try` porque en una ventana privada el
+   acceso al `localStorage` lanza (mismo cuidado que Entregables). */
+const view = ref(readStored('avisos.view') === 'matriz' ? 'matriz' : 'lista');
+
+function readStored(clave) {
+  try {
+    return localStorage.getItem(clave);
+  } catch {
+    return null;
   }
-  return ids.size;
+}
+
+function setView(valor) {
+  view.value = valor;
+  try {
+    localStorage.setItem('avisos.view', valor);
+  } catch {
+    /* Una ventana privada no impide usar la pantalla. */
+  }
+}
+
+// ───────────────────────────── Quién recibe ──────────────────────────────
+
+const usersById = computed(() => {
+  const mapa = new Map();
+  for (const u of audiences.value.users) mapa.set(u.id, u);
+  return mapa;
 });
 
-function rolOf(user) {
-  const rol = audiences.value.roles.find((r) => r.name === user.role_name);
-  return rol ? rol.id : null;
+/**
+ * A quiénes les llegaría el aviso que se está escribiendo, con la MISMA regla
+ * del servidor (`NoticeService.resolveRecipients`): quien está elegido a dedo y
+ * además por su rol cuenta una vez. Con dos reglas distintas, la pantalla
+ * prometería un número y el envío haría otro.
+ */
+const recipients = computed(() => {
+  if (form.value.everyone) return [];
+  const ids = new Set(form.value.userIds);
+  for (const u of audiences.value.users) {
+    if (u.role_id != null && form.value.roleIds.includes(u.role_id)) ids.add(u.id);
+  }
+  return audiences.value.users.filter((u) => ids.has(u.id));
+});
+
+/** Ya le llega por su rol, sin haberla elegido a dedo. */
+function byRoleOnly(user) {
+  return (
+    !form.value.userIds.includes(user.id) &&
+    user.role_id != null &&
+    form.value.roleIds.includes(user.role_id)
+  );
 }
 
 const canSend = computed(() => {
   if (!form.value.title.trim()) return false;
-  return form.value.everyone || recipientCount.value > 0;
+  return form.value.everyone || recipients.value.length > 0;
 });
+
+// ───────────────────────────── El cuadro ──────────────────────────────
+
+/**
+ * En qué estado está la celda (persona × aviso).
+ *
+ * Un aviso a todo el equipo es `all` y no `read`/`unread`: es UNA fila
+ * compartida, así que su `is_read` es el de quien la abrió primero, y afirmar
+ * con eso que una persona lo leyó sería inventar un dato.
+ */
+function cellState(notice, userId) {
+  if (notice.everyone) return 'all';
+  const fila = notice.recipient_list.find((r) => r.id === userId);
+  if (!fila) return 'none';
+  return fila.read ? 'read' : 'unread';
+}
+
+const CELL_WORDS = {
+  all: 'le llega por ser un aviso a todo el equipo',
+  read: 'lo leyó',
+  unread: 'le llegó y todavía no lo leyó',
+  none: 'no le llegó'
+};
+
+function cellTitle(notice, user) {
+  return `${user.name || user.email}: ${CELL_WORDS[cellState(notice, user.id)]} — ${notice.title}`;
+}
+
+/** Cuántos avisos le llegaron a alguien, separando los dirigidos de los de todos. */
+function statsFor(userId) {
+  let directed = 0;
+  let unread = 0;
+  let broadcast = 0;
+  for (const n of notices.value) {
+    const estado = cellState(n, userId);
+    if (estado === 'all') broadcast += 1;
+    else if (estado === 'read') directed += 1;
+    else if (estado === 'unread') {
+      directed += 1;
+      unread += 1;
+    }
+  }
+  return { directed, unread, broadcast };
+}
+
+const focusPerson = computed(() => (focusId.value == null ? null : usersById.value.get(focusId.value) || null));
+const focusStats = computed(() => (focusPerson.value ? statsFor(focusPerson.value.id) : { directed: 0, unread: 0, broadcast: 0 }));
+const focusNotices = computed(() =>
+  focusPerson.value ? notices.value.filter((n) => cellState(n, focusPerson.value.id) !== 'none') : []
+);
+
+function focusOn(userId) {
+  focusId.value = focusId.value === userId ? null : userId;
+}
+
+/** El destinatario de una fila del historial, para poder dibujar su foto. */
+function personOf(recipient) {
+  return usersById.value.get(recipient.id) || { name: recipient.name, avatar_url: null };
+}
+
+function avatarStyle(user) {
+  return user?.avatar_url ? {} : { background: avatarColor(user?.name || user?.email || '') };
+}
+
+/** En la cabecera del cuadro cada columna son ~70 px: entra el nombre de pila. */
+function shortName(name) {
+  return String(name || '').trim().split(/\s+/)[0] || '—';
+}
+
+// ───────────────────────────── Acciones ──────────────────────────────
 
 function toggle(list, id) {
   const i = list.indexOf(id);
@@ -278,6 +530,11 @@ async function loadHistory() {
   } finally {
     loadingHistory.value = false;
   }
+}
+
+function refresh() {
+  loadAudiences();
+  loadHistory();
 }
 
 async function send() {
@@ -340,10 +597,7 @@ function fullDate(iso) {
   return iso ? new Date(iso).toLocaleString('es-PE', { timeZone: 'America/Lima' }) : '';
 }
 
-onMounted(() => {
-  loadAudiences();
-  loadHistory();
-});
+onMounted(refresh);
 </script>
 
 <style scoped>
@@ -353,17 +607,19 @@ onMounted(() => {
   padding: var(--page-py) var(--page-px) var(--page-pb);
 }
 
-.page-head { margin-bottom: 1rem; }
-.page-sub {
-  color: var(--text-muted);
-  font-size: 0.85rem;
-  margin: 0.25rem 0 0;
-  max-width: 60ch;
+.notices-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
 }
+.notices-header .section-subheading { max-width: 70ch; margin-bottom: 0; }
 
 .notices-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
   gap: 1rem;
   align-items: start;
 }
@@ -374,7 +630,7 @@ onMounted(() => {
 .card {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
+  border-radius: var(--radius-lg, 12px);
   padding: 1rem;
 }
 .card-title {
@@ -387,21 +643,15 @@ onMounted(() => {
   margin: 0 0 0.85rem;
 }
 
-.field { display: block; margin-bottom: 0.85rem; }
-.field-label {
-  display: block;
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--text-sub);
-  margin-bottom: 0.3rem;
-}
-.field-label em { font-weight: 400; color: var(--text-muted); font-style: normal; }
 .field-hint {
   display: block;
   font-size: 0.74rem;
   color: var(--text-muted);
   margin-top: 0.25rem;
 }
+.form-label em { font-weight: 400; color: var(--text-muted); font-style: normal; }
+
+/* ─────────────────────────────── A quién ─────────────────────────────── */
 
 .choice {
   display: flex;
@@ -414,6 +664,10 @@ onMounted(() => {
   margin-bottom: 0.4rem;
 }
 .choice:hover { background: var(--bg-card-hover); }
+.choice.is-on {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 7%, transparent);
+}
 .choice input { margin-top: 0.2rem; }
 .choice strong { display: block; font-size: 0.85rem; }
 .choice em {
@@ -443,8 +697,9 @@ onMounted(() => {
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 0.3rem;
-  padding: 0.28rem 0.6rem;
+  gap: 0.35rem;
+  padding: 0.25rem 0.6rem;
+  font: inherit;
   font-size: 0.8rem;
   border: 1px solid var(--border-color);
   border-radius: 999px;
@@ -452,6 +707,7 @@ onMounted(() => {
   color: var(--text-main);
   cursor: pointer;
 }
+.chip-person { padding-left: 0.25rem; }
 .chip:hover:not(:disabled) { border-color: var(--border-strong); }
 .chip:disabled { opacity: 0.45; cursor: not-allowed; }
 .chip.is-on {
@@ -459,18 +715,22 @@ onMounted(() => {
   border-color: var(--primary);
   color: #fff;
 }
-.chip-count,
-.chip-role {
-  font-size: 0.7rem;
-  opacity: 0.75;
+/* Ya le llega por su rol: se marca distinto de "la elegí a dedo" para que no
+   parezca que falta encenderla. */
+.chip.is-by-role:not(.is-on) {
+  border-color: var(--primary);
+  border-style: dashed;
 }
+.chip-count { font-size: 0.7rem; opacity: 0.75; }
+
 .picker-total {
   font-size: 0.78rem;
   font-weight: 600;
-  margin: 0.6rem 0 0;
-  color: var(--primary);
+  margin-top: 0.6rem;
+  color: var(--text-sub);
 }
 .picker-total.is-empty { color: var(--text-muted); font-weight: 400; }
+.picker-total-text { display: block; margin-bottom: 0.3rem; }
 
 .compose-actions { display: flex; gap: 0.5rem; }
 
@@ -492,8 +752,54 @@ onMounted(() => {
   border: 1px solid color-mix(in srgb, var(--accent-emerald) 30%, transparent);
 }
 
-.muted { color: var(--text-muted); font-size: 0.83rem; }
+.muted { color: var(--text-muted); font-size: 0.8rem; font-weight: 400; }
 .btn-mini { font-size: 0.75rem; padding: 0.2rem 0.5rem; }
+
+/* ─────────────────────────────── Avatares ────────────────────────────── */
+
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: #fff;
+  font-weight: 700;
+  overflow: hidden;
+  flex: 0 0 auto;
+  line-height: 1;
+}
+.avatar img { width: 100%; height: 100%; object-fit: cover; }
+.avatar-xs { width: 20px; height: 20px; font-size: 0.56rem; }
+.avatar-sm { width: 26px; height: 26px; font-size: 0.64rem; }
+.avatar-md { width: 38px; height: 38px; font-size: 0.85rem; }
+.avatar-row { display: inline-flex; flex-wrap: wrap; gap: 0.3rem; }
+/* Un anillo dice si lo leyó: la foto sola no distingue al que se enteró del
+   que no, que es lo que se viene a mirar después de mandarlo. */
+.avatar.is-read { box-shadow: 0 0 0 2px var(--accent-emerald); }
+.avatar.is-unread { box-shadow: 0 0 0 2px var(--cta); opacity: 0.7; }
+
+/* ─────────────────────────────── Pestañas ────────────────────────────── */
+
+.tabs { display: inline-flex; gap: 0.25rem; }
+.tab {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.3rem 0.65rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.tab:hover { color: var(--text-main); }
+.tab.is-on {
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  border-color: color-mix(in srgb, var(--primary) 35%, transparent);
+  color: var(--on-tint-strong, var(--primary));
+}
+
+/* ──────────────────────────────── Lista ──────────────────────────────── */
 
 .notice-list { list-style: none; margin: 0; padding: 0; }
 .notice-row {
@@ -527,9 +833,164 @@ onMounted(() => {
   margin-top: 0.45rem;
 }
 .notice-sender { font-size: 0.73rem; color: var(--text-muted); }
-.notice-to {
+.notice-to { margin-top: 0.45rem; }
+
+/* ──────────────────────────────── Cuadro ─────────────────────────────── */
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
   font-size: 0.74rem;
   color: var(--text-muted);
-  margin: 0.35rem 0 0;
+  margin-bottom: 0.6rem;
+}
+.legend-item { display: inline-flex; align-items: center; gap: 0.3rem; }
+
+.matrix-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md, 9px);
+}
+.matrix {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  font-size: 0.78rem;
+}
+.matrix th,
+.matrix td { padding: 0.4rem 0.35rem; }
+
+.matrix thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border-color);
+  z-index: 2;
+}
+/* La columna del aviso queda fija: con diez personas la fila se lee de lado, y
+   sin el título a la vista no se sabe de qué aviso es la celda. */
+.col-notice {
+  position: sticky;
+  left: 0;
+  background: var(--bg-card);
+  text-align: left;
+  min-width: 190px;
+  max-width: 230px;
+  border-right: 1px solid var(--border-color);
+  z-index: 1;
+}
+.matrix thead .col-notice { z-index: 3; }
+.matrix tbody .col-notice { font-weight: 600; vertical-align: top; }
+.matrix-title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.matrix-when { font-size: 0.7rem; font-weight: 400; color: var(--text-muted); }
+
+.col-person { width: 72px; }
+.person-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  width: 100%;
+  background: transparent;
+  border: none;
+  font: inherit;
+  color: var(--text-sub);
+  cursor: pointer;
+  padding: 0;
+}
+.person-name {
+  font-size: 0.7rem;
+  max-width: 68px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.person-count {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  background: var(--surface-2);
+  border-radius: 999px;
+  padding: 0 0.35rem;
+}
+
+.matrix tbody tr:nth-child(even) td,
+.matrix tbody tr:nth-child(even) .col-notice { background: var(--surface-1); }
+.matrix tbody tr:hover td,
+.matrix tbody tr:hover .col-notice { background: var(--bg-card-hover); }
+
+.cell { text-align: center; }
+.cell.is-focus,
+.col-person.is-focus { background: color-mix(in srgb, var(--primary) 10%, transparent); }
+
+.cell-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 700;
+}
+/* Los mismos tintes del sistema de píldoras del panel (`.pill-success` /
+   `.pill-warning` / `.pill-neutral`, con sus correcciones de color para el tema
+   oscuro): un cuadro de estados que inventa su propia paleta es el mismo verde
+   diciendo dos cosas distintas según la pantalla. Y los tres se distinguen
+   también por su FORMA —✓ relleno, ● relleno, ● hueco— porque el verde y el
+   naranja son el mismo color con deuteranopía. */
+.cell-dot.is-read {
+  background: rgba(46, 125, 70, 0.12);
+  color: #1F4A2C;
+  border: 1px solid rgba(46, 125, 70, 0.35);
+}
+.cell-dot.is-unread {
+  background: rgba(222, 117, 75, 0.14);
+  color: #8C4A24;
+  border: 1px solid rgba(222, 117, 75, 0.35);
+}
+.cell-dot.is-all {
+  color: var(--text-sub);
+  background: var(--surface-2);
+  border: 1px solid var(--border-color);
+}
+.cell-dot.is-none { color: var(--text-muted); opacity: 0.5; }
+
+:root[data-theme="dark"] .cell-dot.is-read { color: #5FBE79; }
+:root[data-theme="dark"] .cell-dot.is-unread { color: #F0A87E; }
+
+/* ──────────────────────── Lo que recibió una persona ─────────────────── */
+
+.focus {
+  margin-top: 0.85rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md, 9px);
+  padding: 0.75rem;
+  background: var(--surface-1);
+}
+.focus-head { display: flex; align-items: center; gap: 0.6rem; }
+.focus-head > div { flex: 1; min-width: 0; }
+.focus-head strong { display: block; font-size: 0.9rem; }
+.focus-role { font-size: 0.74rem; color: var(--text-muted); }
+.focus-sum { font-size: 0.78rem; color: var(--text-sub); margin: 0.5rem 0 0.4rem; }
+.focus-list { list-style: none; margin: 0; padding: 0; }
+.focus-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.25rem 0;
+  font-size: 0.8rem;
+}
+.focus-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.focus-when { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
+
+@media (max-width: 760px) {
+  .col-notice { min-width: 150px; }
 }
 </style>
