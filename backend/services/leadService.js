@@ -1466,6 +1466,17 @@ export class LeadService {
    *
    * `actor` es `req.user` (una persona), `{ type: 'bot' }` o nada (el backend).
    */
+  /**
+   * ¿Este lead ya tiene una venta cerrada? Se pregunta por el proyecto abierto
+   * y no por la etapa: la etapa la mueven el bot y los automatismos, y el
+   * proyecto no — es el mismo criterio con el que `isWonLead()` cuenta una
+   * venta en Campañas aunque la tarjeta se haya quedado sin mover.
+   */
+  async #hasOpenProject(leadId) {
+    const project = await db('projects').where({ lead_id: leadId }).first('id');
+    return Boolean(project);
+  }
+
   async updateLeadStatus(id, status, { actor = null, reason = null } = {}) {
     const current = await db('leads').where({ id }).first();
     if (!current) return null;
@@ -1489,7 +1500,27 @@ export class LeadService {
     const graduated = leadHasGraduated(current, salesStatuses);
     const staysCommercial = isSalesFunnelStatus(status, salesStatuses);
 
-    if (graduated && !staysCommercial && actorType !== 'user') {
+    /*
+     * Una venta ya cerrada es del closer pase lo que pase con su etapa.
+     *
+     * El sello `sales_funnel_at` no alcanzaba: una persona que devolvía el
+     * lead a una etapa del setter se lo llevaba puesto (abajo), y a partir de
+     * ahí `leadHasGraduated()` decía que no, así que el bot volvía a tratarlo
+     * como un contacto por calificar y lo seguía moviendo
+     * (`conversacion_abierta`, `calificando`, `congelado`). El lead salía
+     * además del Funnel de Ventas, con lo que nadie del equipo comercial lo
+     * veía pasar: 19 proyectos abiertos cuyo lead no estaba en ninguna etapa
+     * del tablero del closer (reporte del 23/11/2026).
+     *
+     * El proyecto abierto es el hecho más difícil de discutir —es el mismo
+     * criterio con el que `isWonLead()` cuenta una venta en Campañas— y a
+     * diferencia del status no lo mueve ningún automatismo. Se pregunta solo
+     * cuando la etapa de destino saca al lead del funnel comercial: en
+     * cualquier otro movimiento no cambia nada y no vale la consulta.
+     */
+    const wonSale = !staysCommercial && (await this.#hasOpenProject(id));
+
+    if ((graduated || wonSale) && !staysCommercial && actorType !== 'user') {
       await this.stageChanges.record(current.id, {
         fromStatus: current.status,
         toStatus: status,
@@ -1534,11 +1565,17 @@ export class LeadService {
     if (staysCommercial && !current.sales_funnel_at) {
       patch.sales_funnel_at = db.fn.now();
       Object.assign(patch, setterSeal(current, actor, actorType));
-    } else if (current.sales_funnel_at && actorType === 'user' && SETTER_ONLY_STATUSES.includes(status)) {
+    } else if (current.sales_funnel_at && actorType === 'user' && SETTER_ONLY_STATUSES.includes(status) && !wonSale) {
       // Una persona lo devolvió a propósito a una etapa del setter. Las etapas
       // de bandeja ("nuevo") no cuentan: están en la primera columna de los dos
       // tableros, así que arrastrar un lead ahí dentro del funnel del closer no
       // puede significar que deje de ser suyo.
+      //
+      // Una venta cerrada (`wonSale`) es la excepción: el movimiento se hace
+      // —es una decisión de una persona y el tablero tiene que poder
+      // contarla—, pero el sello se queda. Borrárselo la sacaba del Funnel de
+      // Ventas y se la devolvía al bot, que seguía moviéndola con el proyecto
+      // del cliente ya abierto.
       patch.sales_funnel_at = null;
     }
 

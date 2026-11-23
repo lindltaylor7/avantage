@@ -1682,9 +1682,16 @@ const GRADUATED_STATUS_TO_SALES_COLUMN = { cita_agendada: 'nuevo' };
  * tablero del closer es justamente lo que el equipo venía reportando. Al no
  * coincidir con ninguna columna, cae en la primera, donde se puede volver a
  * arrastrar a su etapa.
+ *
+ * El proyecto abierto manda igual que el sello, y por la misma razón: es una
+ * venta cerrada, con su cliente y su cronograma de pagos, y el sello se podía
+ * perder (una persona devolvía el lead a una etapa del setter y
+ * `updateLeadStatus()` se lo borraba, con lo que el bot volvía a moverlo). Un
+ * lead así quedaba fuera de los DOS tableros: del de Ventas por no tener
+ * sello, y de la etapa ganadora por no decir ya `ganado`.
  */
 const visibleLeads = computed(() => leads.value.filter(
-  (l) => l.sales_funnel_at || !SETTER_ONLY_STATUSES.includes(l.status)
+  (l) => l.sales_funnel_at || l.project_id || !SETTER_ONLY_STATUSES.includes(l.status)
 ));
 
 // Estadísticas de Resumen
@@ -1759,13 +1766,23 @@ const filteredLeadsByColumn = computed(() => {
     const effectiveStatus = GRADUATED_STATUS_TO_SALES_COLUMN[lead.status] || lead.status;
     if (grouped[effectiveStatus]) {
       grouped[effectiveStatus].push(lead);
-    } else if (finalKey && winning.has(lead.status)) {
-      // Una venta ganada va SIEMPRE a la etapa ganadora, aunque su clave no
-      // coincida: el cierre escribe `ganado` (el único valor que todas las
-      // lecturas reconocen) y la columna que el equipo creó a mano tiene una
-      // clave generada por el servidor. Sin esto, los leads cerrados caían en
-      // la primera columna y la etapa ganadora se veía vacía mientras
-      // Proyectos, Finanzas y Campañas los seguían contando como ganados.
+    } else if (finalKey && (winning.has(lead.status) || lead.project_id)) {
+      /*
+       * Una venta cerrada va SIEMPRE a la etapa ganadora, y son dos cosas las
+       * que la definen porque las dos se dan:
+       *
+       * - El ESTADO `ganado`, que es lo que escribe el cierre y el único valor
+       *   que reconocen todas las lecturas del sistema; la columna que el
+       *   equipo creó a mano tiene una clave generada por el servidor, así que
+       *   comparar contra ella deja la etapa ganadora sin sus propios leads.
+       * - El PROYECTO abierto, que es el mismo criterio con el que Campañas
+       *   cuenta una venta (`isWonLead()`) y el único que sobrevive a que el
+       *   status se haya movido después — que es exactamente lo que pasó con
+       *   los 19 proyectos cuyo lead terminó en una etapa del setter.
+       *
+       * Va DESPUÉS de la coincidencia exacta: un lead en "Perdido" con su
+       * proyecto abierto (la venta no se concretó) se queda en Perdido.
+       */
       grouped[finalKey].push(lead);
     } else {
       // Si el estado no coincide con ninguna columna activa, asignar a la primera columna

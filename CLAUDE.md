@@ -163,7 +163,32 @@ antes de tocar el arranque de producción.
   proyecto. **No se arregla reescribiendo el `status` de los leads** —`ganado` es el valor
   correcto y el que sobrevive a que la columna se vuelva a borrar—: lo que se corrige es la
   pregunta. `backend/scripts/diagnosticarEtapaGanadora.js` (solo lee) imprime las columnas, cuál
-  está marcada como ganadora, con qué estado quedó cada venta y en qué columna la ubica el tablero.
+  está marcada como ganadora, con qué estado quedó cada venta, si conserva su sello y quién la
+  movió según la bitácora.
+  **Y una venta cerrada no vuelve sola al Setter Funnel.** La otra mitad del mismo reporte eran 19
+  proyectos abiertos cuyo lead no estaba en NINGUNA etapa del Funnel de Ventas: ninguno decía ya
+  `ganado` y todos habían terminado en una etapa del setter. La cadena tiene tres eslabones y el
+  primero es legítimo: (1) una **persona** devuelve el lead a una etapa del setter y
+  `updateLeadStatus()` le borra el sello `sales_funnel_at` —lo correcto para un lead que de verdad
+  vuelve a calificarse—; (2) sin sello y con esa etapa, `leadHasGraduated()` dice que no, así que
+  el tope que mantiene al bot afuera deja de aplicarle; (3) el bot lo retoma y lo sigue moviendo
+  (`conversacion_abierta`, `calificando`, `congelado`) con el proyecto del cliente ya abierto,
+  mientras el lead desaparece del tablero del closer y reaparece en el del setter. El corte está
+  en el eslabón 1: a una venta cerrada **se le hace el movimiento pero no se le borra el sello**
+  —el tablero tiene que poder contar esa decisión, lo que no puede es devolverle el lead al bot—,
+  y el tope del bot alcanza también a la venta cerrada que ya lo perdió. "Venta cerrada" se
+  pregunta por el **proyecto abierto** (`#hasOpenProject()`) y no por la etapa, que es lo que
+  mueven el bot y los automatismos: el mismo criterio con el que `isWonLead()` cuenta una venta en
+  Campañas. Se consulta solo cuando la etapa de destino saca al lead del funnel comercial, así que
+  no cuesta una consulta por arrastre. Por lo mismo el tablero dibuja a un lead con proyecto
+  abierto **siempre** (`visibleLeads`) y lo ubica en la etapa ganadora, después de la coincidencia
+  exacta —un lead en "Perdido" con su proyecto abierto se queda en Perdido—. El daño ya hecho lo
+  repara la migración `20261207000000_reseal_won_leads_sales_funnel_at.js`, que les devuelve el
+  sello fechándolo con el `created_at` del proyecto (el instante del cierre) y **no toca
+  `leads.status`**: dónde va la tarjeta es una decisión del equipo comercial y el tablero ya la
+  ubica bien por su proyecto. Su `down()` está vacío a propósito — volver a poner los sellos en
+  NULL es el estado roto, y no hay forma de distinguir los que escribió la migración de los que el
+  lead ya tenía.
 - En el módulo de **proyectos no se muestran importes** (ni en la lista, ni en el detalle, ni en sus
   notificaciones): el dinero se consulta en Finanzas, que tiene su propio permiso. Los avisos de
   bloqueo se refieren al pago por su código (`finance_income.code`), nunca por su monto.
