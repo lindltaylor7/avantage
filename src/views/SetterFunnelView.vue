@@ -2553,7 +2553,20 @@ async function confirmDeleteColumn() {
    * se mandaban sueltas con `.catch(console.error)`) porque ahora la etapa se
    * borra en el servidor y el orden entre las dos cosas importa.
    */
-  const enLaColumna = leads.value.filter((lead) => lead.status === colKey);
+  /*
+   * Solo los leads de ESTE tablero (`setterFunnelLeads`) y no la lista cruda.
+   *
+   * Los dos funnels leen la MISMA columna `leads.status` y las etapas de
+   * fábrica del setter reusan las claves de los desenlaces (`ganado`,
+   * `cita_agendada`, `descartado`...), así que un lead ganado del closer y un
+   * lead en la etapa "Ganado / Cerrado" del setter son indistinguibles mirando
+   * solo el status. Filtrando la lista cruda, borrar la etapa "Ganado /
+   * Cerrado" del setter se llevaba puestas las ventas cerradas del Funnel de
+   * Ventas: 17 leads movidos a "conversacion_abierta" en el mismo segundo, con
+   * sus proyectos ya abiertos (19/11/2026). Un tablero solo puede mover los
+   * leads que dibuja.
+   */
+  const enLaColumna = setterFunnelLeads.value.filter((lead) => lead.status === colKey);
   try {
     columnError.value = '';
     await Promise.all(enLaColumna.map(async (lead) => {

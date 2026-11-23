@@ -1976,8 +1976,17 @@ function openDeleteColumnModal(col, index) {
   showDeleteColModal.value = true;
 }
 
+/*
+ * Lo que este tablero DIBUJA en esa columna, no toda la tabla.
+ *
+ * Los dos funnels leen la misma `leads.status` y las etapas de fábrica del
+ * setter reusan las claves de los desenlaces (`ganado`, `cita_agendada`,
+ * `descartado`...), así que contar sobre la lista cruda mezcla leads del otro
+ * tablero. El número que se muestra antes de borrar una columna y los leads
+ * que el borrado mueve tienen que ser los mismos.
+ */
 function getLeadsCountInColumn(colKey) {
-  return leads.value.filter(l => l.status === colKey).length;
+  return visibleLeads.value.filter(l => l.status === colKey).length;
 }
 
 async function confirmDeleteColumn() {
@@ -1986,8 +1995,11 @@ async function confirmDeleteColumn() {
   const targetKey = targetReassignColKey.value;
 
   try {
-    // Reasignar leads que estén en esta columna
-    const leadsToMove = leads.value.filter(l => l.status === colKey);
+    // Reasignar los leads que este tablero muestra en esa columna. Sobre la
+    // lista cruda se llevaría también los del Setter Funnel, que comparten la
+    // columna `leads.status` y las claves de los desenlaces (ver
+    // `getLeadsCountInColumn`).
+    const leadsToMove = visibleLeads.value.filter(l => l.status === colKey);
     for (const lead of leadsToMove) {
       await moveLeadToStatus(lead, targetKey);
     }
@@ -2013,8 +2025,10 @@ async function confirmResetColumns() {
   try {
     const defaultKeys = DEFAULT_COLUMNS.map(c => c.key);
 
-    // Reasignar a "nuevo" los leads que están en columnas que van a desaparecer
-    const leadsToReassign = leads.value.filter(l => !defaultKeys.includes(l.status));
+    // Reasignar a "nuevo" los leads que están en columnas que van a desaparecer.
+    // Solo los de este tablero: restablecer las columnas de Ventas no puede
+    // mover los leads que todavía trabaja el setter.
+    const leadsToReassign = visibleLeads.value.filter(l => !defaultKeys.includes(l.status));
     for (const lead of leadsToReassign) {
       await moveLeadToStatus(lead, 'nuevo');
     }

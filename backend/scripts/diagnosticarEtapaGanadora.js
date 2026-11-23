@@ -117,8 +117,12 @@ async function main() {
       ubicacion = 'EN NINGUNA - no se dibuja en el Funnel de Ventas';
     } else if (columnKeys.has(lead.status)) {
       ubicacion = columns.find((column) => column.key === lead.status).label;
-    } else if (finalColumn && winning.has(lead.status)) {
-      ubicacion = `${finalColumn.label} (por ser venta ganada)`;
+    } else if (finalColumn && (winning.has(lead.status) || lead.project_id)) {
+      // El MISMO criterio que `filteredLeadsByColumn` en `LeadsView.vue`: el
+      // estado `ganado` o el proyecto abierto. Si acá dijera otra cosa, el
+      // diagnóstico mandaría a arreglar lo que el tablero ya muestra bien.
+      const porque = winning.has(lead.status) ? 'por su etapa' : 'por su proyecto abierto';
+      ubicacion = `${finalColumn.label} (${porque})`;
     } else {
       ubicacion = `${columns[0]?.label || '—'}  (no coincide con ninguna columna)`;
       fueraDeLaEtapa += 1;

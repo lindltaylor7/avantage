@@ -189,6 +189,21 @@ antes de tocar el arranque de producción.
   ubica bien por su proyecto. Su `down()` está vacío a propósito — volver a poner los sellos en
   NULL es el estado roto, y no hay forma de distinguir los que escribió la migración de los que el
   lead ya tenía.
+  **Y la causa de todo eso: un tablero solo puede mover los leads que DIBUJA.** Los dos funnels
+  tienen tablas de columnas separadas pero leen la misma `leads.status`, y las etapas de fábrica
+  del Setter Funnel **reusan las claves de los desenlaces** de Ventas: `DEFAULT_SETTER_COLUMNS`
+  tiene una "Ganado / Cerrado" con clave **`ganado`** y marcada `final`, igual que la etapa
+  ganadora del closer. El 19/11/2026 alguien borró esa etapa del Setter Funnel y
+  `confirmDeleteColumn()` movía `leads.value.filter(l => l.status === colKey)` —la lista **cruda**
+  de `/api/leads`, no la del tablero—, así que se llevó puestas las 17 ventas cerradas del Funnel
+  de Ventas: `ganado → conversacion_abierta`, las 17 en el **mismo segundo** (es un `Promise.all`)
+  y con sus proyectos ya abiertos. De ahí salieron las otras dos mitades: el sello borrado y el
+  bot retomándolas. Las pantallas que barren leads por su columna filtran ahora sobre lo que ese
+  tablero muestra (`setterFunnelLeads` en el Setter Funnel; `visibleLeads` en el borrado de
+  columna, en el contador que lo acompaña y en "Restablecer columnas" de Ventas) — el número que
+  se ve antes de borrar y los leads que el borrado mueve tienen que ser los mismos. **La clave no
+  identifica al tablero**: eso lo contesta `leadHasGraduated()`, y `boardKeyCollision.test.js`
+  fija que la colisión existe para que nadie vuelva a deducirlo del texto del status.
 - En el módulo de **proyectos no se muestran importes** (ni en la lista, ni en el detalle, ni en sus
   notificaciones): el dinero se consulta en Finanzas, que tiene su propio permiso. Los avisos de
   bloqueo se refieren al pago por su código (`finance_income.code`), nunca por su monto.

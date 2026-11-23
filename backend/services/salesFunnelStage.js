@@ -46,7 +46,7 @@ const INBOX_STATUSES = ['nuevo', 'inbox', 'abierto'];
  * el pase manual del setter) al graduarlo, y las otras tres son los desenlaces
  * que el equipo puede dejar configurados con cualquier etiqueta.
  */
-const GRADUATED_STATUSES = ['cita_agendada', 'en_negociacion', 'ganado', 'perdido'];
+export const GRADUATED_STATUSES = ['cita_agendada', 'en_negociacion', 'ganado', 'perdido'];
 
 /**
  * Conjunto de los status que hoy significan "está en el Funnel de Ventas".
