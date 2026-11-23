@@ -86,9 +86,18 @@ import { signToken, requireAuth, requirePermission, requireAnyPermission, signGo
 
 import { uploadProjectUpdateAttachment, uploadDir, uploadDeliverableAttachment, deliverableDir, uploadFinanceReceipt, uploadFinanceFile, uploadEmailAttachments, uploadSignedContract, uploadAvatar, financeReceiptDir, whatsappMediaDir, campaignAdImageDir, signedContractDir, avatarDir } from './middleware/upload.js';
 import { db } from './db/connection.js';
+import { loadWinningStatuses } from './services/salesFunnelStage.js';
 
 // Estado del funnel Kanban que marca el fin del proceso comercial: al llegar
 // aquí se genera automáticamente el proyecto asociado al lead.
+//
+// Es el estado con el que el cierre de venta DEJA al lead, y por eso es una
+// constante: lo reconocen todas las lecturas del sistema. Para la pregunta
+// contraria —"¿este estado significa venta ganada?"— está
+// `loadWinningStatuses()`, que suma además la clave de la columna que el
+// equipo marcó como ganadora: esa la genera el servidor al crearla desde la
+// pantalla, así que comparar contra la constante dejaba sin proyecto a la
+// venta cerrada arrastrando la tarjeta hasta esa columna.
 const FUNNEL_FINAL_STATUS = 'ganado';
 
 // Frecuencia del sondeo del conteo de seguidores de la página (Meta no lo
@@ -3096,7 +3105,7 @@ app.patch('/api/leads/:id/status', requireAuth, requireAnyPermission('leads.view
     }
 
     let project = null;
-    if (status === FUNNEL_FINAL_STATUS) {
+    if ((await loadWinningStatuses()).has(status)) {
       project = await projectService.createProjectFromLead(lead);
       console.log(`🚀 [Proyectos] Proyecto #${project.id} creado a partir del lead #${lead.id} (estado: Creado)`);
     }

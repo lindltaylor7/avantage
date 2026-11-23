@@ -149,6 +149,21 @@ antes de tocar el arranque de producción.
 - El **Kanban de Leads** (`SetterFunnelView.vue` / `LeadsView.vue`) tiene columnas configurables
   (`funnel_columns`, con `key`, `label`, `final`, `position`). Cuando un lead llega a la columna
   marcada `final` (`ganado`), se genera automáticamente un `project` asociado (1:1 vía `lead_id`).
+  **La etapa ganadora recibe los leads cerrados aunque su clave no sea `ganado`.** El cierre de
+  venta escribe siempre ese estado fijo —es el único que reconocen TODAS las lecturas del sistema,
+  porque `loadWinningStatuses()` lo suma siempre—, mientras que la clave de una columna creada
+  desde la pantalla la genera el servidor (`col_mtc2olqj_j1e`). El tablero ubicaba cada lead
+  comparando su `status` contra la clave de la columna, así que recrear "Ganado" bastaba para que
+  dejara de recibir sus propios leads: caían en la primera columna y la etapa ganadora se veía en
+  0 mientras el resumen de la misma pantalla contaba 2 proyectos ganados y Finanzas, Campañas y
+  Proyectos los seguían contando como ventas (reporte del 23/11/2026). La regla es
+  `buildWinningStatuses()` en `src/salesFunnelStage.js`, el espejo de `loadWinningStatuses()`, y
+  por lo mismo el `PATCH /api/leads/:id/status` abre el proyecto con esa pregunta y no comparando
+  contra la constante: arrastrar la tarjeta hasta una columna ganadora recreada tampoco abría el
+  proyecto. **No se arregla reescribiendo el `status` de los leads** —`ganado` es el valor
+  correcto y el que sobrevive a que la columna se vuelva a borrar—: lo que se corrige es la
+  pregunta. `backend/scripts/diagnosticarEtapaGanadora.js` (solo lee) imprime las columnas, cuál
+  está marcada como ganadora, con qué estado quedó cada venta y en qué columna la ubica el tablero.
 - En el módulo de **proyectos no se muestran importes** (ni en la lista, ni en el detalle, ni en sus
   notificaciones): el dinero se consulta en Finanzas, que tiene su propio permiso. Los avisos de
   bloqueo se refieren al pago por su código (`finance_income.code`), nunca por su monto.

@@ -1326,7 +1326,7 @@ import LeadDuplicateAlert from '../components/LeadDuplicateAlert.vue';
 import { formatCardDate, formatLeadDate } from '../leadCardDate.js';
 import { matchesLeadSearch } from '../leadSearch.js';
 import { changedIdentityFields, useLeadDuplicateCheck } from '../leadDuplicateCheck.js';
-import { SETTER_ONLY_STATUSES } from '../salesFunnelStage.js';
+import { SETTER_ONLY_STATUSES, buildWinningStatuses } from '../salesFunnelStage.js';
 import { DEFAULT_SETTER_COLUMNS, loadSetterColumns } from '../setterFunnelColumns.js';
 
 // Columnas predeterminadas del sistema (usadas solo para "Restablecer columnas")
@@ -1727,12 +1727,28 @@ function matchesBoardFilters(lead) {
   return true;
 }
 
+/**
+ * La etapa ganadora del tablero y los estados que significan "venta ganada".
+ *
+ * Son dos cosas distintas y por eso van las dos: la COLUMNA es la que el
+ * equipo marcó como ganadora (su clave la genera el servidor cuando se crea
+ * desde la pantalla), y el ESTADO con el que queda un lead cerrado es siempre
+ * `ganado`, porque es el único que reconocen todas las lecturas del sistema
+ * (`loadWinningStatuses()` en el backend: Finanzas, Campañas, la comisión de
+ * la setter). Preguntarlo acá es lo que vuelve a juntarlos en el tablero.
+ */
+const winningStatuses = computed(() => buildWinningStatuses(columns.value));
+const finalColumnKey = computed(() => columns.value.find((col) => col.final)?.key || null);
+
 // Leads filtrados agrupados por columna
 const filteredLeadsByColumn = computed(() => {
   const grouped = {};
   for (const col of columns.value) {
     grouped[col.key] = [];
   }
+
+  const winning = winningStatuses.value;
+  const finalKey = finalColumnKey.value;
 
   for (const lead of visibleLeads.value) {
     if (!matchesBoardFilters(lead)) continue;
@@ -1743,6 +1759,14 @@ const filteredLeadsByColumn = computed(() => {
     const effectiveStatus = GRADUATED_STATUS_TO_SALES_COLUMN[lead.status] || lead.status;
     if (grouped[effectiveStatus]) {
       grouped[effectiveStatus].push(lead);
+    } else if (finalKey && winning.has(lead.status)) {
+      // Una venta ganada va SIEMPRE a la etapa ganadora, aunque su clave no
+      // coincida: el cierre escribe `ganado` (el único valor que todas las
+      // lecturas reconocen) y la columna que el equipo creó a mano tiene una
+      // clave generada por el servidor. Sin esto, los leads cerrados caían en
+      // la primera columna y la etapa ganadora se veía vacía mientras
+      // Proyectos, Finanzas y Campañas los seguían contando como ganados.
+      grouped[finalKey].push(lead);
     } else {
       // Si el estado no coincide con ninguna columna activa, asignar a la primera columna
       const firstKey = columns.value[0]?.key || 'nuevo';
@@ -2185,7 +2209,7 @@ function onLeadAssigned(updated) {
  * que ya tienen su pago registrado (o vuelven a "Ganado") pasan derecho.
  */
 function moveLeadToStatusOrWin(lead, newStatus) {
-  const finalKey = columns.value.find((c) => c.final)?.key;
+  const finalKey = finalColumnKey.value;
   if (newStatus === finalKey && !lead.initial_payment_id) {
     winModalLead.value = lead;
     return;

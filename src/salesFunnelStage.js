@@ -75,3 +75,24 @@ export function isSalesFunnelStatus(status, salesStatuses) {
   if (INBOX_STATUSES.includes(status)) return false;
   return salesStatuses.has(status);
 }
+
+/**
+ * Los estados que hoy significan "venta ganada": el desenlace fijo `ganado`
+ * más la clave de la columna que el equipo marcó como ganadora.
+ *
+ * Es el espejo de `loadWinningStatuses()` del backend, del que ya cuelgan la
+ * comisión de la setter, Campañas, Finanzas y el Reporte General. Existe
+ * porque el tablero ubicaba cada lead comparando su `status` contra la clave
+ * de la columna, y esa clave la genera el servidor cuando alguien crea la
+ * etapa a mano (`col_mtc2nwec_fij`): el cierre de venta escribe siempre
+ * `ganado` —el único valor que TODAS las lecturas reconocen—, así que una
+ * columna "Ganado" recreada desde la pantalla dejaba de recibir sus propios
+ * leads y los mandaba a la primera columna del tablero.
+ */
+export function buildWinningStatuses(columns = []) {
+  const statuses = new Set(['ganado']);
+  for (const column of columns) {
+    if (column?.final && column.key) statuses.add(column.key);
+  }
+  return statuses;
+}
