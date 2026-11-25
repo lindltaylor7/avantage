@@ -1896,6 +1896,60 @@ antes de tocar el arranque de producción.
   entrada solo a quien ya tenía `finance.view`, porque muestra importes. Los gráficos son SVG propios
   (`src/components/report/`), sin librería, y su paleta (oliva + azul) es la que pasó el chequeo de
   daltonismo: el naranja de marca junto al oliva no se distingue con deuteranopía.
+  Desde el 25/11/2026 la **trazabilidad de marketing a la venta** reemplaza al embudo de cuatro
+  pasos (`backend/services/leadTraceability.js`, puro y con test): siete pasos —captado ·
+  contactado · pasó a Ventas · cita · propuesta · cerrado · pago verificado— agrupados por el área
+  dueña de cada uno, y de cada paso **los que siguieron adelante, los que se quedaron ahí con el
+  trato abierto y los que se perdieron**. Reemplaza y no acompaña al embudo anterior: aquel era la
+  mitad acumulativa de la misma pregunta, y dos embudos sobre la misma cohorte terminan diciendo
+  números distintos. Las dos lecturas son una sola cuenta: `reached` es acumulativo y los parados y
+  los perdidos son **excluyentes** —cada lead en UN paso, el más lejos que llegó—, así que su suma
+  más los que completaron la cadena es siempre el total de la cohorte, que es lo único que permite
+  afirmar que nadie se contó dos veces. Y el paso más lejano se calcula con un **máximo** y no con el
+  primer paso que falla: un ganado al que nadie le registró la primera respuesta igual pasó por los
+  pasos anteriores, y cortarlo ahí daría un embudo que se ensancha hacia abajo.
+  **Un lead parado espera el paso que FALTA**, así que el área responsable es la del paso siguiente
+  y no la del paso alcanzado: "40 leads esperando que Ventas cotice" se puede repartir, "40 leads en
+  la etapa de cita" no. De ahí salen también las cuatro columnas del reparto por plataforma (ganado ·
+  pendiente de Ventas · pendiente del Setter · perdido, excluyentes y sumando los leads de esa
+  fuente), que es la mitad de marketing: la fila es la plataforma que dice el **sello de atribución**
+  (`leadOrigin()`, no el texto de `source` que agrupa la tarjeta de canales — por eso se nombran
+  distinto en la pantalla).
+  **La calificación comercial y la asistencia a la reunión NO son pasos de la cadena**, y es la
+  decisión que más la sostiene: el vacío de las dos es "nadie lo registró" y no "no ocurrió" (son
+  casi todas), así que puestas como paso mostrarían un precipicio donde solo falta registro — el
+  mismo error con el signo cambiado que cuando `leads.qualified` se derivaba de la etapa y decía
+  "Sí" en 403 de 403. Viajan como **anotaciones** al lado, junto a las citas sin reunión en la
+  agenda, que es lo que explica que la cadena cuente más citas que reuniones. `neverAnswered` de
+  cada plataforma se pregunta por el paso más lejano y **no** por la marca de primera respuesta: con
+  la marca cruda, un ganado sin respuesta registrada salía "sin contestar" mientras la cadena
+  acumulativa lo contaba como contactado, y las dos cifras de la misma tarjeta se contradecían.
+  El vocabulario se pregunta donde ya está contestado (`loadWinningStatuses()`,
+  `loadSalesFunnelStatuses()`, `loadQuotationStatuses()`, `LOST_STATUSES`), y por eso
+  `QUOTATION_STATUSES` pasó a vivir en `salesFunnelStage.js` —Campañas la importa de ahí en vez de
+  tener su copia, como ya había pasado con `LOST_STATUSES`—; `loadQuotationStatuses()` le suma la
+  columna de cotización que el equipo tenga configurada, resuelta con la MISMA pregunta que mueve al
+  lead al cotizar (`funnel_columns.quoted` y, si nadie la marcó, el nombre de la columna).
+  **Y el reparto de la caja entre vender y cobrar** (`backend/services/incomeSplit.js`, puro y con
+  test; `backend/scripts/diagnosticarIngresosPorArea.js`, que solo lee): de las cuotas que Finanzas
+  **verificó** en el período, el **primer pago** de cada cronograma es lo que produjo Ventas al
+  cerrar y las **cuotas siguientes** las produce el área académica y la gestión del proyecto. En una
+  sola cifra, un mes sostenido por una cartera vieja que paga puntual se lee igual que un mes que
+  vendió bien, y son dos negocios que se dirigen distinto. Cuál es la primera cuota se **deriva** del
+  orden del cronograma (vencimiento, fecha, id) y **no se lee de `finance_income.is_initial_payment`**,
+  aunque esa columna signifique justamente eso: el marcador solo está puesto en los cierres
+  posteriores al flujo que lo creó ("un cierre SIN marcador no se toca"), así que leyéndolo todas las
+  ventas anteriores quedarían con su primer pago contado como cuota de académico — y en una
+  clasificación de porcentajes eso no falla, corre la cifra y nadie se entera. El orden es el MISMO
+  de `#syncInitialPayment()`, y esa es la propiedad que la sostiene: donde el marcador existe, lo
+  derivado coincide con él (lo comprueba el test, y el script lo comprueba contra los datos). Por eso
+  también lo sin vencimiento ordena PRIMERO, como MySQL. La cuota **sin `lead_id`** va a su propia
+  clase y no se reparte por descarte —de estos porcentajes cuelga a qué área se le atribuye la caja—,
+  y los ingresos del **Libro Diario** se publican aparte: no son el pago de ningún cliente y no
+  pertenecen a ninguna de las dos áreas, pero sin ellos la suma no cuadra con «Cobrado (caja)».
+  La decisión del cronograma completo no es un detalle: se consulta todo el plan de los leads que
+  pagaron en la ventana, porque con el plan recortado un lead cuyo primer pago entró hace ocho meses
+  tendría su segunda cuota contada como primer pago, y el error crece justo con la cartera vieja.
 - El **contrato firmado** de un lead (`signed_contracts`, `signedContractService.js`, botón
   "📝 Contrato firmado" en la ficha del Funnel de Ventas, `SignedContractModal.vue`) es el PDF, el
   Word o el **enlace de Drive** que vuelve con la firma del cliente. Tiene **tabla propia** y no unas

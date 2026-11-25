@@ -6,8 +6,8 @@
           <span class="heading-icon">📊</span> Reporte General
         </h2>
         <p class="section-subheading">
-          Ventas, caja, cartera y embudo comercial en un solo lugar. Cada cifra se compara con
-          el período anterior de la misma duración.
+          Ventas, caja, cartera y la trazabilidad de marketing a la venta en un solo lugar.
+          Cada cifra se compara con el período anterior de la misma duración.
         </p>
       </div>
       <div class="gr-controls">
@@ -128,6 +128,60 @@
           </header>
           <ReportBarList :rows="closerRows" empty-text="Sin ventas cerradas en el período." />
         </article>
+
+        <article class="gr-card gr-card-wide">
+          <header class="gr-card-head">
+            <h4>¿Qué produjo la caja: vender o cobrar?</h4>
+            <p>Las cuotas que Finanzas verificó en el período, repartidas según su lugar en el
+              cronograma del cliente. El <strong>primer pago</strong> es lo que produjo el cierre
+              de la venta; las <strong>cuotas siguientes</strong> las paga el cliente mientras el
+              trabajo avanza, así que son producto del área académica y de la gestión que se hace
+              con él. Mezcladas en una sola cifra, un mes sostenido por una cartera vieja se lee
+              igual que un mes que vendió bien.</p>
+          </header>
+
+          <div class="gr-mix" role="list">
+            <div
+              v-for="clase in mixClasses"
+              :key="clase.key"
+              class="gr-mix-item"
+              role="listitem"
+            >
+              <span class="gr-mix-head">
+                <span class="gr-swatch" :style="{ background: clase.color }" aria-hidden="true"></span>
+                {{ clase.label }}
+                <em>{{ clase.owner }}</em>
+              </span>
+              <strong class="gr-mix-share">{{ pct(clase.share) }}</strong>
+              <span class="gr-mix-amount">{{ money(clase.amount) }}</span>
+              <span class="gr-mix-note">
+                {{ integer(clase.count) }} {{ clase.count === 1 ? 'cuota' : 'cuotas' }}<template
+                  v-if="clase.leads"
+                > · {{ integer(clase.leads) }} {{ clase.leads === 1 ? 'cliente' : 'clientes' }}</template>
+                <template v-if="clase.deltaText"> · {{ clase.deltaText }}</template>
+              </span>
+            </div>
+          </div>
+
+          <ReportBarChart
+            :labels="monthLabels"
+            :tooltip-titles="monthTitles"
+            :series="mixSeries"
+            :extra-rows="mixTooltipRows"
+            :format="money"
+            :compact-format="moneyCompact"
+            :axis-format="moneyCompact"
+            :height="210"
+            aria-label="Primer pago frente a cuotas siguientes, por mes"
+          />
+
+          <p class="gr-footnote">
+            Son {{ money(report.incomeMix.total) }} de cuotas de clientes sobre
+            {{ money(report.incomeMix.cashIn) }} cobrados en el período: la diferencia son
+            {{ money(report.incomeMix.otherIncome) }} de otros ingresos del Libro Diario, que no
+            son el pago de ningún cliente y no se reparten entre las dos áreas.
+          </p>
+        </article>
       </section>
 
       <!-- Cartera -->
@@ -206,28 +260,139 @@
       </section>
 
       <!-- Comercial -->
-      <h3 class="gr-section-title">Embudo comercial</h3>
+      <h3 class="gr-section-title">Trazabilidad: de marketing a la venta</h3>
       <section class="gr-grid">
-        <article class="gr-card">
+        <article class="gr-card gr-card-wide">
           <header class="gr-card-head">
-            <h4>Embudo de conversión</h4>
-            <p>Los leads que entraron en el período y hasta dónde llegaron. Los más recientes
-              todavía pueden avanzar, así que el último tramo crece con el tiempo.</p>
+            <h4>¿En qué parte del proceso se quedan los leads?</h4>
+            <p>Los leads que entraron en el período y hasta dónde llegaron, paso por paso y área
+              por área. La barra de cada paso se parte en tres: los que siguieron adelante, los
+              que se quedaron ahí con el trato todavía abierto y los que se perdieron. Un lead
+              parado está esperando el paso que falta, así que al lado dice quién tiene la
+              pelota.</p>
           </header>
-          <ol class="gr-funnel">
-            <li v-for="(step, i) in report.funnel" :key="step.label" class="gr-funnel-step">
-              <div class="gr-funnel-head">
-                <span>{{ step.label }}</span>
-                <strong>{{ integer(step.count) }}</strong>
-              </div>
-              <div class="gr-funnel-track" aria-hidden="true">
-                <span class="gr-funnel-bar" :style="{ width: funnelWidth(step) }"></span>
-              </div>
-              <div v-if="i > 0" class="gr-funnel-note">
-                {{ pct(step.ofPrevious) }} de la etapa anterior · {{ pct(step.ofTotal) }} del total
-              </div>
-            </li>
+
+          <p v-if="report.traceability.leak" class="gr-leak" role="status">
+            <span aria-hidden="true">🚧</span>
+            <span>
+              La mayor fuga está en <strong>{{ report.traceability.leak.label }}</strong>:
+              {{ integer(report.traceability.leak.stopped) }} de
+              {{ integer(report.traceability.total) }} leads
+              ({{ pct(report.traceability.leak.share) }}) no pasaron de ahí<template
+                v-if="report.traceability.leak.stuckOpen"
+              >, y {{ integer(report.traceability.leak.stuckOpen) }} siguen abiertos<template
+                v-if="report.traceability.leak.waitingOnLabel"
+              > esperando a {{ report.traceability.leak.waitingOnLabel }}</template></template>.
+            </span>
+          </p>
+
+          <div class="gr-chain-legend" role="list">
+            <span v-for="seg in CHAIN_SEGMENTS" :key="seg.key" class="gr-chain-legend-item" role="listitem">
+              <span class="gr-swatch" :style="{ background: seg.color }" aria-hidden="true"></span>
+              {{ seg.label }}
+            </span>
+          </div>
+
+          <ol class="gr-chain">
+            <template v-for="step in chainSteps" :key="step.key">
+              <li v-if="step.zoneStart" class="gr-chain-zone">{{ step.ownerLabel }}</li>
+              <li class="gr-chain-step" :class="{ 'is-leak': step.isLeak }">
+                <div class="gr-chain-head">
+                  <span class="gr-chain-label" :title="step.what">{{ step.label }}</span>
+                  <strong>{{ integer(step.reached) }}</strong>
+                  <span class="gr-chain-share">{{ pct(step.ofTotal) }}</span>
+                </div>
+                <div class="gr-chain-track" aria-hidden="true">
+                  <span
+                    v-for="seg in step.segments"
+                    :key="seg.key"
+                    class="gr-chain-seg"
+                    :style="{ width: seg.width, background: seg.color }"
+                  ></span>
+                </div>
+                <p class="gr-chain-note">
+                  <span v-for="part in step.notes" :key="part.text" class="gr-chain-chip">
+                    <span
+                      v-if="part.color"
+                      class="gr-swatch"
+                      :style="{ background: part.color }"
+                      aria-hidden="true"
+                    ></span>
+                    {{ part.text }}
+                  </span>
+                </p>
+              </li>
+            </template>
           </ol>
+
+          <details class="gr-chain-table">
+            <summary>Ver tabla</summary>
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Paso</th>
+                  <th scope="col">Área</th>
+                  <th scope="col">Llegaron</th>
+                  <th scope="col">Siguieron</th>
+                  <th scope="col">Parados</th>
+                  <th scope="col">Perdidos</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="step in chainSteps" :key="step.key">
+                  <th scope="row">{{ step.label }}</th>
+                  <td>{{ step.ownerLabel }}</td>
+                  <td>{{ integer(step.reached) }}</td>
+                  <td>{{ integer(step.through) }}</td>
+                  <td>{{ integer(step.stuckOpen) }}</td>
+                  <td>{{ integer(step.lost) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </details>
+
+          <!--
+            Lo que NO es un paso de la cadena, y por qué: el vacío de estas dos
+            marcas es "nadie lo registró" y no "no ocurrió", así que puestas
+            como paso mostrarían una fuga donde solo falta registro.
+          -->
+          <ul class="gr-annotations">
+            <li>
+              <strong>Calificación comercial.</strong>
+              {{ integer(annotations.qualification.yes) }} calificados ·
+              {{ integer(annotations.qualification.no) }} descartados ·
+              {{ integer(annotations.qualification.pending) }} sin calificar.
+              No es un paso de la cadena: un lead sin calificar no es un lead que no calificó.
+            </li>
+            <li>
+              <strong>Asistencia a la reunión.</strong>
+              {{ integer(annotations.attendance.attended) }} asistieron ·
+              {{ integer(annotations.attendance.notAttended) }} no asistieron ·
+              {{ integer(annotations.attendance.unknown) }} sin registrar.
+              Con el desenlace sin registrar, una cita asistida y una ausencia se escriben igual.
+            </li>
+            <li v-if="annotations.appointmentWithoutMeeting">
+              <strong>Citas sin reunión en la agenda.</strong>
+              {{ integer(annotations.appointmentWithoutMeeting) }} leads en la etapa de cita sin
+              fecha ni hora cargada: nadie puede ir a buscarlas en el Calendario.
+            </li>
+          </ul>
+        </article>
+
+        <article class="gr-card gr-card-wide">
+          <header class="gr-card-head">
+            <h4>Qué fuente trae y qué fuente cierra</h4>
+            <p>Los mismos leads repartidos por la plataforma de la que salieron, según el sello
+              de atribución de su ficha. Cada barra dice en qué terminó el volumen de esa fuente:
+              una que trae mucho y queda todo pendiente del setter es un problema de capacidad;
+              una que se pierde entera es un problema de público.</p>
+          </header>
+          <ReportStackedBars
+            :rows="platformRows"
+            :series="PLATFORM_SERIES"
+            category-label="Plataforma"
+            empty-text="Sin leads en el período."
+          />
         </article>
 
         <article class="gr-card">
@@ -290,6 +455,7 @@ import { apiFetch } from '../apiClient.js';
 import AppLoader from '../components/AppLoader.vue';
 import ReportBarChart from '../components/report/ReportBarChart.vue';
 import ReportBarList from '../components/report/ReportBarList.vue';
+import ReportStackedBars from '../components/report/ReportStackedBars.vue';
 import {
   delta,
   integer,
@@ -432,6 +598,29 @@ const highlights = computed(() => {
       text: `El ${pct(r.overdueShare)} de la cartera está vencido (${money(r.overdue)}).`
     });
   }
+  const leak = report.value.traceability.leak;
+  if (leak && leak.share !== null) {
+    list.push({
+      icon: '🚧',
+      tone: leak.stuckOpen ? 'warn' : 'neutral',
+      text: `Donde más leads se quedan es «${leak.label}»: ${pct(leak.share)} del total no pasó de ahí`
+        + (leak.stuckOpen && leak.waitingOnLabel
+          ? `, y ${integer(leak.stuckOpen)} siguen abiertos esperando a ${leak.waitingOnLabel}.`
+          : '.')
+    });
+  }
+  // De dónde salió la caja. Es la cifra que no se puede ver en ningún otro
+  // lado de la pantalla: el KPI de "Cobrado" suma las dos mitades.
+  const first = report.value.incomeMix.classes.find((c) => c.key === 'primer_pago');
+  const next = report.value.incomeMix.classes.find((c) => c.key === 'siguientes');
+  if (first?.share !== null && next?.share !== null) {
+    list.push({
+      icon: '🧾', tone: 'neutral',
+      text: `De lo cobrado a clientes, ${pct(first.share)} son primeros pagos (Ventas) y `
+        + `${pct(next.share)} cuotas posteriores (académico y gestión).`
+    });
+  }
+
   const best = report.value.channels
     .filter((c) => !c.isOther && c.leads >= 5 && c.conversion !== null)
     .sort((a, b) => b.conversion - a.conversion)[0];
@@ -441,7 +630,7 @@ const highlights = computed(() => {
       text: `El canal que mejor convierte es «${best.label}»: ${pct(best.conversion)} de sus leads compraron.`
     });
   }
-  return list.slice(0, 4);
+  return list.slice(0, 5);
 });
 
 // --- Filas de las listas ---
@@ -485,11 +674,171 @@ const projectionValues = computed(() => [
   ...report.value.receivables.projection.months.map((m) => m.amount)
 ]);
 
-const funnelWidth = (step) => {
-  const total = report.value.funnel[0]?.count || 0;
-  if (!total) return '0%';
-  return `${Math.max((step.count / total) * 100, step.count ? 1.5 : 0)}%`;
+// --- Trazabilidad marketing → ventas ---
+
+/**
+ * Los tres tramos en los que se parte cada paso de la cadena. El orden es el de
+ * la barra: lo que siguió, lo que quedó esperando y lo que se cerró en falso.
+ */
+const CHAIN_SEGMENTS = [
+  { key: 'advanced', label: 'Siguieron adelante', color: 'var(--viz-chain-advanced)' },
+  { key: 'stuckOpen', label: 'Se quedaron acá (abiertos)', color: 'var(--viz-chain-stuck)' },
+  { key: 'lost', label: 'Se perdieron acá', color: 'var(--viz-chain-lost)' }
+];
+const CHAIN_COLOR = Object.fromEntries(CHAIN_SEGMENTS.map((s) => [s.key, s.color]));
+
+/**
+ * Los pasos listos para pintar.
+ *
+ * El ancho de los tramos se mide contra el TOTAL de la cohorte y no contra lo
+ * que llegó a ese paso: así la barra se angosta hacia abajo y la fuga se ve
+ * como lo que es, un pedazo que se cae. Medida contra el paso, cada barra
+ * ocuparía el ancho completo y los siete pasos se verían iguales.
+ *
+ * Las cifras van además escritas al lado de su color: la identidad de un tramo
+ * no puede depender solo del relleno —el ámbar y el rojo son el mismo color con
+ * deuteranopía— y de esta lectura cuelga a quién se le reclama el trabajo.
+ */
+const chainSteps = computed(() => {
+  const trace = report.value.traceability;
+  const total = trace.total || 0;
+  const width = (n) => (total ? `${Math.max((n / total) * 100, n ? 0.8 : 0)}%` : '0%');
+  let previousOwner = null;
+
+  return trace.steps.map((step) => {
+    const zoneStart = step.ownerLabel !== previousOwner;
+    previousOwner = step.ownerLabel;
+
+    /*
+     * En el último paso no hay "siguiente", así que el tramo que sigue adelante
+     * son los que lo completaron. Sin esto la última barra quedaría vacía —solo
+     * se pintan los que se detuvieron— y un paso que llegó al final se vería
+     * igual que uno en cero.
+     */
+    const isLast = step.advanced === null;
+    const through = isLast ? step.reached - step.lost : step.advanced;
+
+    const segments = CHAIN_SEGMENTS
+      .map((seg) => ({ ...seg, value: seg.key === 'advanced' ? through : step[seg.key] }))
+      .filter((seg) => seg.value > 0)
+      .map((seg) => ({ ...seg, width: width(seg.value) }));
+
+    const notes = [];
+    if (through > 0) {
+      notes.push({
+        color: CHAIN_COLOR.advanced,
+        text: isLast
+          ? `${integer(through)} completaron la cadena`
+          : `${integer(through)} avanzaron (${pct(ratioOf(through, step.reached))} de este paso)`
+      });
+    }
+    if (step.stuckOpen) {
+      const quien = step.waitingOnLabel ? ` esperando a ${step.waitingOnLabel}` : '';
+      const quieto = step.idleDaysMedian === null
+        ? ''
+        : `, mediana ${integer(step.idleDaysMedian)} ${step.idleDaysMedian === 1 ? 'día' : 'días'} sin movimiento`;
+      notes.push({
+        color: CHAIN_COLOR.stuckOpen,
+        text: `${integer(step.stuckOpen)} parados acá${quien}${quieto}`
+      });
+    }
+    if (step.lost) {
+      notes.push({ color: CHAIN_COLOR.lost, text: `${integer(step.lost)} perdidos o descartados` });
+    }
+    if (!notes.length) {
+      notes.push({ color: null, text: step.reached ? 'Nadie se quedó en este paso.' : 'Ningún lead llegó hasta acá.' });
+    }
+
+    return {
+      ...step,
+      zoneStart,
+      isLeak: trace.leak?.key === step.key,
+      through,
+      segments,
+      notes
+    };
+  });
+});
+
+/** Un porcentaje con la misma convención del servidor: sin base, no hay tasa. */
+function ratioOf(part, total) {
+  return total ? Math.round((part / total) * 1000) / 10 : null;
+}
+
+const annotations = computed(() => report.value.traceability.annotations);
+
+/**
+ * El reparto de cada plataforma. El orden de los tramos es Ganado · Ventas ·
+ * Setter · Perdido justamente para que el oliva y el rojo NO queden pegados:
+ * con deuteranopía esos dos son el mismo color (ver la paleta del final).
+ */
+const PLATFORM_SERIES = [
+  { key: 'ganado', label: 'Venta cerrada', color: 'var(--viz-zone-won)' },
+  { key: 'ventas', label: 'Pendiente de Ventas', color: 'var(--viz-zone-sales)' },
+  { key: 'setter', label: 'Pendiente del Setter', color: 'var(--viz-zone-setter)' },
+  { key: 'perdido', label: 'Perdido o descartado', color: 'var(--viz-zone-lost)' }
+];
+
+const platformRows = computed(() => report.value.traceability.platforms.map((p) => ({
+  key: p.key,
+  label: p.label,
+  total: p.leads,
+  totalText: `${integer(p.leads)} leads · ${pct(p.wonShare)} cerró`,
+  values: p.zones,
+  // El caso extremo del pendiente del setter: nadie le contestó nunca. Va como
+  // pista y no como quinto tramo, que no se puede pintar sin que dos colores
+  // queden indistinguibles con daltonismo.
+  hints: {
+    setter: p.neverAnswered
+      ? `${integer(p.neverAnswered)} sin una sola respuesta registrada`
+      : null
+  }
+})));
+
+// --- Composición de los ingresos ---
+
+const MIX_COLOR = {
+  primer_pago: 'var(--viz-1)',
+  siguientes: 'var(--viz-2)',
+  sin_cliente: 'var(--viz-mix-unknown)'
 };
+
+const mixClasses = computed(() => {
+  const previous = Object.fromEntries(
+    report.value.incomeMix.previous.classes.map((c) => [c.key, c])
+  );
+  return report.value.incomeMix.classes
+    // La clase sin clasificar solo aparece cuando tiene plata: un recuadro en
+    // cero obliga a entender una excepción que ese período no tuvo.
+    .filter((c) => c.key !== 'sin_cliente' || c.amount > 0)
+    .map((c) => {
+      const antes = previous[c.key];
+      const cambio = antes && antes.share !== null && c.share !== null
+        ? pointDelta(c.share, antes.share)
+        : null;
+      return {
+        ...c,
+        color: MIX_COLOR[c.key],
+        deltaText: cambio ? `${cambio.arrow} ${cambio.text} vs. período anterior` : null
+      };
+    });
+});
+
+const mixSeries = computed(() => mixClasses.value.map((c) => ({
+  key: c.key,
+  label: c.label,
+  color: c.color,
+  values: report.value.incomeMix.monthly[c.key]
+})));
+
+/** El porcentaje del mes en el tooltip: la barra dice el monto, no el reparto. */
+const mixTooltipRows = computed(() => report.value.monthly.months.map((_, i) => {
+  const total = mixSeries.value.reduce((sum, s) => sum + (Number(s.values[i]) || 0), 0);
+  return mixSeries.value.map((s) => ({
+    label: `${s.label} del mes`,
+    value: pct(ratioOf(Number(s.values[i]) || 0, total))
+  }));
+}));
 
 const obligationsTotal = computed(() => {
   const o = report.value.obligations;
@@ -511,11 +860,56 @@ const obligationsTotal = computed(() => {
   --status-warning: #fab219;
   --status-serious: #ec835a;
   --status-critical: #d03b3b;
+
+  /*
+   * Los tres tramos de la cadena de trazabilidad, validados con el script de la
+   * guía de visualización (`validate_palette.js`) contra los dos fondos. El par
+   * que de verdad importa es ámbar ↔ rojo —"se quedó" contra "se perdió", que
+   * es la diferencia entre llamar a alguien y no llamarlo— y queda en ΔE 13,9
+   * con deuteranopía y 17,9 con visión normal.
+   *
+   * El ámbar sale del rango de luminosidad recomendado (2,6:1 contra el fondo
+   * claro; en oscuro queda por encima de la banda) y es un precio aceptado a
+   * conciencia: cualquier ámbar más oscuro se confunde con el rojo —probados,
+   * #B8710F cae a ΔE 4,5 con deuteranopía—, y el relevo que pide la guía está
+   * puesto: cada tramo lleva su cifra escrita al lado con su color. Por eso
+   * tampoco se escribe texto DENTRO de estos tramos, que son de 12 px.
+   */
+  --viz-chain-advanced: #2F6DC0;
+  --viz-chain-stuck: #E08A1E;
+  --viz-chain-lost: #D03B3B;
+
+  /*
+   * El reparto por plataforma. Son los cuatro tonos ya validados del panel
+   * (oliva · magenta · azul · rojo) y el ORDEN es parte de la decisión: con
+   * deuteranopía el oliva y el rojo son el mismo color (ΔE 1,5), así que el
+   * azul y el magenta van en medio y el peor par adyacente sube a ΔE 8,6. Es la
+   * misma razón por la que el Reporte de Setters ordena Ganado · En proceso ·
+   * Perdido. Los cuatro pasan 4,5:1 contra el blanco, que es el color de la
+   * cifra que va escrita dentro de cada tramo.
+   */
+  --viz-zone-won: #6F8125;
+  --viz-zone-sales: #A64D8C;
+  --viz-zone-setter: #2F6DC0;
+  --viz-zone-lost: #D03B3B;
+
+  /* La clase de ingresos que no se puede clasificar: gris, porque no es una
+     tercera área sino la ausencia del dato. */
+  --viz-mix-unknown: #6B7280;
+
   padding: var(--page-py) var(--page-px) var(--page-pb);
 }
 :root[data-theme="dark"] .general-report-page {
   --viz-1: #7C9A2E;
   --viz-2: #4A88DA;
+  --viz-chain-advanced: #4A88DA;
+  --viz-chain-stuck: #DDA62E;
+  --viz-chain-lost: #DE6B6B;
+  --viz-zone-won: #7C9A2E;
+  --viz-zone-sales: #B55C9D;
+  --viz-zone-setter: #4A88DA;
+  --viz-zone-lost: #DE6B6B;
+  --viz-mix-unknown: #9AA3AF;
 }
 
 .gr-header {
@@ -676,12 +1070,140 @@ const obligationsTotal = computed(() => {
 .gr-mini-stats strong { font-size: 0.95rem; color: var(--text-main); font-variant-numeric: tabular-nums; }
 .gr-mini-stats strong.text-critical { color: var(--accent-rose); }
 
-.gr-funnel { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.75rem; }
-.gr-funnel-head { display: flex; justify-content: space-between; font-size: 0.84rem; color: var(--text-sub); }
-.gr-funnel-head strong { color: var(--text-main); font-variant-numeric: tabular-nums; }
-.gr-funnel-track { margin-top: 0.25rem; height: 14px; border-radius: 4px; background: var(--border-color); overflow: hidden; }
-.gr-funnel-bar { display: block; height: 100%; border-radius: 4px; background: var(--viz-1); transition: width 0.3s ease; }
-.gr-funnel-note { margin-top: 0.2rem; font-size: 0.74rem; color: var(--text-muted); }
+/* --- Cadena de trazabilidad --- */
+.gr-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.gr-leak {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  margin: 0 0 0.75rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  border-left: 4px solid var(--viz-chain-stuck);
+  background: var(--bg-page-alt);
+  font-size: 0.82rem;
+  color: var(--text-sub);
+  line-height: 1.45;
+}
+.gr-leak strong { color: var(--text-main); }
+
+.gr-chain-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin-bottom: 0.7rem;
+  font-size: 0.76rem;
+  color: var(--text-sub);
+}
+.gr-chain-legend-item { display: inline-flex; align-items: center; gap: 0.4rem; }
+
+.gr-chain { list-style: none; margin: 0; padding: 0; }
+.gr-chain-zone {
+  margin: 0.85rem 0 0.4rem;
+  padding-bottom: 0.2rem;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+.gr-chain-zone:first-child { margin-top: 0; }
+.gr-chain-step {
+  padding: 0.45rem 0 0.5rem 0.65rem;
+  border-left: 2px solid var(--border-color);
+}
+/* El paso donde más leads se detienen: lo primero que hay que ver. */
+.gr-chain-step.is-leak { border-left-color: var(--viz-chain-stuck); }
+.gr-chain-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.84rem;
+  color: var(--text-sub);
+}
+.gr-chain-label { flex: 1; min-width: 0; }
+.gr-chain-head strong { color: var(--text-main); font-variant-numeric: tabular-nums; }
+.gr-chain-share { font-size: 0.74rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+/* 2 px de fondo entre tramos: pegados, dos rellenos contiguos se leen como uno. */
+.gr-chain-track { display: flex; gap: 2px; margin-top: 0.3rem; height: 12px; }
+.gr-chain-seg { border-radius: 3px; min-width: 2px; transition: width 0.3s ease; }
+.gr-chain-note {
+  margin: 0.3rem 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.75rem;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+.gr-chain-chip { display: inline-flex; align-items: center; gap: 0.3rem; }
+
+.gr-chain-table { margin-top: 0.8rem; font-size: 0.78rem; color: var(--text-muted); }
+.gr-chain-table summary { cursor: pointer; width: fit-content; }
+.gr-chain-table table { width: 100%; margin-top: 0.4rem; border-collapse: collapse; }
+.gr-chain-table th,
+.gr-chain-table td {
+  padding: 0.25rem 0.4rem;
+  border-bottom: 1px solid var(--border-color);
+  text-align: right;
+  color: var(--text-sub);
+  font-variant-numeric: tabular-nums;
+}
+.gr-chain-table th:first-child,
+.gr-chain-table td:nth-child(2) { text-align: left; font-weight: 500; }
+
+.gr-annotations {
+  list-style: none;
+  margin: 0.85rem 0 0;
+  padding: 0.6rem 0.7rem;
+  border-radius: var(--radius-md);
+  background: var(--bg-page-alt);
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.gr-annotations li + li { margin-top: 0.4rem; }
+.gr-annotations strong { color: var(--text-sub); }
+
+/* --- Composición de los ingresos --- */
+.gr-mix {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 0.5rem;
+  margin-bottom: 0.9rem;
+}
+.gr-mix-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: var(--radius-md);
+  background: var(--bg-page-alt);
+}
+.gr-mix-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.76rem;
+  color: var(--text-sub);
+}
+.gr-mix-head em { font-style: normal; color: var(--text-muted); font-size: 0.72rem; }
+.gr-mix-share {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--text-main);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.gr-mix-amount { font-size: 0.82rem; color: var(--text-sub); font-variant-numeric: tabular-nums; }
+.gr-mix-note { font-size: 0.72rem; color: var(--text-muted); }
 
 .gr-notes { margin-top: 1rem; font-size: 0.8rem; color: var(--text-muted); }
 .gr-notes p { margin: 0 0 0.35rem; }

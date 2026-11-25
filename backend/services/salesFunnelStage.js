@@ -1,4 +1,5 @@
 import { db } from '../db/connection.js';
+import { isQuotedLabel } from './funnelColumnService.js';
 
 /**
  * ¿Un lead ya "graduó" del Setter Funnel al Funnel de Ventas?
@@ -106,9 +107,56 @@ export function isAppointmentStatus(status) {
   return APPOINTMENT_STATUSES.has(status);
 }
 
+/**
+ * Las etapas en las que el lead ya tiene una propuesta económica sobre la mesa.
+ *
+ * Se miran ADEMÁS de las tablas de cotizaciones y contratos porque el equipo
+ * negocia por WhatsApp y a veces mueve la tarjeta antes de emitir el documento:
+ * contando solo `quotes`, un lead que está cerrando trato aparece como si no
+ * hubiera pasado de la primera conversación.
+ *
+ * Viven acá —con el resto del vocabulario de `leads.status`— y no en el reporte
+ * que las necesita, por lo mismo que `LOST_STATUSES`: Campañas cuenta "leads en
+ * cotización" por anuncio y el Reporte General cuenta el mismo paso en su
+ * cadena de trazabilidad, así que con una lista por módulo basta que alguien
+ * agregue una etapa para que cada pantalla diga un número distinto del mismo
+ * lead.
+ */
+export const QUOTATION_STATUSES = new Set(['transferido_closer', 'en_negociacion']);
+
+/** ¿Este status dice que ya hay una propuesta sobre la mesa? */
+export function isQuotationStatus(status, quotationStatuses = QUOTATION_STATUSES) {
+  return quotationStatuses.has(status);
+}
+
 export async function loadWinningStatuses() {
   const columns = await db('funnel_columns').where({ final: true }).select('key');
   return new Set(['ganado', ...columns.map((column) => column.key)]);
+}
+
+/**
+ * Los status de propuesta más la columna de cotización que el equipo tenga
+ * configurada en su tablero.
+ *
+ * Esa columna no se puede listar en el código: su clave la genera el servidor
+ * (`col_mtc2nwec_fij`) y a cuál de todas se mueve un lead recién cotizado lo
+ * decide `getQuotedColumn()` —la marca explícita `funnel_columns.quoted` y, si
+ * nadie la puso, el nombre de la columna—. Se resuelve con la MISMA pregunta
+ * que usa el movimiento automático al cotizar: si el reporte la contestara por
+ * su cuenta, un lead podría estar en la etapa a la que el sistema mismo lo
+ * movió y no contar como cotizado.
+ */
+export async function loadQuotationStatuses() {
+  const statuses = new Set(QUOTATION_STATUSES);
+  const flagged = await db('funnel_columns').where({ quoted: true }).select('key').first();
+  if (flagged) {
+    statuses.add(flagged.key);
+    return statuses;
+  }
+  const columns = await db('funnel_columns').orderBy('position', 'asc').select('key', 'label');
+  const byName = columns.find((column) => isQuotedLabel(column.label));
+  if (byName) statuses.add(byName.key);
+  return statuses;
 }
 
 export async function loadSalesFunnelStatuses() {

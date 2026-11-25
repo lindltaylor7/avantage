@@ -6,7 +6,12 @@ import { PHONE_MATCH_KEY_SQL, phoneMatchKey } from './leadService.js';
 import { LEAD_ORIGIN_COLUMNS, bareSourceId, leadOrigin, onlyGreeted } from './leadOrigin.js';
 import { LEVELS, SPEND_LEVEL, levelLabel } from './smartPlusLevel.js';
 import { GENERIC_CONTACT_NAME } from './contactName.js';
-import { APPOINTMENT_STATUSES, LOST_STATUSES, loadWinningStatuses } from './salesFunnelStage.js';
+import {
+  APPOINTMENT_STATUSES,
+  LOST_STATUSES,
+  QUOTATION_STATUSES,
+  loadWinningStatuses
+} from './salesFunnelStage.js';
 import { percentile } from './reportPeriod.js';
 
 /**
@@ -278,15 +283,6 @@ export function dedupeAttribution(...listas) {
   }
   return out;
 }
-
-/**
- * Etapas en las que el lead ya tiene una propuesta económica sobre la mesa.
- * Se miran además de las tablas de cotizaciones/contratos/ingresos porque el
- * equipo negocia por WhatsApp y a veces mueve la tarjeta antes de emitir el
- * documento: si sólo se contara `quotes`, un anuncio que está cerrando trato
- * aparecería como si no hubiera pasado de la primera conversación.
- */
-const QUOTATION_STATUSES = new Set(['transferido_closer', 'en_negociacion']);
 
 /**
  * Lee una columna JSON de `campaigns` (`meta_insights`, un objeto, o
