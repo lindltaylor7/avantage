@@ -18,10 +18,20 @@
             :key="opt.value"
             type="button"
             class="range-tab"
-            :class="{ active: rangeDays === opt.value }"
+            :class="{ active: !monthFilter && rangeDays === opt.value }"
             @click="setRange(opt.value)"
           >{{ opt.label }}</button>
         </div>
+        <select
+          class="month-select"
+          :class="{ active: !!monthFilter }"
+          :value="monthFilter"
+          aria-label="Filtrar por mes"
+          @change="setMonth($event.target.value)"
+        >
+          <option value="">📅 Por mes…</option>
+          <option v-for="m in MONTH_OPTIONS" :key="m.value" :value="m.value">{{ m.label }}</option>
+        </select>
         <button
           type="button"
           class="btn-secondary sync-btn"
@@ -53,6 +63,11 @@
         <button type="button" class="btn-primary new-campaign-btn" @click="openCreateModal">＋ Nueva campaña</button>
       </div>
     </header>
+    <p v-if="monthFilter" class="month-note">
+      📅 Leads, conversaciones, citas y ventas de <strong>{{ monthLabel(monthFilter) }}</strong>
+      (del 1 al último día, hora de Lima). La inversión es la de la última sincronización con Meta/TikTok,
+      que va por ventana hasta hoy y no por mes calendario.
+    </p>
 
     <!-- Tira compacta de estado de integraciones cuando están conectadas -->
     <div v-if="(metaStatus && metaStatus.configured) || (tiktokStatus && tiktokStatus.configured)" class="connections-strip">
@@ -795,7 +810,7 @@
 
       <p class="generated-note">
         Actualizado {{ formatDateTime(report.generatedAt) }} · rango:
-        {{ report.range.from ? 'desde ' + formatDate(report.range.from) : 'todo el histórico' }}
+        {{ monthFilter ? monthLabel(monthFilter) : report.range.from ? 'desde ' + formatDate(report.range.from) : 'todo el histórico' }}
       </p>
     </template>
 
@@ -1075,6 +1090,7 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { apiFetch } from '../apiClient.js';
 import { loadApiImage } from '../apiImage.js';
 import BrandIcon from '../components/BrandIcon.vue';
+import { recentMonths, monthRange, monthLabel } from '../campaignMonths.js';
 import AppLoader from '../components/AppLoader.vue';
 
 /**
@@ -1097,14 +1113,39 @@ const loading = ref(false);
 const errorMsg = ref('');
 const rangeDays = ref(30);
 
+/**
+ * Mes calendario elegido (`YYYY-MM`), o vacío. Va aparte de `rangeDays`
+ * porque un mes tiene principio Y fin: "octubre" no es "los últimos 30 días",
+ * y es lo que contesta cuántos leads llegaron ese mes. Elegir un rango lo
+ * borra y elegir un mes deja los rangos apagados.
+ */
+const MONTH_OPTIONS = recentMonths(12);
+const monthFilter = ref('');
+
 /** Inicio del rango elegido; `null` cuando es "Todo" (sin filtro de fecha). */
 function rangeFrom() {
+  if (monthFilter.value) return monthRange(monthFilter.value).from;
   if (rangeDays.value === TODAY_RANGE) {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
     return start;
   }
   return rangeDays.value > 0 ? new Date(Date.now() - rangeDays.value * 86400000) : null;
+}
+
+/** Fin del rango: solo un mes lo tiene; los demás llegan hasta hoy. */
+function rangeTo() {
+  return monthFilter.value ? monthRange(monthFilter.value).to : null;
+}
+
+/** Los parámetros de fecha que viajan al informe y al exportable. */
+function rangeParams() {
+  const params = new URLSearchParams();
+  const from = rangeFrom();
+  const to = rangeTo();
+  if (from) params.set('from', from.toISOString());
+  if (to) params.set('to', to.toISOString());
+  return params;
 }
 const traceCampaign = ref(null);
 const expandedId = ref(null);
@@ -1257,9 +1298,7 @@ async function loadReport() {
   loading.value = true;
   errorMsg.value = '';
   try {
-    const params = new URLSearchParams();
-    const from = rangeFrom();
-    if (from) params.set('from', from.toISOString());
+    const params = rangeParams();
     const res = await apiFetch(`/api/campaigns/performance?${params.toString()}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'No se pudo cargar el rendimiento.');
@@ -1275,7 +1314,14 @@ async function loadReport() {
 }
 
 function setRange(value) {
+  monthFilter.value = '';
   rangeDays.value = value;
+  loadReport();
+}
+
+function setMonth(value) {
+  monthFilter.value = value;
+  if (!value) rangeDays.value = 30;
   loadReport();
 }
 
@@ -1291,9 +1337,7 @@ async function exportExcel() {
   exporting.value = true;
   exportMsg.value = '';
   try {
-    const params = new URLSearchParams();
-    const from = rangeFrom();
-    if (from) params.set('from', from.toISOString());
+    const params = rangeParams();
     const all = report.value?.campaigns || [];
     if (filteredCampaigns.value.length && filteredCampaigns.value.length < all.length) {
       params.set('campaignIds', filteredCampaigns.value.map((c) => c.id).join(','));
@@ -1344,6 +1388,22 @@ async function loadTikTokStatus() {
 /** Ventana de insights que se le pide a Meta según el rango en pantalla. */
 const PRESET_BY_RANGE = { [TODAY_RANGE]: 'today', 7: 'last_7d', 30: 'last_30d', 90: 'last_90d', 0: 'maximum' };
 
+/**
+ * Con un mes elegido no hay preset exacto (Meta y TikTok se sincronizan por
+ * ventana hasta hoy), así que se pide la ventana más chica que lo contenga
+ * entero. La inversión que se ve entonces es la de esa ventana y no la del
+ * mes, y la pantalla lo dice (`monthSpendNote`).
+ */
+function syncPreset() {
+  if (monthFilter.value) {
+    const days = (Date.now() - monthRange(monthFilter.value).from.getTime()) / 86400000;
+    if (days <= 30) return 'last_30d';
+    if (days <= 90) return 'last_90d';
+    return 'maximum';
+  }
+  return PRESET_BY_RANGE[rangeDays.value] || 'last_30d';
+}
+
 async function syncMeta() {
   syncing.value = true;
   syncMsg.value = '';
@@ -1352,7 +1412,7 @@ async function syncMeta() {
     const res = await apiFetch('/api/campaigns/meta/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ datePreset: PRESET_BY_RANGE[rangeDays.value] || 'last_30d' })
+      body: JSON.stringify({ datePreset: syncPreset() })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'No se pudo sincronizar con Meta.');
@@ -1382,7 +1442,7 @@ async function syncTikTok() {
     const res = await apiFetch('/api/campaigns/tiktok/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ datePreset: PRESET_BY_RANGE[rangeDays.value] || 'last_30d' })
+      body: JSON.stringify({ datePreset: syncPreset() })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'No se pudo sincronizar con TikTok.');
@@ -1510,7 +1570,9 @@ const traceSummary = computed(() => {
   ];
 });
 
-const rangeLabel = computed(() => RANGE_OPTIONS.find((o) => o.value === rangeDays.value)?.label || '');
+const rangeLabel = computed(() => (monthFilter.value
+  ? monthLabel(monthFilter.value)
+  : RANGE_OPTIONS.find((o) => o.value === rangeDays.value)?.label || ''));
 
 function toggleExpand(id) {
   expandedId.value = expandedId.value === id ? null : id;
@@ -1875,6 +1937,28 @@ onMounted(() => {
   padding: 0.35rem 0.8rem;
   border-radius: 9999px;
   cursor: pointer;
+}
+.month-select {
+  width: auto;
+  background: var(--surface-2);
+  border: 1px solid var(--border-color);
+  border-radius: 9999px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.4rem 0.8rem;
+  cursor: pointer;
+  text-transform: capitalize;
+}
+.month-select.active {
+  background: var(--bg-card-solid);
+  color: var(--text-main);
+  box-shadow: var(--shadow-sm);
+}
+.month-note {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
 }
 .range-tab.active {
   background: var(--bg-card-solid);
