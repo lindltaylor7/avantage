@@ -11,8 +11,10 @@ import {
   firstDayAfter,
   firstDayOf,
   lastMonthKeys,
+  normalizeMonthKey,
   normalizeMonths,
   percentChange,
+  previousMonthKey,
   percentile,
   ratio
 } from './reportPeriod.js';
@@ -461,9 +463,15 @@ export class SetterReportService {
   }
 
   async report(user, query = {}, now = new Date()) {
-    const months = normalizeMonths(query.months);
+    /*
+     * Un mes concreto (`month=YYYY-MM`) reemplaza la ventana de N meses: es la
+     * misma cohorte de siempre recortada a ese mes y comparada con el anterior,
+     * así que todo lo que cuelga de `keys` sigue valiendo igual.
+     */
+    const month = normalizeMonthKey(query.month, now);
+    const months = month ? 1 : normalizeMonths(query.months);
     // Se trae el doble de meses: la mitad vieja es el período de comparación.
-    const allKeys = lastMonthKeys(months * 2, now);
+    const allKeys = month ? [previousMonthKey(month), month] : lastMonthKeys(months * 2, now);
     const keys = allKeys.slice(months);
     const prevKeys = allKeys.slice(0, months);
     const windowStart = firstDayOf(allKeys[0]);
@@ -737,6 +745,7 @@ export class SetterReportService {
 
     return {
       months,
+      month,
       generatedAt: now.toISOString(),
       scope: visibility.scope,
       /*

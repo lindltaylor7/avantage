@@ -16,11 +16,20 @@
             v-for="option in PERIODS"
             :key="option"
             type="button"
-            :class="{ 'is-active': months === option }"
-            :aria-pressed="months === option"
-            @click="months = option"
+            :class="{ 'is-active': !month && months === option }"
+            :aria-pressed="!month && months === option"
+            @click="pickMonths(option)"
           >{{ option }} meses</button>
         </div>
+        <select
+          v-model="month"
+          class="sr-month-select"
+          :class="{ 'is-active': !!month }"
+          aria-label="Filtrar por mes"
+        >
+          <option value="">📅 Por mes…</option>
+          <option v-for="m in MONTH_OPTIONS" :key="m.value" :value="m.value">{{ m.label }}</option>
+        </select>
         <button class="btn-action-secondary" :disabled="isLoading" @click="load">
           <span :class="['btn-icon', { 'spin-animation': isLoading }]">🔄</span>
           {{ isLoading ? 'Cargando…' : 'Actualizar' }}
@@ -481,6 +490,7 @@ import {
   pointDelta,
   shortMonth as shortMonthOf
 } from '../components/report/reportFormat.js';
+import { recentMonths } from '../campaignMonths.js';
 
 const PERIODS = [3, 6, 12];
 const STORAGE_KEY = 'reporteSetters.months';
@@ -518,6 +528,19 @@ function readStoredMonths() {
 }
 
 const months = ref(readStoredMonths());
+/**
+ * Un mes concreto (`YYYY-MM`) o vacío. Va aparte de `months` porque contesta
+ * otra pregunta —¿cómo le fue a cada setter en octubre?— y NO se recuerda
+ * entre visitas: un recorte que sobrevive a la recarga muestra un mes viejo
+ * sin que nadie lo haya pedido ese día.
+ */
+const MONTH_OPTIONS = recentMonths(12);
+const month = ref('');
+
+function pickMonths(option) {
+  months.value = option;
+  month.value = '';
+}
 const report = ref(null);
 const isLoading = ref(false);
 const error = ref('');
@@ -530,7 +553,8 @@ async function load() {
   isLoading.value = true;
   error.value = '';
   try {
-    const response = await apiFetch(`/api/setter-report?months=${months.value}`);
+    const query = month.value ? `month=${month.value}` : `months=${months.value}`;
+    const response = await apiFetch(`/api/setter-report?${query}`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'No se pudo cargar el reporte.');
     report.value = data;
@@ -543,7 +567,9 @@ async function load() {
   }
 }
 
-watch(months, (value) => {
+// Los dos juntos: elegir una ventana con un mes puesto cambia ambos a la vez,
+// y con un watcher por lado el reporte se pediría dos veces.
+watch([months, month], ([value]) => {
   try { localStorage.setItem(STORAGE_KEY, String(value)); } catch { /* ventana privada */ }
   load();
 });
@@ -979,6 +1005,18 @@ const monthlyExtras = computed(() => monthlySource.value.months.map((_, i) => {
   cursor: pointer;
 }
 .sr-segmented button + button { border-left: 1px solid var(--border-color); }
+.sr-month-select {
+  width: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-card-solid);
+  color: var(--text-sub);
+  font-size: 0.82rem;
+  padding: 0.35rem 0.6rem;
+  cursor: pointer;
+  text-transform: capitalize;
+}
+.sr-month-select.is-active { background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 600; }
 .sr-segmented button.is-active { background: var(--primary); color: #fff; font-weight: 600; }
 
 .sr-error {

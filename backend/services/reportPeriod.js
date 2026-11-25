@@ -32,6 +32,23 @@ export function lastMonthKeys(count, now = new Date()) {
   return keys;
 }
 
+/**
+ * Un mes calendario pedido como `YYYY-MM`, o `null` si no es uno válido o es
+ * futuro: un mes que todavía no empezó no tiene leads, y aceptarlo mostraría
+ * una tabla en cero que se lee como "nadie trabajó".
+ */
+export function normalizeMonthKey(value, now = new Date()) {
+  const text = String(value || '');
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(text)) return null;
+  return text <= monthKeyOf(now) ? text : null;
+}
+
+/** El mes anterior a `YYYY-MM`: el período de comparación de un solo mes. */
+export function previousMonthKey(monthKey) {
+  const [y, m] = monthKey.split('-').map(Number);
+  return monthKeyOf(new Date(y, m - 2, 1));
+}
+
 /** Las claves `YYYY-MM` de los próximos `count` meses, el actual incluido. */
 export function nextMonthKeys(count, now = new Date()) {
   const keys = [];
