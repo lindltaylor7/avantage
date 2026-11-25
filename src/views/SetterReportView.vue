@@ -186,6 +186,13 @@
                       <span v-if="s.meetingsCancelled" class="sr-sub">
                         {{ s.meetingsCancelled }} cancelada{{ s.meetingsCancelled === 1 ? '' : 's' }}
                       </span>
+                      <span
+                        v-if="s.meetingsBooked"
+                        class="sr-sub"
+                        :title="s.meetingsBookedWithoutLead ? `${s.meetingsBookedWithoutLead} sin lead vinculado: no cuentan en «Con reunión» hasta que se aten a su ficha.` : 'Reuniones que esta persona cargó en el período.'"
+                      >
+                        {{ s.meetingsBooked }} agendada{{ s.meetingsBooked === 1 ? '' : 's' }}<template v-if="s.meetingsBookedWithoutLead"> · {{ s.meetingsBookedWithoutLead }} sin lead</template>
+                      </span>
                     </td>
                     <td data-label="Cerrados" class="num">
                       <strong>{{ integer(s.won) }}</strong>
@@ -236,6 +243,9 @@
                     <td data-label="Con reunión" class="num">
                       <strong>{{ integer(report.team.withMeeting) }}</strong>
                       <span class="sr-rate">{{ pct(report.team.meetingRate) }}</span>
+                      <span v-if="report.team.meetingsBooked" class="sr-sub">
+                        {{ report.team.meetingsBooked }} agendadas<template v-if="report.team.meetingsBookedWithoutLead"> · {{ report.team.meetingsBookedWithoutLead }} sin lead</template>
+                      </span>
                     </td>
                     <td data-label="Cerrados" class="num">
                       <strong>{{ integer(report.team.won) }}</strong>

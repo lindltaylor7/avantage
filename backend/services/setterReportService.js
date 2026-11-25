@@ -555,6 +555,25 @@ export class SetterReportService {
         this.users.listCommercialTeam()
       ]);
 
+    /*
+     * Reuniones que cada persona AGENDÓ en el período, fechadas por el alta y
+     * no por el lead. "Con reunión" es de la cohorte —leads del período que
+     * tienen una reunión— y por eso no ve las reuniones cargadas desde el
+     * Calendario sin lead: quien agenda así figuraba con 0 reuniones teniendo
+     * la agenda llena (Mishel, 25/11/2026). Es actividad, como los
+     * movimientos: se cuenta aparte y no entra en ninguna tasa.
+     */
+    const bookedRows = await db('scheduled_meetings')
+      .where('created_at', '>=', currentStart)
+      .where('created_at', '<', windowEnd)
+      .whereNull('cancelled_at')
+      .whereNotNull('created_by')
+      .groupBy('created_by')
+      .select('created_by')
+      .select(db.raw('COUNT(*) as booked'))
+      .select(db.raw('SUM(CASE WHEN lead_id IS NULL THEN 1 ELSE 0 END) as without_lead'));
+    const agendadas = new Map(bookedRows.map((row) => [row.created_by, row]));
+
     const labelStatus = buildStatusLabeler(index);
 
     // --- Reuniones por lead ---
@@ -712,6 +731,8 @@ export class SetterReportService {
           // defecto dentro de cada llamada, dos setters de la misma corrida
           // podrían caer a los dos lados del umbral de 7 días.
           ...summarize(setter.entries, { now }),
+          meetingsBooked: Number(agendadas.get(setter.id)?.booked || 0),
+          meetingsBookedWithoutLead: Number(agendadas.get(setter.id)?.without_lead || 0),
           activity: {
             moves: Number(movimientos?.moves || 0),
             blocked: Number(movimientos?.blocked || 0),
@@ -758,7 +779,12 @@ export class SetterReportService {
       responseBuckets: RESPONSE_BUCKETS.map(({ key, label }) => ({ key, label })),
       staleDays: STALE_DAYS,
       period: { months: keys, previous: prevKeys },
-      team: actual,
+      // Lo agendado del equipo es la suma de sus filas, para que cuadre.
+      team: {
+        ...actual,
+        meetingsBooked: setters.reduce((n, s) => n + s.meetingsBooked, 0),
+        meetingsBookedWithoutLead: setters.reduce((n, s) => n + s.meetingsBookedWithoutLead, 0)
+      },
       teamStages: topStages(etapasEquipo),
       previous: previo,
       kpis: {

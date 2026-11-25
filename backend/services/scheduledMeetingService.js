@@ -1,5 +1,6 @@
 import { db } from '../db/connection.js';
 import { firstRealName } from './contactName.js';
+import { resolveLeadForMeeting } from './meetingLeadLink.js';
 
 /**
  * Los desenlaces de asistencia que el panel admite hoy.
@@ -160,6 +161,19 @@ export class ScheduledMeetingService {
     // eso sigue siendo una reunión sin sala: no se guarda.
     if (porMeet && !evento) {
       throw new Error(`No se pudo crear el evento de Google Meet: ${calendarError} Vuelve a intentarlo, o marca la reunión como telefónica para agendarla sin Meet.`);
+    }
+
+    /*
+     * Desde el Calendario no hay ficha: si el celular o el correo que se
+     * escribió apunta a UN lead, la reunión se ata a él (ver
+     * `meetingLeadLink.js`). Nunca tumba el alta: el evento ya existe.
+     */
+    if (!leadId) {
+      try {
+        leadId = await resolveLeadForMeeting({ contactName, topic, attendeeEmail });
+      } catch (error) {
+        console.warn('⚠️ No se pudo buscar el lead de la reunión:', error.message);
+      }
     }
 
     const meeting = await this.create({
