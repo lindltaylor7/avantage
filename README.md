@@ -133,6 +133,17 @@ adelante) desde **hPanel → Avanzado → Node.js**. Pasos:
   adjuntos por `path`/`content` con `cid`— **no cambió en la 10**: probado con la 10.1.1, compone
   los mismos correos. Lo único que frena el salto es el `engines`, así que en cuanto el hosting
   esté en Node 20+ el cambio es de una línea.
+
+  **Actualización del 26/11/2026: ya son doce avisos y el piso se movió dos veces.** Los tres de
+  septiembre se volvieron doce (se sumaron la reutilización del `servername` TLS entre
+  transportes, el desbordamiento de pila por arreglos de destinatarios anidados, el O(n²) del
+  desdoblado de cabeceras DKIM y cuatro más de `addressparser`). Lo importante para el día que se
+  haga el salto: **el escáner dice "actualiza a 10.0.5" o "10.0.6" y eso ya no alcanza** — la
+  versión mínima que limpia los doce es **10.1.4**, porque tres de los avisos nuevos
+  (GHSA-8c8m-p3m8-cjg8, GHSA-m943-m63m-w62w, GHSA-85x2-q946-cp5h) se arreglaron recién ahí. La
+  cifra que publica un aviso es el piso de ESE aviso y no del paquete, así que subir al número que
+  dice el primero de la lista deja los otros once abiertos y el escáner vuelve a marcar en verde
+  oscuro lo que no se arregló. `npm audit fix --force` propone hoy la 10.6.1, que también sirve.
 - **Por qué `esbuild` se queda en 0.25.x pese al aviso de seguridad**: el escáner de dependencias
   marca `esbuild@0.25.12` (GHSA-gv7w-rqvm-qjhr, "actualiza a 0.28.1"). Ese aviso **está retirado
   por GitHub** —dice textualmente que el paquete afectado se identificó mal— y describe un fallo
@@ -170,6 +181,20 @@ adelante) desde **hPanel → Avanzado → Node.js**. Pasos:
   en su última versión; funciona porque uuid 11 sigue publicando su build CommonJS, que es como
   `exceljs` lo carga (`require('uuid')`). Si algún día `exceljs` actualiza su propia dependencia,
   este `overrides` se puede quitar.
+- **Por qué hay un `overrides` de `gaxios` en `package.json`**: `gaxios@7.1.3` —la versión que
+  `googleapis-common` y `gcp-metadata` piden **fijada exactamente**, no con un rango— lleva
+  `rimraf` entre sus dependencias de *producción*, y de ahí cuelgan `glob@10` y `minimatch`, los
+  dos con avisos de denegación de servicio (GHSA-3g3m-2fjr-6pw4 y GHSA-g3hv-75wg-m249). `rimraf`
+  ahí era un error: es una herramienta de limpieza del build, no algo que el cliente HTTP use en
+  tiempo de ejecución, y `gaxios` la quitó en la 7.2. El `overrides` fuerza `^7.3.1`, que tiene el
+  **mismo `engines` (`node >=18`)** y exactamente las mismas dependencias menos `rimraf`, así que
+  desaparece la cadena entera sin tocar `googleapis` —subirlo sería un salto de la 176 a la 190—.
+  El `glob@7.2.3` que entra por `exceljs` no está afectado: ese aviso empieza en la 9.
+- **Por qué `vite` está en `^6.4.6` y no en `^6.4.4`**: la 6.4.4 exacta tiene GHSA-8g5g-mxqh-grgj,
+  el `server.fs.deny` que se evade agregándole una *query* a la ruta. Solo afecta al servidor de
+  desarrollo (`npx vite`), que en producción no corre, pero el arreglo es un parche dentro de la
+  misma menor y no cuesta nada. Ojo que **no** se puede subir a la 7 por lo dicho en la nota de
+  `esbuild`: Vite 7 exige Node ^20.19 || >=22.12 y el build corre en el hosting.
 - **Por qué `boot.cjs` y no `server.js` como archivo de inicio**: el hosting de Node.js de
   Hostinger arranca la app con Phusion Passenger, que usa `require()` (CommonJS) para cargar el
   archivo de inicio. Nuestro backend usa módulos ES (`import`/`export`, ver
