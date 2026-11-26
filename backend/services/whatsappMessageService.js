@@ -8,6 +8,7 @@ import { whatsappMediaDir } from '../middleware/upload.js';
 import { isAdFormMessage } from './whatsappBotService.js';
 import { buildStageResolver, loadFunnelStageIndex } from './funnelStageLabel.js';
 import { WhisperService } from './whisperService.js';
+import { BALANCE_ERROR_CODE, isInsufficientBalanceError, ycloudBalanceAlert } from './ycloudBalanceAlert.js';
 
 const whisperService = new WhisperService();
 
@@ -489,8 +490,28 @@ export class WhatsappMessageService {
 
     if (!response.ok) {
       const reason = data?.message || data?.error?.message || JSON.stringify(data);
+
+      /*
+       * El rechazo por saldo no es un problema de ESTE mensaje: la cuenta no
+       * puede mandar ninguno, y hasta que alguien recargue cada reintento es
+       * una llamada que ya sabemos cómo termina. Se avisa una vez y se marca
+       * la cuenta, que es lo que mira el barrido para no quemar reservas (ver
+       * `ycloudBalanceAlert.js`). El error sale igual, con su código, porque
+       * quien disparó el envío a mano desde el panel tiene que verlo.
+       */
+      if (isInsufficientBalanceError(response.status, data)) {
+        void ycloudBalanceAlert.noteRejection({ reason, waId });
+        const error = new Error(`YCloud rechazó el envío: ${reason}`);
+        error.code = BALANCE_ERROR_CODE;
+        throw error;
+      }
+
       throw new Error(`YCloud rechazó el envío: ${reason}`);
     }
+
+    // Salió: hay saldo. Es lo que levanta la pausa de los barridos después de
+    // una recarga, sin tener que reiniciar el proceso.
+    ycloudBalanceAlert.noteSuccess();
 
     // Se guarda el "wamid" (no el "id" interno de YCloud) como message_id
     // para que quede en el mismo formato que usan las actualizaciones de

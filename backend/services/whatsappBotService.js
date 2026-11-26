@@ -18,6 +18,7 @@ import * as whatsappBotCopy from '../copy/whatsappBotCopy.js';
 import { evaluateQualification, normalizeAcademicStatus, normalizeCycle, normalizeThesisSituation } from './leadQualification.js';
 import { leadHasGraduated, loadSalesFunnelStatuses } from './salesFunnelStage.js';
 import { PHONE_MATCH_KEY_SQL, phoneMatchKey } from './leadService.js';
+import { ycloudBalanceAlert } from './ycloudBalanceAlert.js';
 
 // Motivo que ve el equipo en la notificación de transferencia, por señal
 // crítica detectada (ver `leadSignals.js`). Se redactan desde el punto de
@@ -6144,6 +6145,22 @@ ${slotMenuFooter(offered, scheduling.availableDays)}`);
     // falla gasta el único recordatorio que a ese lead le tocaba — y al
     // encender el bot otra vez, ya no se lo manda nadie.
     if (!(await this.isGloballyEnabled())) return;
+
+    /*
+     * Con la cuenta de YCloud sin saldo, tampoco. Es el mismo argumento del
+     * párrafo de arriba y por eso va pegado: este bucle RESERVA antes de
+     * mandar, así que correrlo contra una API que rechaza todo gasta el
+     * recordatorio —o el único reintento de turno perdido— que a ese lead le
+     * tocaba, y al recargar ya no se lo manda nadie. La marca la levanta el
+     * primer envío que salga bien (ver `ycloudBalanceAlert.js`).
+     */
+    if (ycloudBalanceAlert.agotado) {
+      this.logActivity({
+        type: 'stale_sweep_skipped_no_balance',
+        reason: 'La cuenta de YCloud no tiene saldo: el barrido no reserva trabajo que no se puede mandar.'
+      });
+      return;
+    }
 
     const now = Date.now();
 

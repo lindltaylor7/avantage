@@ -51,6 +51,7 @@ import { PageMessageService } from './services/pageMessageService.js';
 import { PageFollowerService } from './services/pageFollowerService.js';
 import { WhatsappWebhookService } from './services/whatsappWebhookService.js';
 import { YCloudWebhookService } from './services/ycloudWebhookService.js';
+import { ycloudBalanceAlert } from './services/ycloudBalanceAlert.js';
 import { WhatsappMessageService } from './services/whatsappMessageService.js';
 import { WhatsappBotService } from './services/whatsappBotService.js';
 import { LeadHandoffService } from './services/leadHandoffService.js';
@@ -357,6 +358,32 @@ const botQualityService = new BotQualityService();
 const whatsappBotService = new WhatsappBotService({ ollamaService, emailService, leadService, whatsappMessageService, settingsService: whatsappBotSettingsService, googleCalendarService, scheduledMeetingService, notificationService, handoffService: leadHandoffService, qualityService: botQualityService });
 const whatsappWebhookService = new WhatsappWebhookService({ botService: whatsappBotService });
 const ycloudWebhookService = new YCloudWebhookService({ botService: whatsappBotService });
+
+/*
+ * El aviso de saldo de YCloud necesita un cartero, y es el mismo que usan las
+ * demás alertas internas: INTERNAL_ALERT_EMAIL. Se inyecta acá —y no dentro
+ * del módulo— para que la máquina de estados se pueda probar sin SMTP.
+ *
+ * Sin destinatario configurado no se calla: deja el aviso en el log del
+ * servidor, que es mejor que nada el día que WhatsApp se cae a las 10 de la
+ * mañana.
+ */
+ycloudBalanceAlert.setNotifier(async ({ asunto, titulo, cuerpo }) => {
+  const destinatario = (process.env.INTERNAL_ALERT_EMAIL || '').trim();
+  if (!destinatario) {
+    console.warn(`⚠️ [YCloud] ${titulo}
+${cuerpo}
+(sin INTERNAL_ALERT_EMAIL: no se mandó correo)`);
+    return;
+  }
+  await emailService.sendInternalAlertEmail(destinatario, {
+    subject: asunto,
+    title: titulo,
+    bodyText: cuerpo,
+    actionUrl: 'https://dashboard.ycloud.com/billing',
+    actionLabel: 'Recargar en YCloud'
+  });
+});
 const advisorAvailabilityService = new AdvisorAvailabilityService();
 const instagramService = new InstagramService();
 const instagramWebhookService = new InstagramWebhookService();
@@ -7073,5 +7100,17 @@ app.listen(PORT, () => {
     leadReconciliationSweep.tick().catch((error) => {
       console.error('❌ [Conciliación diaria] Error inesperado en el barrido:', error);
     });
+    /*
+     * El saldo de YCloud, para enterarnos ANTES de que corte. `checkIfDue()`
+     * y no `check()`: la cadencia real es de una hora y la decide el propio
+     * módulo, así que colgarlo de este barrido de diez minutos no multiplica
+     * las llamadas a la API. Solo corre si YCloud es el proveedor activo —con
+     * WHATSAPP_PROVIDER=meta no hay saldo que mirar.
+     */
+    if ((process.env.WHATSAPP_PROVIDER || 'meta').toLowerCase() === 'ycloud') {
+      ycloudBalanceAlert.checkIfDue().catch((error) => {
+        console.error('❌ [YCloud] Error al consultar el saldo:', error);
+      });
+    }
   }, STALE_CONVERSATION_SWEEP_INTERVAL_MS);
 });
