@@ -347,6 +347,31 @@ igual sin duplicar nada. Lo que distingue el origen es `campaigns.source` (`meta
 `manual`), y los `external_id` de TikTok van prefijados con `tt:` para que no puedan colisionar con
 los de Meta. No hace falta ninguna migración para usar el módulo.
 
+## 4 bis. El botón «Conciliar Meta» del Kanban de Leads
+
+Qué compara, en tres líneas:
+
+1. Le pregunta a la Graph API **qué leads tiene cada formulario instantáneo activo** de la Página y
+   los compara, uno por uno, contra los que están en el CRM. Hace falta porque el webhook de Meta
+   responde `200` **antes** de procesar: un fallo posterior no se reintenta y solo deja una línea en
+   un log que se rota, así que un lead perdido no falla — simplemente no está (en septiembre de 2026
+   se perdió así el 39% de los leads de formulario: 95 en el Administrador de anuncios contra 58 en
+   la base).
+2. Comprueba además **si Meta está avisando** (`/{page_id}/subscribed_apps`: `conectado` /
+   `sin_leadgen` / `sin_apps` / `desconocido`) y **cuántas fichas están sin `meta_ad_id`**, o sea en
+   el CRM pero sin anuncio, que son las que no figuran en Campañas.
+3. Qué corrige: el **`GET` solo reporta** y el **`POST` importa** los que faltan (es el botón;
+   traer leads agrega gente al funnel que el equipo va a trabajar, así que no puede ser un efecto de
+   abrir una pantalla). «Completar datos del formulario» rellena *solo los huecos* de atribución de
+   las fichas que ya existen, volviendo a pedirle el `field_data` a Meta; un celular rescatado que ya
+   pertenece a otra ficha **no se escribe** y se informa como conflicto.
+
+Detalles que conviene saber: el alta pasa por el mismo camino que el webhook (`persistMetaLead()`),
+así que no duplica a nadie —cruza por el id del lead de Meta y por teléfono—; **Meta solo conserva
+los leads de un formulario 90 días**, y pasado ese plazo lo que no se concilió se perdió de verdad;
+corre además **sola una vez al día** (07:00 de Lima, `LEAD_RECONCILIATION_HOUR`), así que el botón
+es para mirar el detalle ahora mismo. El token tiene que ser de **página**.
+
 ## 5. Traer los leads de los formularios instantáneos de TikTok
 
 Si tus campañas de TikTok usan un **formulario instantáneo** (Instant Form: la persona deja sus

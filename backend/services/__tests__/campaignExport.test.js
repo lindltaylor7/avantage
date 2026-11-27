@@ -38,7 +38,11 @@ const COLUMNAS_META = [
  * se confundía con 'cobrada', que es lo verificado en Finanzas.
  */
 const COLUMNAS_ATRIBUCION = [
-  'Campaña', 'ID del conjunto de anuncios', 'Conjunto de anuncios', 'ID del anuncio', 'Anuncio',
+  // La plataforma y el ID de origen entraron el 26/11/2026: los nombres de
+  // anuncio se repiten entre conjuntos y entre plataformas, así que una fila
+  // identificada solo por su nombre no se puede enlazar con nada.
+  'Campaña', 'Plataforma', 'ID del conjunto de anuncios', 'Conjunto de anuncios',
+  'ID del anuncio', 'Anuncio', 'ID de origen',
   'Inversión (PEN)', 'Impresiones', 'Clics en el enlace', 'CTR del enlace (%)', 'Leads generados',
   'Costo por lead (PEN)', 'Leads sin respuesta', 'Citas agendadas', 'Citas asistidas',
   'Leads en cotización', 'Leads en seguimiento', 'Leads descartados', 'Ventas cerradas',
@@ -50,7 +54,15 @@ const COLUMNAS_ATRIBUCION = [
   'Registrado de ventas ganadas (PEN)', 'Cuota pactada sin cerrar (PEN)',
   'Ingreso cobrado (PEN)',
   'Ingreso registrado, incl. cuotas por cobrar (PEN)', 'ROAS real (CRM, sobre cobrado)',
-  'Contactos sin ficha en el CRM', 'Leads con pieza desconocida'
+  'Contactos sin ficha en el CRM', 'Leads con pieza desconocida',
+  /*
+   * Agregadas el 26/11/2026, al final: las tres mitades de "Leads descartados"
+   * —que sumaba el descarte del setter y la pérdida de ventas en un solo
+   * número— y las cuatro bandas de viabilidad, que solo se publicaban
+   * promediadas.
+   */
+  'Descartados sin respuesta', 'Descartados tras contacto', 'Perdidos en ventas',
+  'Viabilidad alta', 'Viabilidad media', 'Viabilidad baja', 'Sin viabilidad registrada'
 ];
 
 function campaignFixture() {
@@ -81,7 +93,10 @@ function campaignFixture() {
           responded: 55, qualified: 31, appointments: 12, won: 4, lost: 9,
           qualificationRate: 53.4, conversationToAppointmentRate: 20.7, appointmentToWonRate: 33.3,
           avgViability: 72, medianFirstResponseMin: 3.5, costPerConversation: 14.66,
-          costPerAppointment: 70.84, costPerWon: 212.53, quotedValue: 9600, roas: 11.29
+          costPerAppointment: 70.84, costPerWon: 212.53, quotedValue: 9600, roas: 11.29,
+          // Las tres mitades de `lost` (9) y las bandas de viabilidad.
+          discardedNoResponse: 5, discardedAfterContact: 3, lostInSales: 1,
+          viabilityHigh: 6, viabilityMid: 13, viabilityLow: 3, viabilityUnset: 36
         },
         metaAds: [
           {
@@ -124,26 +139,36 @@ function campaignFixture() {
           {
             key: 'ad:1', adId: '1', adName: 'Video testimonial — asesoría de tesis',
             adsetId: '11', adsetName: 'Lima Norte 22-35', adSourceId: '1', headline: null,
+            platform: 'Meta',
             leads: 41, responded: 39, qualified: 25, appointments: 10,
             // De las 10 citas agendadas solo 7 ocurrieron: esa brecha es la
             // calidad del público, y se perdía con las dos en una columna.
             attended: 7, collected: 3,
             quotation: 6, followUp: 27, discarded: 4, won: 4,
+            // Las tres mitades del descarte suman la columna de siempre (4) y
+            // las cuatro bandas de viabilidad suman los leads (41): es lo que
+            // permite comprobar el desglose en la misma fila.
+            discardedNoResponse: 3, discardedAfterContact: 1, lostInSales: 0,
+            viabilityHigh: 5, viabilityMid: 10, viabilityLow: 2, viabilityUnset: 24,
             paidRevenue: 9600, billedRevenue: 12000, quotedValue: 9600
           },
           {
             key: 'ad:2', adId: '2', adName: 'Carrusel — planes y precios',
-            adsetId: null, adsetName: null, adSourceId: '2', headline: null,
+            adsetId: null, adsetName: null, adSourceId: '2', headline: null, platform: 'Meta',
             leads: 14, responded: 12, qualified: 5, appointments: 2,
             quotation: 0, followUp: 8, discarded: 6, won: 0,
+            discardedNoResponse: 4, discardedAfterContact: 1, lostInSales: 1,
+            viabilityHigh: 0, viabilityMid: 3, viabilityLow: 1, viabilityUnset: 10,
             paidRevenue: 0, billedRevenue: 0, quotedValue: 0
           },
           {
             // El anuncio ya no existe en Meta pero sus leads —y su venta— sí.
             key: 'src:9001', adId: null, adName: null, adsetId: null, adsetName: null,
-            adSourceId: '9001', headline: 'Post antiguo — promo julio',
+            adSourceId: '9001', headline: 'Post antiguo — promo julio', platform: 'Meta',
             leads: 3, responded: 3, qualified: 2, appointments: 2,
             quotation: 1, followUp: 1, discarded: 0, won: 1,
+            discardedNoResponse: 0, discardedAfterContact: 0, lostInSales: 0,
+            viabilityHigh: 1, viabilityMid: 1, viabilityLow: 0, viabilityUnset: 1,
             paidRevenue: 2500, billedRevenue: 3000, quotedValue: 2500
           }
         ]
@@ -167,9 +192,11 @@ function campaignFixture() {
         adBreakdown: [
           {
             key: 'src:7777', adId: null, adName: null, adsetId: null, adsetName: null,
-            adSourceId: '7777', headline: 'Enlace directo a WhatsApp',
+            adSourceId: '7777', headline: 'Enlace directo a WhatsApp', platform: 'Orgánico',
             leads: 5, responded: 4, qualified: 2, appointments: 1,
             quotation: 2, followUp: 2, discarded: 1, won: 0,
+            discardedNoResponse: 1, discardedAfterContact: 0, lostInSales: 0,
+            viabilityHigh: 0, viabilityMid: 0, viabilityLow: 0, viabilityUnset: 5,
             paidRevenue: 0, billedRevenue: 0, quotedValue: 0
           }
         ]
@@ -317,6 +344,8 @@ test('cada fila es la combinación campaña > conjunto > anuncio', async () => {
   const cell = (row, header) => sheet.getRow(row).getCell(headers.indexOf(header) + 1).value;
 
   assert.equal(cell(2, 'Campaña'), 'Ingeniería Civil — Lima Norte');
+  assert.equal(cell(2, 'Plataforma'), 'Meta');
+  assert.equal(cell(2, 'ID de origen'), '1');
   assert.equal(cell(2, 'ID del conjunto de anuncios'), '11');
   assert.equal(cell(2, 'Conjunto de anuncios'), 'Lima Norte 22-35');
   assert.equal(cell(2, 'ID del anuncio'), '1');
@@ -384,6 +413,94 @@ test('ninguna columna declarada queda sin escribir', async () => {
     campañas.getRow(2).getCell(hc.indexOf('Personas nuevas (CRM)') + 1).value,
     47
   );
+});
+
+test('el desglose de la pérdida se escribe y suma la columna de siempre', async () => {
+  const { workbook } = await buildAndReopen();
+  const sheet = workbook.getWorksheet('Atribución anuncio → venta');
+  const headers = headersOf(sheet);
+  const cell = (row, header) => sheet.getRow(row).getCell(headers.indexOf(header) + 1).value;
+
+  /*
+   * Las tres columnas se recorren por su VALOR y no solo por su encabezado: el
+   * fallo del 12/11/2026 fue justamente declarar columnas que nadie llenaba, y
+   * en el archivo una celda vacía se lee como un cero. Y la suma tiene que dar
+   * la columna que ya se publicaba, que es lo que permite agregar el desglose
+   * sin mover ninguna cifra histórica.
+   */
+  const mitades = ['Descartados sin respuesta', 'Descartados tras contacto', 'Perdidos en ventas'];
+  for (let row = 2; row <= sheet.rowCount; row += 1) {
+    for (const header of mitades) {
+      assert.equal(typeof cell(row, header), 'number',
+        `"${header}" quedó sin escribir en la fila ${row}`);
+    }
+    const suma = mitades.reduce((total, header) => total + cell(row, header), 0);
+    assert.equal(suma, cell(row, 'Leads descartados'),
+      'las tres mitades deben sumar los descartados de la fila ' + row);
+  }
+
+  assert.equal(cell(2, 'Descartados sin respuesta'), 3);
+  assert.equal(cell(2, 'Descartados tras contacto'), 1);
+  assert.equal(cell(2, 'Perdidos en ventas'), 0);
+
+  // Y el mismo desglose en la hoja de campañas, donde la suma es "Perdidos".
+  const campañas = workbook.getWorksheet('Campañas');
+  const hc = headersOf(campañas);
+  const cc = (header) => campañas.getRow(2).getCell(hc.indexOf(header) + 1).value;
+  assert.equal(cc('Descartados sin respuesta') + cc('Descartados tras contacto')
+    + cc('Perdidos en ventas'), cc('Perdidos'));
+});
+
+test('las bandas de viabilidad se escriben y suman los leads del anuncio', async () => {
+  const { workbook } = await buildAndReopen();
+  const sheet = workbook.getWorksheet('Atribución anuncio → venta');
+  const headers = headersOf(sheet);
+  const cell = (row, header) => sheet.getRow(row).getCell(headers.indexOf(header) + 1).value;
+
+  /*
+   * "Sin viabilidad registrada" se publica y no se omite: las tres bandas en
+   * cero pueden ser un anuncio malo o leads que nadie evaluó, y se arreglan al
+   * revés. Por eso las CUATRO suman los leads de la fila — sin la cuarta, la
+   * suma no cuadra y el lector no sabe si falta un dato o sobra un lead.
+   */
+  const bandas = ['Viabilidad alta', 'Viabilidad media', 'Viabilidad baja', 'Sin viabilidad registrada'];
+  for (let row = 2; row <= sheet.rowCount; row += 1) {
+    for (const header of bandas) {
+      assert.equal(typeof cell(row, header), 'number',
+        `"${header}" quedó sin escribir en la fila ${row}`);
+    }
+    const suma = bandas.reduce((total, header) => total + cell(row, header), 0);
+    assert.equal(suma, cell(row, 'Leads generados'),
+      'las cuatro bandas deben sumar los leads de la fila ' + row);
+  }
+
+  assert.equal(cell(2, 'Viabilidad alta'), 5);
+  assert.equal(cell(2, 'Sin viabilidad registrada'), 24);
+});
+
+test('la hoja por anuncio dice la plataforma, y no la da por Meta', async () => {
+  const { workbook } = await buildAndReopen();
+  const sheet = workbook.getWorksheet('Atribución anuncio → venta');
+  const headers = headersOf(sheet);
+  const col = (header) => headers.indexOf(header) + 1;
+
+  /*
+   * El valor por defecto "Meta" es lo que hacía figurar los leads de TikTok
+   * como si fueran de Meta. Una fila con leads dice la plataforma de sus
+   * leads; una fila de puro gasto sincronizado desde Meta sí puede decir
+   * "Meta", porque de ahí salió la métrica.
+   */
+  const filas = [];
+  for (let row = 2; row <= sheet.rowCount; row += 1) {
+    filas.push({
+      anuncio: sheet.getRow(row).getCell(col('Anuncio')).value,
+      plataforma: sheet.getRow(row).getCell(col('Plataforma')).value
+    });
+  }
+
+  const organico = filas.find((f) => f.anuncio === 'Enlace directo a WhatsApp');
+  assert.equal(organico.plataforma, 'Orgánico', 'un contacto orgánico no es de Meta');
+  assert.ok(filas.every((f) => f.plataforma), 'ninguna fila se queda sin plataforma');
 });
 
 test('el costo por lead y el ROAS se calculan con la inversión del anuncio', async () => {

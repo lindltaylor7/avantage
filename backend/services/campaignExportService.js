@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs';
 import { levelLabel } from './smartPlusLevel.js';
+import { LOSS_STAGE_LABELS } from './lossStage.js';
 
 /**
  * Exporta el rendimiento de campañas a un libro de Excel (.xlsx) con una hoja
@@ -277,10 +278,33 @@ function adAttributionColumns(currency) {
   return [
     // ── Bloque A: identificación y origen ──
     { header: 'Campaña', key: 'campaignName', width: 34 },
-    { header: 'ID del conjunto de anuncios', key: 'adsetId', width: 22 },
+    /*
+     * La plataforma, que faltaba en esta hoja. Los nombres de anuncio se
+     * repiten entre conjuntos y entre plataformas —el mismo "WA | BF | ... |
+     * 23Nov" vive en Prospección y en Remarketing—, así que una fila
+     * identificada solo por su nombre no se puede enlazar con nada: `platform`
+     * ya entraba en la clave de agrupación y simplemente no se publicaba.
+     */
+    { header: 'Plataforma', key: 'platform', width: 13 },
+    /*
+     * Los ids, como TEXTO. Tienen 15 a 17 dígitos y sin el formato de texto
+     * Excel los muestra en notación científica y les cambia los últimos
+     * dígitos al abrir el archivo, que es exactamente lo que impide
+     * compararlos contra el Administrador de anuncios. Es la misma regla que
+     * ya aplicaba la hoja "Ruta de leads" y que acá faltaba.
+     */
+    { header: 'ID del conjunto de anuncios', key: 'adsetId', width: 22, fmt: TEXT_FMT },
     { header: 'Conjunto de anuncios', key: 'adsetName', width: 36 },
-    { header: 'ID del anuncio', key: 'adId', width: 20 },
+    { header: 'ID del anuncio', key: 'adId', width: 20, fmt: TEXT_FMT },
     { header: 'Anuncio', key: 'adName', width: 44 },
+    /*
+     * El "ID de origen": el identificador con el que llegó el lead, pelado y
+     * sin el prefijo interno `tt:` (ver `bareSourceId`). Es el campo que se
+     * compara dígito por dígito contra la plataforma, y puede no ser el id del
+     * anuncio —el referral de WhatsApp manda a veces el de la publicación—,
+     * así que va al lado y no en su lugar.
+     */
+    { header: 'ID de origen', key: 'adSourceId', width: 20, fmt: TEXT_FMT },
     // ── Bloque B: inversión y conversión inicial ──
     { header: `Inversión (${currency})`, key: 'spend', width: 17, fmt: MONEY_FMT },
     { header: 'Impresiones', key: 'impressions', width: 13, fmt: INT_FMT },
@@ -339,7 +363,34 @@ function adAttributionColumns(currency) {
      * anuncio padre). Dice que el costo de esta fila es del padre y no de una
      * creatividad concreta, en vez de dejar creer que mide un video.
      */
-    { header: 'Leads con pieza desconocida', key: 'piezaDesconocida', width: 26, fmt: INT_FMT }
+    { header: 'Leads con pieza desconocida', key: 'piezaDesconocida', width: 26, fmt: INT_FMT },
+    /*
+     * ── Columnas agregadas el 26/11/2026, al final y sin tocar las de arriba ──
+     *
+     * Van al final a propósito: el importador de marketing busca las columnas
+     * por el nombre del encabezado, así que agregar en medio no rompe nada,
+     * pero renombrar o reordenar lo que ya lee sí — y una columna que deja de
+     * llegar se lee como un cero.
+     *
+     * Las tres mitades de "Leads descartados", que sumaba dos cosas que se
+     * arreglan al revés: el contacto que nunca llegó a ser una oportunidad y
+     * el cliente real que no compró. La suma de las tres es la columna de
+     * arriba, así que se puede comprobar en la misma fila. Ver `lossStage.js`.
+     */
+    { header: 'Descartados sin respuesta', key: 'discardedNoResponse', width: 24, fmt: INT_FMT },
+    { header: 'Descartados tras contacto', key: 'discardedAfterContact', width: 24, fmt: INT_FMT },
+    { header: 'Perdidos en ventas', key: 'lostInSales', width: 19, fmt: INT_FMT },
+    /*
+     * La banda de viabilidad por anuncio. Se publicaba solo promediada, y un
+     * promedio no distingue diez leads mediocres de cinco altos y cinco bajos
+     * — que es la diferencia que decide si el anuncio se escala. "Sin
+     * viabilidad registrada" va publicado y no omitido: las tres bandas en
+     * cero pueden ser un anuncio malo o leads que nadie evaluó.
+     */
+    { header: 'Viabilidad alta', key: 'viabilityHigh', width: 16, fmt: INT_FMT },
+    { header: 'Viabilidad media', key: 'viabilityMid', width: 17, fmt: INT_FMT },
+    { header: 'Viabilidad baja', key: 'viabilityLow', width: 16, fmt: INT_FMT },
+    { header: 'Sin viabilidad registrada', key: 'viabilityUnset', width: 24, fmt: INT_FMT }
   ];
 }
 
@@ -424,6 +475,15 @@ function leadTrailColumns(currency) {
     { header: 'Solo saludó', key: 'onlyGreeted', width: 12 },
     { header: 'Calificado', key: 'qualified', width: 12 },
     { header: 'Viabilidad', key: 'viability', width: 12, fmt: INT_FMT },
+    /*
+     * La BANDA, al lado del puntaje. Son dos columnas distintas de la ficha
+     * —`overall_viability_score` es el número y `viability_level` el texto— y
+     * la banda es la que el equipo usa para filtrar su tablero, así que es la
+     * que hay que poder contar. "Sin registrar" se escribe con todas las
+     * letras, como "Calificado": la celda vacía la lee el importador como una
+     * viabilidad baja, que es el error con el signo cambiado.
+     */
+    { header: 'Nivel de viabilidad', key: 'viabilityBand', width: 19 },
     { header: 'Cita agendada', key: 'meetingAt', width: 18, fmt: DATETIME_FMT },
     /*
      * El lead está en la etapa "cita agendada" y no hay ninguna reunión con
@@ -439,6 +499,15 @@ function leadTrailColumns(currency) {
     // ── Dónde está hoy ──
     { header: 'Columna del funnel', key: 'funnelColumn', width: 24 },
     { header: 'Etapa comercial', key: 'commercialStage', width: 22 },
+    /*
+     * En qué PASO se perdió, para los que se perdieron. Es lo que deja cuadrar
+     * las tres columnas de descarte de las hojas agregadas contra las filas de
+     * esta: el número de arriba y los leads que lo forman tienen que poder ser
+     * los mismos. No dice POR QUÉ —ese dato no existe en ninguna columna
+     * todavía— y "Descartado tras contacto" afirma solo que una persona lo
+     * revisó y lo descartó. Ver `lossStage.js`.
+     */
+    { header: 'Desenlace de la pérdida', key: 'lossStage', width: 24 },
     { header: 'Fecha de cierre', key: 'closedAt', width: 18, fmt: DATE_FMT },
     // ── Dinero ──
     /*
@@ -496,12 +565,28 @@ function adAttributionRow(campaign, ad, crm) {
 
   return {
     campaignName: campaign.name,
-    adsetId: ad?.adsetId || crm?.adsetId || '-',
+    /*
+     * Sin leads atribuidos no se sabe de qué plataforma es la fila: las
+     * métricas (`ad`) salen de la sincronización de Meta y por eso ahí se
+     * puede afirmar "Meta", pero un anuncio que no trajo a nadie y del que
+     * solo hay gasto no tiene de dónde sacarlo. "Sin dato" y no "Meta": el
+     * valor por defecto de una plataforma es justo lo que hacía figurar los
+     * leads de TikTok como si fueran de Meta.
+     */
+    platform: crm?.platform || (ad ? 'Meta' : 'sin dato'),
+    adsetId: asText(ad?.adsetId || crm?.adsetId) || '-',
     adsetName: ad?.adsetName || crm?.adsetName || '-',
     // Sin anuncio en las métricas se cae al `source_id` del referral: es el
     // identificador con el que llegó el lead y el que permite rastrearlo.
-    adId: ad?.adId || crm?.adId || crm?.adSourceId || '-',
+    adId: asText(ad?.adId || crm?.adId || crm?.adSourceId) || '-',
     adName: ad?.adName || crm?.adName || crm?.headline || '-',
+    /*
+     * El id de origen va aparte del id del anuncio porque no siempre son el
+     * mismo: el referral de WhatsApp manda a veces el id de la publicación.
+     * `-` es "no corresponde" —una fila de gasto sin un solo lead no tiene
+     * origen que publicar— y no un dato faltante.
+     */
+    adSourceId: asText(crm?.adSourceId) || '-',
     spend,
     impressions: ad?.impressions ?? null,
     linkClicks: ad?.linkClicks ?? null,
@@ -523,6 +608,16 @@ function adAttributionRow(campaign, ad, crm) {
     quotation: crm?.quotation || 0,
     followUp: crm?.followUp || 0,
     discarded: crm?.discarded || 0,
+    // Las tres mitades del descarte y las cuatro bandas de viabilidad. El
+    // conteo lo calcula `#breakdownByAd()`; acá solo se copia — es el mismo
+    // olvido que dejó "Citas agendadas" en blanco en todas las filas.
+    discardedNoResponse: crm?.discardedNoResponse || 0,
+    discardedAfterContact: crm?.discardedAfterContact || 0,
+    lostInSales: crm?.lostInSales || 0,
+    viabilityHigh: crm?.viabilityHigh || 0,
+    viabilityMid: crm?.viabilityMid || 0,
+    viabilityLow: crm?.viabilityLow || 0,
+    viabilityUnset: crm?.viabilityUnset || 0,
     won: crm?.won || 0,
     quoted: crm?.quoted || 0,
     quotedValue: crm?.quotedValue || 0,
@@ -651,7 +746,21 @@ function campaignColumns(currency) {
     // El retorno sobre lo cotizado, nombrado por lo que es. No es ROAS: lo
     // cotizado es una propuesta, no dinero que entró.
     { header: 'Cotizado / gasto', key: 'quotedToSpend', width: 17, fmt: DEC_FMT },
-    { header: 'Última sincronización con Meta', key: 'lastSyncedAt', width: 26 }
+    { header: 'Última sincronización con Meta', key: 'lastSyncedAt', width: 26 },
+    /*
+     * ── Columnas agregadas el 26/11/2026, al final ──
+     * Las tres mitades de "Perdidos" y las cuatro bandas de viabilidad, con la
+     * misma definición que en la hoja por anuncio. Acá la suma de las tres
+     * mitades es exactamente "Perdidos": en esta hoja la pérdida se cuenta por
+     * estado y no por el cajón de prioridad del reporte por anuncio.
+     */
+    { header: 'Descartados sin respuesta', key: 'discardedNoResponse', width: 24, fmt: INT_FMT },
+    { header: 'Descartados tras contacto', key: 'discardedAfterContact', width: 24, fmt: INT_FMT },
+    { header: 'Perdidos en ventas', key: 'lostInSales', width: 19, fmt: INT_FMT },
+    { header: 'Viabilidad alta', key: 'viabilityHigh', width: 16, fmt: INT_FMT },
+    { header: 'Viabilidad media', key: 'viabilityMid', width: 17, fmt: INT_FMT },
+    { header: 'Viabilidad baja', key: 'viabilityLow', width: 16, fmt: INT_FMT },
+    { header: 'Sin viabilidad registrada', key: 'viabilityUnset', width: 24, fmt: INT_FMT }
   ];
 }
 
@@ -777,9 +886,29 @@ export class CampaignExportService {
       ['ROAS',
         'Cobrado y verificado ÷ gasto. No sobre lo cotizado: un anuncio que solo genera propuestas que nunca cierran mostraría el mejor retorno del libro. El cociente sobre lo cotizado se publica aparte, con su nombre ("Cotizado / gasto").'],
 
+      ['— Los tres desenlaces de la pérdida —', ''],
+      ['Por qué se separaron',
+        'Hasta el 26/11/2026 había un solo contador ("Leads descartados" / "Perdidos") que sumaba el descarte del Setter Funnel y la pérdida del Funnel de Ventas: 713 contra 199 en ese corte. Mezclados no se puede decir si el anuncio trae contactos que nunca llegaron a ser una oportunidad o clientes reales que no compraron, y a uno se le corta el presupuesto y al otro se le revisa el cierre. La columna de siempre sigue publicándose y es la SUMA de las tres de abajo, así que el desglose se comprueba en la misma fila.'],
+      ['Descartados sin respuesta',
+        'Se descartó en el Setter Funnel y NADIE le contestó nunca. Lo que hay que mirar acá es si el problema fue el contacto o que no se lo atendió.'],
+      ['Descartados tras contacto',
+        'Se descartó en el Setter Funnel y sí se le había contestado: alguien lo trabajó y decidió que no servía. Afirma que una persona lo revisó, NO por qué lo descartó — el motivo ("solo curioso", "pide gratis", "número equivocado") todavía no se registra en ninguna columna y no se puede derivar sin inventarlo.'],
+      ['Perdidos en ventas',
+        'Llegó al closer y no compró. Es el único de los tres que habla de un cliente real.'],
+      ['Si las tres no suman la columna de siempre',
+        'En la hoja por anuncio puede pasar en un caso, y es una ficha que hay que ir a mirar: el lead con el proyecto abierto o la cuota verificada que quedó con la tarjeta en "Perdido" se cuenta en "Ventas cerradas" y además en "Perdidos en ventas". En la hoja de campañas suman siempre.'],
+
+      ['— Viabilidad: son dos columnas distintas —', ''],
+      ['Viabilidad (número) vs Nivel de viabilidad',
+        'La primera es el puntaje que calcula el evaluador y la segunda la banda Alta / Media / Baja, que es la que el equipo usa para filtrar su tablero. La hoja publicaba solo el puntaje y promediado por anuncio, y un promedio no distingue diez leads mediocres de cinco altos y cinco bajos — que es la diferencia que decide si el anuncio se escala.'],
+      ['"Sin viabilidad registrada"',
+        'Nadie la evaluó. Solo tienen banda los leads que pasaron por el evaluador o por Avan, que son la minoría, así que esta columna suele ser la más grande de las cuatro. Las tres bandas en cero pueden ser un anuncio malo o leads sin evaluar, y por eso se publica en vez de omitirse: contarlos como "Baja" diría que el anuncio trae leads malos cuando lo que pasa es que no se los miró.'],
+
       ['— Los tres estados, y por qué no son dos —', ''],
       ['Calificado',
-        '"Sí" / "No" / "Sin calificar". El tercero es información: separa al lead que nadie revisó del revisado y descartado. Se escribe con todas las letras justamente para que ningún importador lo lea como un "No".'],
+        '"Sí" / "No" / "Sin calificar". El tercero es información: separa al lead que nadie revisó del revisado y descartado. Se escribe con todas las letras justamente para que ningún importador lo lea como un "No". Es el juicio de una PERSONA sobre si el contacto sirve.'],
+      ['"Calificados (Avan)" (hoja de campañas) — CAMBIÓ el 26/11/2026',
+        'Cuenta los contactos con informe de viabilidad de Avan: completó la sesión del bot o el lead tiene puntaje de viabilidad. Antes contaba además a cualquier lead que hubiera salido de la bandeja, así que venía SIEMPRE igual a "Leads" (397 de 397 en Meta) y no servía para comparar dos anuncios. La cifra ahora es mucho más chica y eso es el arreglo, no un fallo: las series anteriores a esta fecha no son comparables con las nuevas. El juicio del setter es otra cosa y va en "Calificados por el setter".'],
       ['Cita asistida',
         '"Sí" / "No" / "Sin registrar". Lo marca una persona y nunca un automatismo: Google Calendar no sabe quién entró a la sala. Un "No" por defecto mostraría como ausencias todas las reuniones viejas.'],
       ['Cita sin reunión registrada',
@@ -792,6 +921,14 @@ export class CampaignExportService {
         'Se publican las tres. La mediana sola puede ser el acuse automático de Avan: en el corte del 10/11/2026 decía ~20 segundos con 51 leads esperando más de una hora. El P90 mide la cola y la mediana humana mide al equipo.'],
       ['Quién respondió primero',
         '"Avan o app de WhatsApp" cuando no fue nadie desde el panel — no se afirma que contestó el bot, porque un asesor escribiendo desde WhatsApp Business llega por el mismo camino.'],
+
+      ['— De dónde salió el lead —', ''],
+      ['"Orgánico" + canal "WhatsApp"',
+        'Escribió por WhatsApp sin venir de un anuncio (no hay referral). NO es un dato faltante: es la respuesta, y así se publica desde que existe la columna.'],
+      ['"Otro" como plataforma',
+        'No hay NINGUNA evidencia del origen de ese lead. Es deliberado que no diga "Meta": el origen se escribe una sola vez, con la evidencia que lo prueba (el id que la plataforma emitió para ese envío, su marcador en las notas o la recepción del webhook), y rellenarlo por descarte fue justo lo que acreditó a TikTok ventas que no trajo. Un lead "Otro" se corrige completando su evidencia, no cambiándole la plataforma.'],
+      ['"Fuente de atribución" y "Confianza de atribución"',
+        'Con qué se supo la plataforma de ese lead. Una confianza baja significa que se emparejó por teléfono, que sirve para no duplicar a una persona pero no para afirmar de qué anuncio salió: coincidir no es identificar.'],
 
       ['— Cómo se escriben las celdas —', ''],
       ['"-"', 'No corresponde: acá no hay nada que poner (un lead orgánico no tiene anuncio).'],
@@ -825,7 +962,9 @@ export class CampaignExportService {
   #addAdAttributionSheet(workbook, campaigns, currency) {
     const sheet = workbook.addWorksheet('Atribución anuncio → venta');
     const columns = adAttributionColumns(currency);
-    styleSheet(sheet, columns, 5); // fija los cinco campos de identificación
+    // Fija el bloque de identificación completo: campaña, plataforma, conjunto
+    // (id y nombre), anuncio (id y nombre) y el id de origen.
+    styleSheet(sheet, columns, 7);
 
     const rows = [];
     for (const campaign of campaigns) {
@@ -937,6 +1076,16 @@ export class CampaignExportService {
         // Solo se afirma del lead que SÍ está en la etapa de cita: del resto
         // no hay nada que decir, y un "No" en todas las filas es ruido.
         appointmentWithoutMeeting: row.appointmentWithoutMeeting ? 'Sí' : '-',
+        /*
+         * Los dos datos nuevos, con la misma regla de tres estados del resto
+         * de la hoja: "Sin registrar" escrito, y `-` solo donde de verdad no
+         * corresponde (un lead que no se perdió no tiene desenlace de
+         * pérdida).
+         */
+        viabilityBand: row.viabilityBand
+          ? row.viabilityBand.charAt(0).toUpperCase() + row.viabilityBand.slice(1)
+          : 'Sin registrar',
+        lossStage: row.lossStage ? LOSS_STAGE_LABELS[row.lossStage] || row.lossStage : '-',
         /*
          * Quién contestó primero. Nulo con respuesta registrada no es "el
          * bot": es "no fue nadie del panel" —puede ser Avan o el eco de un
@@ -1165,6 +1314,13 @@ export class CampaignExportService {
         appointmentsWithoutMeeting: m.appointmentsWithoutMeeting,
         won: m.won,
         lost: m.lost,
+        discardedNoResponse: m.discardedNoResponse,
+        discardedAfterContact: m.discardedAfterContact,
+        lostInSales: m.lostInSales,
+        viabilityHigh: m.viabilityHigh,
+        viabilityMid: m.viabilityMid,
+        viabilityLow: m.viabilityLow,
+        viabilityUnset: m.viabilityUnset,
         qualificationRate: m.qualificationRate,
         conversationToAppointmentRate: m.conversationToAppointmentRate,
         attendanceRate: m.attendanceRate,

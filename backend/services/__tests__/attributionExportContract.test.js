@@ -82,6 +82,54 @@ function tiktokLead(extra = {}) {
   };
 }
 
+// ───────── La viabilidad y el desenlace de la pérdida, por lead ─────────
+
+test('la banda de viabilidad viaja por lead, al lado del puntaje', async () => {
+  const [fila] = await buildTrail([tiktokLead({ viability: 78, viabilityBand: 'alta' })]);
+
+  assert.equal(fila['Viabilidad'], 78);
+  // Son dos columnas distintas de la ficha: el puntaje que calcula el
+  // evaluador y la banda con la que el equipo filtra su tablero. La hoja
+  // publicaba solo la primera, y promediada por anuncio.
+  assert.equal(fila['Nivel de viabilidad'], 'Alta');
+});
+
+test('sin banda registrada se ESCRIBE "Sin registrar", no se deja la celda vacía', async () => {
+  const [fila] = await buildTrail([tiktokLead({ viability: null, viabilityBand: null })]);
+
+  /*
+   * La celda vacía la leyó el importador de marketing como un "No" y la
+   * planilla terminó diciendo que los 450 leads del corte estaban
+   * descalificados. Acá sería peor: se leería como viabilidad baja, o sea como
+   * un anuncio que trae leads malos, cuando lo que pasa es que nadie los
+   * evaluó. Un valor que no se puede colapsar no se colapsa.
+   */
+  assert.equal(fila['Nivel de viabilidad'], 'Sin registrar');
+});
+
+test('el desenlace de la pérdida se nombra en castellano y distingue los dos tableros', async () => {
+  const [sinRespuesta] = await buildTrail([tiktokLead({ lossStage: 'descartado_sin_respuesta' })]);
+  const trasContacto = await buildTrail([tiktokLead({ lossStage: 'descartado_tras_contacto' })]);
+  const enVentas = await buildTrail([tiktokLead({ lossStage: 'perdido_ventas' })]);
+
+  /*
+   * Los tres estaban colapsados en un solo contador, y de esa diferencia
+   * depende qué se corrige: al contacto que nunca llegó a ser oportunidad se
+   * le revisa el anuncio, al cliente real que no compró se le revisa el
+   * cierre.
+   */
+  assert.equal(sinRespuesta['Desenlace de la pérdida'], 'Descartado sin respuesta');
+  assert.equal(trasContacto[0]['Desenlace de la pérdida'], 'Descartado tras contacto');
+  assert.equal(enVentas[0]['Desenlace de la pérdida'], 'Perdido en ventas');
+});
+
+test('un lead que no se perdió no tiene desenlace, y la hoja lo dice con "-"', async () => {
+  const [fila] = await buildTrail([tiktokLead({ lossStage: null })]);
+
+  // `-` es "no corresponde" y no "falta el dato": este lead sigue abierto.
+  assert.equal(fila['Desenlace de la pérdida'], '-');
+});
+
 // ───────────────────── La fuente de la atribución viaja ─────────────────────
 
 test('la hoja publica con qué evidencia se atribuyó cada lead', async () => {

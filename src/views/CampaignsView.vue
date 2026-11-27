@@ -173,7 +173,7 @@
         <div class="kpi-tile kpi-hero is-cyan">
           <div class="kpi-top-line">
             <span class="kpi-label">Conversaciones</span>
-            <span class="kpi-mini-badge">{{ num(report.kpis.qualified) }} calif.</span>
+            <span class="kpi-mini-badge" title="Contactos con informe de viabilidad de Avan">{{ num(report.kpis.qualified) }} calif.</span>
           </div>
           <span class="kpi-value">{{ num(report.kpis.totalConversations) }}</span>
           <span class="kpi-sub" v-if="report.kpis.unclassifiedConversations">
@@ -254,10 +254,19 @@
                   · {{ money(report.kpis.totalPactedRevenue) }} pactado sin cerrar</template>
               </span>
             </div>
+            <!--
+              "Calificados" es el informe de viabilidad que arma Avan: completó
+              la sesión del bot o el lead tiene puntaje de viabilidad. Hasta el
+              26/11/2026 contaba además a todo lead que hubiera salido de la
+              bandeja, así que venía siempre igual al total de conversaciones y
+              no servía para comparar dos anuncios. El subtítulo dice qué
+              cuenta porque la cifra bajó mucho al arreglarse, y sin eso se lee
+              como un fallo.
+            -->
             <div class="kpi-tile">
               <span class="kpi-label">Calificados</span>
               <span class="kpi-value">{{ num(report.kpis.qualified) }}</span>
-              <span class="kpi-sub">Prospectos aptos</span>
+              <span class="kpi-sub">Con informe de viabilidad de Avan</span>
             </div>
             <div class="kpi-tile">
               <span class="kpi-label">Costo por cita</span>
@@ -787,7 +796,7 @@
             </div>
             <div class="unclassified-stats">
               <span>{{ num(ad.conversations) }} conv.</span>
-              <span>{{ num(ad.qualified) }} calif.</span>
+              <span title="Leads con informe de viabilidad de Avan">{{ num(ad.qualified) }} calif.</span>
               <span>{{ num(ad.appointments) }} citas</span>
               <span>{{ num(ad.won) }} ganados</span>
             </div>

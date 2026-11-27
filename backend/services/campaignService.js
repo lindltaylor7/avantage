@@ -12,6 +12,8 @@ import {
   QUOTATION_STATUSES,
   loadWinningStatuses
 } from './salesFunnelStage.js';
+import { lossStage, tallyLossStages } from './lossStage.js';
+import { tallyViabilityBands, viabilityBand } from './viabilityBand.js';
 import { percentile } from './reportPeriod.js';
 
 /**
@@ -602,6 +604,14 @@ export class CampaignService {
           .whereIn(db.raw(PHONE_MATCH_KEY_SQL), phoneKeys)
           .orWhereIn('id', formLeadIds))
         .select('id', 'phone', 'status', 'created_at', 'full_name', 'topic', 'overall_viability_score',
+          /*
+           * La BANDA de viabilidad, que es otra columna que el puntaje.
+           * `overall_viability_score` es un número y `viability_level` el
+           * texto que el Setter Funnel usa para sus recuadros Alta/Media/Baja:
+           * el reporte publicaba solo el primero, así que la señal con la que
+           * el equipo filtra su tablero no llegaba a marketing por anuncio.
+           */
+          'viability_level',
           // Correo y carrera solo los usa la hoja "Ruta de leads" del Excel.
           'email', 'field_of_study', 'sales_funnel_at',
           // La calificación del setter es un dato propio del lead y ya no se
@@ -806,9 +816,24 @@ export class CampaignService {
       const firstResponseAt = lead?.first_response_at || firstOut || null;
       const responderId = lead?.first_response_at ? lead.first_response_by : null;
       const responded = !!firstResponseAt;
+      /*
+       * "Calificado" acá es el informe de viabilidad que arma Avan: completó
+       * la sesión del bot o el lead tiene puntaje de viabilidad.
+       *
+       * Tenía un tercer camino —`lead.status !== 'nuevo'`— y ese era el
+       * problema: en cuanto el lead sale de la bandeja queda calificado, así
+       * que la columna "Calificados (Avan)" venía SIEMPRE igual a "Leads"
+       * (397 de 397 en Meta, corte del 26/11/2026) y no servía para comparar
+       * la calidad de dos anuncios, que es para lo único que se la mira. Es el
+       * mismo error que se corrigió en `leads.qualified` cuando se derivaba de
+       * la etapa y decía "Sí" en 403 de 403 leads: una cifra que no puede
+       * decir "no" no es una medición.
+       *
+       * El juicio de una PERSONA sobre si el contacto sirve es otra cosa y
+       * viaja aparte en sus tres estados (`setterQualified`, más abajo).
+       */
       const qualified = (session && session.status === 'completed')
-        || (lead && lead.overall_viability_score != null)
-        || (lead && !['nuevo'].includes(lead.status));
+        || (lead && lead.overall_viability_score != null);
       const hasAppointment = !!meeting || (lead && APPOINTMENT_STATUSES.has(lead.status));
       const won = isWonLead(lead, wonStatuses, wonProjectLeadIds, paidLeadIds);
       const lost = lead && LOST_STATUSES.has(lead.status);
@@ -860,6 +885,13 @@ export class CampaignService {
         lead,
         leadStatus: lead?.status || null,
         viability: lead?.overall_viability_score ?? null,
+        /*
+         * La BANDA de viabilidad, normalizada. Es otra columna que el puntaje
+         * de arriba —`viability_level` es texto libre— y es la que el equipo
+         * mira en su tablero, así que es la que hay que poder contar por
+         * anuncio. `null` es "nadie la registró" y no una banda baja.
+         */
+        viabilityBand: viabilityBand(lead?.viability_level),
         firstResponseMinutes: minutesBetween(a.firstMessageAt, firstResponseAt),
         /*
          * Quién contestó, y el tiempo de la respuesta HUMANA por separado.
@@ -931,6 +963,15 @@ export class CampaignService {
         hasAppointment: !!hasAppointment,
         won: !!won,
         lost: !!lost,
+        /*
+         * En qué PASO se perdió, que es otra pregunta que si se perdió.
+         * `lost` sigue siendo la suma de los tres cajones y por eso ninguna
+         * cifra ya publicada se mueve; lo que se agrega es poder distinguir al
+         * contacto que nunca llegó a ser oportunidad del cliente real que no
+         * compró. El motivo —"solo curioso", "pide gratis"— no existe como
+         * dato todavía y no se deriva de acá: ver `lossStage.js`.
+         */
+        lossStage: lossStage({ status: lead?.status, responded }),
         currentStage
       };
     });
@@ -1135,6 +1176,14 @@ export class CampaignService {
         // esa cita no se puede ir a buscar en ninguna agenda.
         appointmentWithoutMeeting: c.appointmentWithoutMeeting,
         viability: c.viability,
+        /*
+         * La banda de viabilidad y, para los perdidos, en qué paso se
+         * perdieron. Las dos viajan por lead y no solo agregadas: el número de
+         * la hoja por anuncio y los leads que lo forman tienen que poder ser
+         * los mismos, que es como marketing comprueba una fila.
+         */
+        viabilityBand: c.viabilityBand,
+        lossStage: c.lossStage,
         meetingAt: c.meetingAt,
         /*
          * Meta cuenta como conversación iniciada cualquier clic que abre el
@@ -1261,6 +1310,16 @@ export class CampaignService {
     const setterQualified = contacts.filter((c) => c.setterQualified === true).length;
     const setterDisqualified = contacts.filter((c) => c.setterQualified === false).length;
     const setterUnreviewed = contacts.filter((c) => c.setterQualified == null).length;
+    /*
+     * El desglose de la pérdida y de la viabilidad. Los dos son conteos
+     * EXCLUYENTES que cuadran con una cifra que ya se publicaba: los tres
+     * cajones de la pérdida suman `lost`, y las tres bandas más las no
+     * registradas suman el total de contactos. Es lo que permite agregarlos
+     * sin mover ningún número histórico — se puede comprobar sumando lo que
+     * hay en la misma fila, que es como marketing valida la hoja.
+     */
+    const lossStages = tallyLossStages(contacts.map((c) => c.lossStage));
+    const viabilityBands = tallyViabilityBands(contacts.map((c) => c.viabilityBand));
 
     const spend = campaign ? resolveSpend(campaign) : 0;
     const meta = campaign ? parseMetaInsights(campaign.meta_insights) : null;
@@ -1314,6 +1373,20 @@ export class CampaignService {
         appointments,
         won,
         lost,
+        /*
+         * Las tres mitades de `lost`: el descartado al que nadie contestó, el
+         * descartado por una persona y el perdido en ventas. Ver
+         * `lossStage.js` — `lost` no cambia y sigue siendo su suma.
+         */
+        discardedNoResponse: lossStages.descartado_sin_respuesta,
+        discardedAfterContact: lossStages.descartado_tras_contacto,
+        lostInSales: lossStages.perdido_ventas,
+        // La banda de viabilidad por campaña, que es la mejor señal temprana
+        // de la calidad de un anuncio y solo se publicaba promediada.
+        viabilityHigh: viabilityBands.alta,
+        viabilityMid: viabilityBands.media,
+        viabilityLow: viabilityBands.baja,
+        viabilityUnset: viabilityBands.sinRegistrar,
         noFirstResponse,
         appointmentsWithoutMeeting,
         attended,
@@ -1470,6 +1543,15 @@ export class CampaignService {
       if (!group) {
         group = {
           key,
+          /*
+           * La plataforma del grupo. Ya estaba en la clave —sin ella, dos
+           * anuncios distintos con el mismo id numérico caerían en la misma
+           * fila— pero no se guardaba, así que la hoja por anuncio no la
+           * podía publicar: los nombres de anuncio se repiten entre
+           * plataformas y entre conjuntos, y sin la plataforma al lado del id
+           * no hay forma de saber de qué fila se está hablando.
+           */
+          platform: c.platform || null,
           adId: ad.adId,
           adName: ad.adName,
           adsetId: ad.adsetId,
@@ -1492,6 +1574,29 @@ export class CampaignService {
           quotation: 0,
           followUp: 0,
           discarded: 0,
+          /*
+           * Las tres mitades de `discarded`, que sumaba el descarte del Setter
+           * Funnel y la pérdida del Funnel de Ventas en un solo número: con
+           * los dos juntos no se sabe si el anuncio trae contactos que nunca
+           * llegaron a ser oportunidad o clientes reales que no compraron, y a
+           * uno se le corta el presupuesto y al otro se le revisa el cierre.
+           * Ver `lossStage.js`; `discarded` no cambia y sigue siendo su suma.
+           */
+          discardedNoResponse: 0,
+          discardedAfterContact: 0,
+          lostInSales: 0,
+          /*
+           * La banda de viabilidad de los leads de este anuncio. Se publicaba
+           * solo promediada (`avgViability`), y un promedio no dice si el
+           * anuncio trajo diez leads mediocres o cinco altos y cinco bajos —
+           * que es justo la diferencia que decide si se escala. `sinRegistrar`
+           * va publicado y no omitido: las tres bandas en cero pueden ser un
+           * anuncio malo o leads que nadie evaluó.
+           */
+          viabilityHigh: 0,
+          viabilityMid: 0,
+          viabilityLow: 0,
+          viabilityUnset: 0,
           won: 0,
           /*
            * Leads de este anuncio a los que NADIE contestó. Es la otra mitad
@@ -1547,6 +1652,28 @@ export class CampaignService {
       else if (c.crmStage === 'cotizacion') group.quotation += 1;
       else if (c.crmStage === 'descartado') group.discarded += 1;
       else group.followUp += 1;
+      /*
+       * El desglose va por `c.lossStage` y NO por `crmStage`.
+       *
+       * Son dos clasificaciones distintas y casi siempre coinciden: `crmStage`
+       * es por PRIORIDAD —un lead ganado se cuenta como ganado aunque su etapa
+       * diga "perdido"— y `lossStage` mira solo el desenlace. Así que las tres
+       * mitades suman `discarded` salvo en el caso en que las dos
+       * discrepan a propósito: el lead con el proyecto abierto o la cuota
+       * verificada que quedó con la tarjeta en "Perdido" (`isWonLead()`), que
+       * se cuenta en "Ventas cerradas" y además en "Perdido en ventas". Es una
+       * ficha que hay que ir a mirar, y las cuatro columnas juntas son lo que
+       * la hace visible en vez de esconderla en una resta que no cuadra. En el
+       * resumen por campaña no pasa: ahí `lost` también se cuenta por estado.
+       */
+      const perdida = c.lossStage;
+      if (perdida === 'descartado_sin_respuesta') group.discardedNoResponse += 1;
+      else if (perdida === 'descartado_tras_contacto') group.discardedAfterContact += 1;
+      else if (perdida === 'perdido_ventas') group.lostInSales += 1;
+      if (c.viabilityBand === 'alta') group.viabilityHigh += 1;
+      else if (c.viabilityBand === 'media') group.viabilityMid += 1;
+      else if (c.viabilityBand === 'baja') group.viabilityLow += 1;
+      else group.viabilityUnset += 1;
       if (c.paidRevenue === null) group.sinFicha += 1;
       if (c.attributionLevel === LEVELS.padre) group.piezaDesconocida += 1;
       if (!c.responded) group.noFirstResponse += 1;

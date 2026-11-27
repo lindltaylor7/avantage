@@ -71,7 +71,16 @@ export const GRADUATED_STATUSES = ['cita_agendada', 'en_negociacion', 'ganado', 
  *
  * Son dos y no uno: `perdido` es el desenlace del Funnel de Ventas y
  * `descartado` el del Setter Funnel, y la pregunta "¿este lead se perdió?" se
- * hace sobre leads de los dos tableros. Viven acá —con el resto del
+ * hace sobre leads de los dos tableros.
+ *
+ * Y por eso van en DOS conjuntos y no en una sola lista: colapsados en un
+ * contador, el reporte no deja distinguir el contacto que nunca llegó a ser
+ * una oportunidad del cliente real que no compró —713 descartados del setter
+ * contra 199 perdidos de ventas en el corte del 26/11/2026—, y a uno se le
+ * corta el presupuesto del anuncio y al otro se le revisa el cierre. La unión
+ * sigue publicándose porque es la que preguntan los tres reportes.
+ *
+ * Viven acá —con el resto del
  * vocabulario de `leads.status`— y no en cada pantalla que los necesite, por lo
  * mismo que `loadWinningStatuses()`: Campañas y el Reporte de Setters cuentan
  * leads perdidos del mismo universo, y con una lista por módulo basta que
@@ -82,11 +91,39 @@ export const GRADUATED_STATUSES = ['cita_agendada', 'en_negociacion', 'ganado', 
  * de ninguna columna configurable (`funnel_columns.final` marca la etapa que
  * gana, no la que pierde), así que no hay nada que leer de la base.
  */
-export const LOST_STATUSES = new Set(['perdido', 'descartado']);
+/**
+ * El desenlace de pérdida del **Setter Funnel**: el contacto no llegó a ser
+ * una oportunidad comercial.
+ */
+export const SETTER_DISCARD_STATUSES = new Set(['descartado']);
 
-/** ¿Este status es un desenlace de pérdida? */
+/**
+ * El desenlace de pérdida del **Funnel de Ventas**: era un cliente real y no
+ * compró.
+ */
+export const SALES_LOST_STATUSES = new Set(['perdido']);
+
+/*
+ * Los dos juntos, que es la pregunta "¿este lead se perdió?" y la que hacen
+ * los tres reportes. Se deriva de los dos conjuntos de arriba y no se escribe
+ * a mano: con la unión copiada, agregar un desenlace a uno de los dos lo
+ * dejaría fuera de la pregunta general sin que nada falle a la vista.
+ */
+export const LOST_STATUSES = new Set([...SETTER_DISCARD_STATUSES, ...SALES_LOST_STATUSES]);
+
+/** ¿Este status es un desenlace de pérdida, de cualquiera de los dos tableros? */
 export function isLostStatus(status) {
   return LOST_STATUSES.has(status);
+}
+
+/** ¿Se descartó en el Setter Funnel (nunca llegó a ser oportunidad)? */
+export function isSetterDiscardStatus(status) {
+  return SETTER_DISCARD_STATUSES.has(status);
+}
+
+/** ¿Se perdió en el Funnel de Ventas (era un cliente real y no compró)? */
+export function isSalesLostStatus(status) {
+  return SALES_LOST_STATUSES.has(status);
 }
 
 /**
